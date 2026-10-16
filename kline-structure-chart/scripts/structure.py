@@ -7,7 +7,7 @@ analysis.py 与 render_structure_chart.py 都只从这里取结构结果：v5 �
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any
+from typing import Any, Callable
 
 REVERSAL = 0.05             # ABC：B 浪至少反向 5%
 B_MIN_RETRACE = 0.382       # ABC：B 浪至少收回 A 浪的 0.382
@@ -71,14 +71,12 @@ def q2(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def fmt_price(value: float) -> str:
-    """按价格量级格式化简短标签：>=100 用整数，10~100 保留 2 位小数，<10 保留 2~3 位小数（避免低价股/ETF 失真）。"""
-    v = float(value)
-    if abs(v) >= 100.0:
-        return f"{v:.0f}"
-    if abs(v) < 10.0 and round(v, 3) != round(v, 2):
-        return f"{v:.3f}"
-    return f"{v:.2f}"
+def fmt_price(value: float, decimals: int = 2) -> str:
+    """价格文本按价位表小数位输出，与 *_report.md 同一精度。
+
+    decimals 由调用方按 market_rules.price_decimals（市场 + 品种 + 价位表）给出；缺省 2 位即 A 股股票口径。
+    """
+    return f"{float(value):.{decimals}f}"
 
 
 
@@ -635,7 +633,13 @@ def _trigger(levels: list[dict], rails: list[tuple[float, str]], ref: float, cap
 
 
 def compute_projections(
-    ref: float, struct: dict, ladder: dict, atr: float, future_slots: int, live_price: float | None = None
+    ref: float,
+    struct: dict,
+    ladder: dict,
+    atr: float,
+    future_slots: int,
+    live_price: float | None = None,
+    decimals: int = 2,
 ) -> dict:
     """三条规则推演路径。触发位 = 现价上/下方最近的形态轨道（太远则改用最近的重要位），目标位 = 阶梯里下一个有效位。
 
@@ -676,6 +680,9 @@ def compute_projections(
     neutral_low = float(money(max(s1, min(ref * (1 - 0.6 * atr), (ref + s1) / 2))))
     neutral_mid = float(money((neutral_high + neutral_low) / 2))
 
+    def fp(value: float) -> str:
+        return fmt_price(value, decimals)
+
     r1_note = "（盘中已站上，待收盘确认）" if live_price is not None and live_price > r1 else ""
     s1_note = "（盘中已跌破，待收盘确认）" if live_price is not None and live_price < s1 else ""
 
@@ -691,39 +698,46 @@ def compute_projections(
         "breakdown_level": {"price": s1, "source": s1_src},
         "bull": {
             "name": "上攻突破路径",
-            "trigger": f"日线放量收盘站上 {r1:.2f}（{r1_src}）{r1_note}",
+            "trigger": f"日线放量收盘站上 {fp(r1)}（{r1_src}）{r1_note}",
             "retest_hold": bull_retest,
             "target_price": bull_target,
             "target_source": bull_src,
-            "invalidation": f"突破后收盘跌回 {bull_retest:.2f} 下方视为假突破",
+            "invalidation": f"突破后收盘跌回 {fp(bull_retest)} 下方视为假突破",
             "waypoints_offset": [(0, start), (s1_slot, r1), (s2_slot, bull_retest), (s3_slot, bull_target)],
-            "step_labels": [(s1_slot, f"突破 {fmt_price(r1)}"), (s2_slot, f"回踩 {fmt_price(bull_retest)}")],
+            "step_labels": [(s1_slot, f"突破 {fp(r1)}"), (s2_slot, f"回踩 {fp(bull_retest)}")],
         },
         "neutral": {
             "name": "区间震荡路径",
             "range": [neutral_low, neutral_high],
             "target_price": neutral_mid,
-            "condition": f"收盘既未站上 {r1:.2f} 也未跌破 {s1:.2f}",
+            "condition": f"收盘既未站上 {fp(r1)} 也未跌破 {fp(s1)}",
             "waypoints_offset": [(0, start), (n1_slot, neutral_high), (n2_slot, neutral_low), (s3_slot, neutral_mid)],
-            "step_labels": [(n1_slot, f"受阻 {fmt_price(neutral_high)}"), (n2_slot, f"企稳 {fmt_price(neutral_low)}")],
+            "step_labels": [(n1_slot, f"受阻 {fp(neutral_high)}"), (n2_slot, f"企稳 {fp(neutral_low)}")],
         },
         "bear": {
             "name": "下探破位路径",
-            "trigger": f"日线收盘跌破 {s1:.2f}（{s1_src}）{s1_note}",
+            "trigger": f"日线收盘跌破 {fp(s1)}（{s1_src}）{s1_note}",
             "rebound_cap": bear_rebound,
             "target_price": bear_target,
             "target_source": bear_src,
-            "invalidation": f"跌破后收盘重新站回 {bear_rebound:.2f} 上方视为假跌破",
+            "invalidation": f"跌破后收盘重新站回 {fp(bear_rebound)} 上方视为假跌破",
             "waypoints_offset": [(0, start), (s1_slot, s1), (s2_slot, bear_rebound), (s3_slot, bear_target)],
-            "step_labels": [(s1_slot, f"破位 {fmt_price(s1)}"), (s2_slot, f"反抽 {fmt_price(bear_rebound)}")],
+            "step_labels": [(s1_slot, f"破位 {fp(s1)}"), (s2_slot, f"反抽 {fp(bear_rebound)}")],
         },
     }
 
 
-def compute_structure_layer(bars: list[dict], intraday: dict | None, show: int) -> dict[str, Any]:
+def compute_structure_layer(
+    bars: list[dict],
+    intraday: dict | None,
+    show: int,
+    price_decimals: Callable[[float, str], int] | None = None,
+) -> dict[str, Any]:
     """一次性计算结构层全部结果，供 JSON 报告与 PNG 渲染共用。
 
     结构窗口固定为 HISTORY_BARS / STRUCT_DAYS，与展示根数 show 无关；show 只影响 view、背景层与展示用波段骨架。
+    price_decimals(最新已收盘价, 当日) -> 价格文本小数位，由知道市场与品种的调用方传入（与报告同一精度）；
+    缺省时按 A 股股票口径 2 位。
     """
     completed, active_intra, data_note = split_live_bar(bars, intraday)
     closes = [float(bar["close"]) for bar in completed]
@@ -736,6 +750,7 @@ def compute_structure_layer(bars: list[dict], intraday: dict | None, show: int) 
     last_bar_idx = len(view) - 1 + (1 if active_intra else 0)
     last_c = money(view[-1]["close"])
     ref_p = money(active_intra["close"]) if active_intra else last_c
+    decimals = price_decimals(float(last_c), view[-1]["day"]) if price_decimals else 2
     struct_slots = len(sview) + (1 if active_intra else 0)
     future_slots = max(28, int(struct_slots * 0.28))
 
@@ -767,6 +782,7 @@ def compute_structure_layer(bars: list[dict], intraday: dict | None, show: int) 
         atr,
         future_slots,
         live_price=float(ref_p) if active_intra else None,
+        decimals=decimals,
     )
     # 展示用波段骨架：同一阈值在全部已收盘K线上的 ZigZag，下标换算到主图
     display_pivots = [dict(p, idx=p["idx"] - view_start) for p in zigzag(completed, zz_thr) if p["idx"] >= view_start]
@@ -783,6 +799,7 @@ def compute_structure_layer(bars: list[dict], intraday: dict | None, show: int) 
         "last_bar_idx": last_bar_idx,
         "last_c": last_c,
         "ref_p": ref_p,
+        "price_decimals": decimals,
         "future_slots": future_slots,
         "struct_slots": struct_slots,
         "s_hi": (s_hi_idx, s_hi),

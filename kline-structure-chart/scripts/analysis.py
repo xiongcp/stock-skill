@@ -206,7 +206,16 @@ def analyze_bundle(
     horizon_bars = int(request.get("horizon_bars") or 15)
 
     # 1. 结构层：由 structure.compute_structure_layer 统一计算（与 PNG 共用同一份结果，窗口与 --days 无关）
-    layer = structure if structure is not None else compute_structure_layer(bars, intraday, show)
+    layer = (
+        structure
+        if structure is not None
+        else compute_structure_layer(
+            bars,
+            intraday,
+            show,
+            price_decimals=lambda price, day: price_decimals(price, inst["market"], inst["asset_type"], day),
+        )
+    )
     completed, active_intra, data_note = layer["completed"], layer["active_intra"], layer["data_note"]
     if len(completed) < 60:
         raise ValueError(f"Insufficient completed bars ({len(completed)} < 60) for {inst['symbol']}")

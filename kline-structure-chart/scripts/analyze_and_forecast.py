@@ -19,6 +19,7 @@ from analysis import analyze_bundle
 from contracts import AnalysisRequest, sanitize_filename, validate_report
 from data_gateway import load_bundle
 from evaluation import run_causal_replay_audit, run_plan_backtest
+from market_rules import price_decimals
 from render_html import render_html
 from render_report_md import render_report_markdown
 from render_structure_chart import render as render_png_chart
@@ -45,9 +46,13 @@ def run_pipeline(
         input_path=input_path,
         allow_network=allow_network,
     )
-    # 结构层只算一次：同一份结果写入 JSON 并交给 PNG 渲染器（算图分离）
+    # 结构层只算一次：同一份结果写入 JSON 并交给 PNG 渲染器（算图分离）；价格文本按价位表精度，与 report.md 一致
+    inst = bundle["target"]["instrument"]
     layer = compute_structure_layer(
-        bundle["target"]["bars"], bundle["target"].get("intraday"), int(request.get("display_bars") or 120)
+        bundle["target"]["bars"],
+        bundle["target"].get("intraday"),
+        int(request.get("display_bars") or 120),
+        price_decimals=lambda price, day: price_decimals(price, inst["market"], inst["asset_type"], day),
     )
     report = analyze_bundle(bundle, request, include_replay=True, structure=layer)
 

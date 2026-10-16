@@ -513,6 +513,15 @@ def render(
     up_word, down_word = ("绿", "红") if color_scheme == "us_green_up" else ("红", "绿")
     # 结构层只来自 structure.compute_structure_layer：v5 主流程传入已算好的结果，v4.1 CLI 才在这里现算
     layer = structure if structure is not None else compute_structure_layer(bars, intraday, show)
+    # 图上与摘要里的价格文本与 *_report.md 同一精度（价位表小数位由结构层按市场给出）
+    dec = layer["price_decimals"]
+
+    def fp(value: float) -> str:
+        return fmt_price(value, dec)
+
+    def fps(value: float) -> str:  # 带正负号的价差（点数）
+        return f"{float(value):+.{dec}f}"
+
     completed, active_intra, data_note = layer["completed"], layer["active_intra"], layer["data_note"]
     ma = layer["ma"]
     view, view_start, sview, off = layer["view"], layer["view_start"], layer["sview"], layer["off"]
@@ -643,8 +652,8 @@ def render(
 
     # ---------------- 顶部 5 卡片 KPI 仪表盘 (Y: 76 ~ 142) ----------------
     if scenario:
-        scen_title = f"④ {scenario['label']}（B点 {scenario['b_end']['day'][5:]} {fmt_price(scenario['b_end']['price'])}）"
-        scen_line1 = " | ".join(f"{l['ratio']:.3f}位 {fmt_price(l['price'])}" for l in scenario["levels"][:3])
+        scen_title = f"④ {scenario['label']}（B点 {scenario['b_end']['day'][5:]} {fp(scenario['b_end']['price'])}）"
+        scen_line1 = " | ".join(f"{l['ratio']:.3f}位 {fp(l['price'])}" for l in scenario["levels"][:3])
         scen_line2 = (
             f"A {scenario['a_start']['day'][5:]}→{scenario['a_end']['day'][5:]}  |  "
             f"C/A 已走 {scenario['c_progress']['c_over_a']:.2f}"
@@ -652,36 +661,36 @@ def render(
     else:
         scen_title = "④ ABC测算"
         scen_line1 = "暂无合格B浪，不划分ABC"
-        scen_line2 = f"窗口高 {fmt_price(float(hi_p))} ({hi['day'][5:]}) / 低 {fmt_price(float(lo_p))} ({lo['day'][5:]})"
+        scen_line2 = f"窗口高 {fp(float(hi_p))} ({hi['day'][5:]}) / 低 {fp(float(lo_p))} ({lo['day'][5:]})"
 
     cards = [
         (
             "① 最新大盘位置",
-            f"{view[-1]['day']} 收 {float(last_c):.2f} ({daily_chg_pct:+.2f}%)",
-            f"盘中 {active_intra['close']:.2f} ({active_intra['stamp'][11:16]})"
+            f"{view[-1]['day']} 收 {fp(float(last_c))} ({daily_chg_pct:+.2f}%)",
+            f"盘中 {fp(active_intra['close'])} ({active_intra['stamp'][11:16]})"
             if active_intra
             else f"处 {len(view)}日区间 {range_pct:.1f}% 分位",
             UP if daily_chg >= 0 else DOWN,
         ),
         (
             "② 均线位置与偏离",
-            f"MA20: {ma20_val:.2f} ({fmt_price(float(ref_p) - ma20_val)}点)" if ma20_val else "MA20: --",
-            f"MA60: {ma60_val:.2f}  |  MA120: {ma120_val:.2f}" if (ma60_val and ma120_val) else "",
+            f"MA20: {fp(ma20_val)} ({fp(float(ref_p) - ma20_val)}点)" if ma20_val else "MA20: --",
+            f"MA60: {fp(ma60_val)}  |  MA120: {fp(ma120_val)}" if (ma60_val and ma120_val) else "",
             MA[20],
         ),
         (
             f"③ 结构：{wedge['pattern']}",
             f"两轨已于 {wedge['apex_day'] or '近期'} 前后交汇，形态完成"
             if wedge["expired"]
-            else f"今日上轨 {wedge['upper_today']:.2f} | 下轨 {wedge['lower_today']:.2f}",
+            else f"今日上轨 {fp(wedge['upper_today'])} | 下轨 {fp(wedge['lower_today'])}",
             wedge["status_short"],
             WEDGE_UPPER,
         ),
         (scen_title, scen_line1, scen_line2, SCEN),
         (
             "⑤ 三路径目标（收盘确认）",
-            f"{up_word} {projections['bull']['target_price']:.2f} | 黄 {projections['neutral']['target_price']:.2f} | {down_word} {projections['bear']['target_price']:.2f}",
-            f"突破位 {projections['breakout_level']['price']:.2f} / 破位 {projections['breakdown_level']['price']:.2f}",
+            f"{up_word} {fp(projections['bull']['target_price'])} | 黄 {fp(projections['neutral']['target_price'])} | {down_word} {fp(projections['bear']['target_price'])}",
+            f"突破位 {fp(projections['breakout_level']['price'])} / 破位 {fp(projections['breakdown_level']['price'])}",
             PROJ_BULL,
         ),
     ]
@@ -697,6 +706,11 @@ def render(
         draw.rounded_rectangle((cx1, cy1, cx1 + 4, cy2), radius=2, fill=accent_col)
         draw.text((cx1 + 13, cy1 + 5), c_title, font=f_card_title, fill=accent_col)
         val_face = f_card_val if text_size(draw, c_line1, f_card_val)[0] <= card_w - 22 else f_card_val_sm
+        # 价格按价位表精度显示后可能更长（如 5 位数指数带 2 位小数）：小字号仍放不下时从末尾逐段收起，绝不越出卡片
+        while text_size(draw, c_line1, val_face)[0] > card_w - 22 and " | " in c_line1:
+            c_line1 = c_line1.rsplit(" | ", 1)[0] + " …"
+        while text_size(draw, c_line1, val_face)[0] > card_w - 22 and len(c_line1) > 2:
+            c_line1 = c_line1[:-2] + "…"
         val_y = cy1 + 25 if val_face is f_card_val else cy1 + 27
         draw.text((cx1 + 13, val_y), c_line1, font=val_face, fill=TEXT)
         draw.text((cx1 + 13, cy1 + 45), c_line2, font=f_tiny, fill=MUTED)
@@ -757,7 +771,7 @@ def render(
         y = yp(price)
         draw.line((left, y, chart_right, y), fill=GRID, width=1)
         draw.line((left - 4, y, left, y), fill=AXIS_LINE, width=1)
-        label = fmt_price(price)
+        label = fp(price)
         tw, th = text_size(draw, label, f_tiny)
         draw.text((left - 8 - tw, y - th // 2 - 1), label, font=f_tiny, fill=MUTED)
     draw.rectangle((left, top, chart_right, main_bottom), outline=AXIS_LINE, width=1.2)
@@ -818,7 +832,7 @@ def render(
             y = yp(level["price"])
             abc_ys.append(y)
             dashed_hline(draw, left, chart_right, y, (*SCEN, 185))
-            right_gutter_tags.append((y, f"ABC {level['ratio']:.3f}  {level['price']:.2f} ({level['state']})", SCEN))
+            right_gutter_tags.append((y, f"ABC {level['ratio']:.3f}  {fp(level['price'])} ({level['state']})", SCEN))
 
     # ---------------- 绘制真实 K 线与盘中 K 线 ----------------
     kline_obstacles: list[tuple[int, int, int, int]] = []
@@ -891,9 +905,9 @@ def render(
         draw.text((div_x + 14, top + 41), v_banner, font=f_tiny_sm, fill=(254, 226, 226))
 
     proj_configs = [
-        ("bull", PROJ_BULL, False, f"上攻目标  {projections['bull']['target_price']:.2f}"),
-        ("neutral", PROJ_NEUTRAL, True, f"震荡中枢  {projections['neutral']['target_price']:.2f}"),
-        ("bear", PROJ_BEAR, False, f"下探目标  {projections['bear']['target_price']:.2f}"),
+        ("bull", PROJ_BULL, False, f"上攻目标  {fp(projections['bull']['target_price'])}"),
+        ("neutral", PROJ_NEUTRAL, True, f"震荡中枢  {fp(projections['neutral']['target_price'])}"),
+        ("bear", PROJ_BEAR, False, f"下探目标  {fp(projections['bear']['target_price'])}"),
     ]
     dup_tol = float(ref_p) * 0.003
     skip_labels = set()
@@ -975,8 +989,8 @@ def render(
         (wedge["lower_today"], lower_tag, WEDGE_LOWER),
     ):
         if pmin <= rail_val <= pmax and not wedge["expired"]:
-            right_gutter_tags.append((yp(rail_val), f"{rail_tag}  {rail_val:.2f}", rail_col))
-    right_gutter_tags.append((yp(float(ref_p)), f"当前位置  {float(ref_p):.2f}", INTRA if active_intra else TEXT))
+            right_gutter_tags.append((yp(rail_val), f"{rail_tag}  {fp(rail_val)}", rail_col))
+    right_gutter_tags.append((yp(float(ref_p)), f"当前位置  {fp(float(ref_p))}", INTRA if active_intra else TEXT))
 
     # ---------------- 绘制右侧专属标签槽 (Right Gutter，折线引线 + 零遮挡) ----------------
     placed_tags = []
@@ -1009,6 +1023,7 @@ def render(
     occupied_badges: list[tuple[int, int, int, int]] = [(div_x + 4, top + 6, z_right + 4, top + 35)]
     if veto_box is not None:
         occupied_badges.append((veto_box[0] - 4, veto_box[1] - 2, veto_box[2] + 4, veto_box[3] + 2))
+    occupied_badges += step_boxes  # 最新K线徽标可伸入推演区 48px，须避开已画好的推演步骤标签
     marks: list[dict] = []
 
     def mark(idx: int, price: float, tag: str, color: tuple[int, int, int], side: str, extra: str = "") -> None:
@@ -1044,7 +1059,7 @@ def render(
     sorted_marks = sorted(marks, key=lambda item: (item["idx"], -item["price"] if item["side"] == "above" else item["price"]))
     peer_anchors = [(x_of(m["idx"]), yp(m["price"]), m["side"]) for m in sorted_marks]
     for m in sorted_marks:
-        text = f"{plot[m['idx']]['day'][5:]} {'·'.join(m['tags'])} {m['price']:.2f}{m['extra']}"
+        text = f"{plot[m['idx']]['day'][5:]} {'·'.join(m['tags'])} {fp(m['price'])}{m['extra']}"
         draw_callout_badge(
             draw,
             x_of(m["idx"]),
@@ -1137,7 +1152,7 @@ def render(
     )
     draw.text((left, vol_top - 24), vol_header, font=f_tiny, fill=MUTED)
 
-    last_mas = [f"MA{n} {float(money(ma[n][-1])):.2f}" for n in MA if ma[n][-1] is not None]
+    last_mas = [f"MA{n} {fp(float(money(ma[n][-1])))}" for n in MA if ma[n][-1] is not None]
     footer = "  |  ".join(last_mas)
     footer += f"  |  {'绿涨红跌' if color_scheme == 'us_green_up' else '红涨绿跌'}  |  右侧折线为规则推演（日线收盘确认，盘中刺破不算；未来日期未扣除节假日），不构成投资建议"
     draw.text((left, 1118), footer, font=f_tiny, fill=MUTED)
@@ -1175,12 +1190,12 @@ def render(
             }
 
     completed_str = (
-        f"截至最新已收盘交易日 {view[-1]['day']}，收盘价 {float(last_c):.2f}（涨跌 {float(daily_chg):+.2f} 点 / {daily_chg_pct:+.2f}%）；"
-        f"近 {len(view)} 个交易日内最高点为 {hi['day']} 的 {float(hi_p):.2f}，最低点为 {lo['day']} 的 {float(lo_p):.2f}，"
+        f"截至最新已收盘交易日 {view[-1]['day']}，收盘价 {fp(float(last_c))}（涨跌 {fps(float(daily_chg))} 点 / {daily_chg_pct:+.2f}%）；"
+        f"近 {len(view)} 个交易日内最高点为 {hi['day']} 的 {fp(float(hi_p))}，最低点为 {lo['day']} 的 {fp(float(lo_p))}，"
         f"当前处于该区间的 {range_pct:.2f}% 分位；"
-        f"MA20 为 {ma20_val:.2f}（当前价距 MA20 {ma_dist['vs_ma20']['diff_pts']:+.2f} 点），"
-        f"MA60 为 {ma60_val:.2f}（距 MA60 {ma_dist['vs_ma60']['diff_pts']:+.2f} 点），"
-        f"MA120 为 {ma120_val:.2f}（距 MA120 {ma_dist['vs_ma120']['diff_pts']:+.2f} 点）；"
+        f"MA20 为 {fp(ma20_val)}（当前价距 MA20 {fps(ma_dist['vs_ma20']['diff_pts'])} 点），"
+        f"MA60 为 {fp(ma60_val)}（距 MA60 {fps(ma_dist['vs_ma60']['diff_pts'])} 点），"
+        f"MA120 为 {fp(ma120_val)}（距 MA120 {fps(ma_dist['vs_ma120']['diff_pts'])} 点）；"
         f"最新已收盘成交量为5日均量的 {r_ma5:.2f} 倍、20日均量的 {r_ma20:.2f} 倍。"
     )
     if active_intra:
@@ -1191,9 +1206,9 @@ def render(
             else 0.0
         )
         intra_str = (
-            f"盘中快照时间 {active_intra['stamp']}（未收盘），最新价 {active_intra['close']:.2f}"
-            f"（较昨收 {intra_chg:+.2f} 点 / {intra_pct:+.2f}%），"
-            f"盘中最高 {active_intra['high']:.2f}，盘中最低 {active_intra['low']:.2f}。"
+            f"盘中快照时间 {active_intra['stamp']}（未收盘），最新价 {fp(active_intra['close'])}"
+            f"（较昨收 {fps(intra_chg)} 点 / {intra_pct:+.2f}%），"
+            f"盘中最高 {fp(active_intra['high'])}，盘中最低 {fp(active_intra['low'])}。"
         )
     elif data_note:
         intra_str = f"今日已收盘，无盘中未收盘K线（{data_note}）。"
@@ -1206,19 +1221,19 @@ def render(
             upper_now = lower_now = ""
             apex_note = f"两轨已于 {wedge['apex_day'] or '近期'} 前后交汇（收敛顶点），原形态已完成，轨道外推值不再作为今日支撑压力；"
         else:
-            upper_now = f"，今日上轨 {wedge['upper_today']:.2f}"
-            lower_now = f"，今日下轨 {wedge['lower_today']:.2f}"
+            upper_now = f"，今日上轨 {fp(wedge['upper_today'])}"
+            lower_now = f"，今日下轨 {fp(wedge['lower_today'])}"
             apex_note = ""
         rails_str = (
-            f"形态：【{wedge['pattern']}】。上轨连接 {up_r['start']['day']}({up_r['start']['price']:.2f}) 与 "
-            f"{up_r['end']['day']}({up_r['end']['price']:.2f})，共 {len(up_r['touches'])} 个波段高点触及{upper_now}；"
-            f"下轨连接 {low_r['start']['day']}({low_r['start']['price']:.2f}) 与 "
-            f"{low_r['end']['day']}({low_r['end']['price']:.2f})，共 {len(low_r['touches'])} 个波段低点触及{lower_now}；"
+            f"形态：【{wedge['pattern']}】。上轨连接 {up_r['start']['day']}({fp(up_r['start']['price'])}) 与 "
+            f"{up_r['end']['day']}({fp(up_r['end']['price'])})，共 {len(up_r['touches'])} 个波段高点触及{upper_now}；"
+            f"下轨连接 {low_r['start']['day']}({fp(low_r['start']['price'])}) 与 "
+            f"{low_r['end']['day']}({fp(low_r['end']['price'])})，共 {len(low_r['touches'])} 个波段低点触及{lower_now}；"
             f"{apex_note}状态：{wedge['status_text']}。"
         )
     else:
         rails_str = (
-            f"形态：【{wedge['pattern']}】，箱体上沿 {wedge['upper_today']:.2f}、下沿 {wedge['lower_today']:.2f}；"
+            f"形态：【{wedge['pattern']}】，箱体上沿 {fp(wedge['upper_today'])}、下沿 {fp(wedge['lower_today'])}；"
             f"状态：{wedge['status_text']}。"
         )
 
@@ -1226,11 +1241,11 @@ def render(
         scen_parts = []
         for lvl in scenario["levels"]:
             out_tag = "，画面外" if not lvl["drawn"] else ""
-            scen_parts.append(f"{lvl['ratio']:.3f} 倍位 {lvl['price']:.2f}【{lvl['state']}{out_tag}】")
+            scen_parts.append(f"{lvl['ratio']:.3f} 倍位 {fp(lvl['price'])}【{lvl['state']}{out_tag}】")
         scen_str = (
-            f"{scenario['label']}测算：A浪 {scenario['a_start']['day']} {scenario['a_start']['price']:.2f} → "
-            f"{scenario['a_end']['day']} {scenario['a_end']['price']:.2f}（幅度 {scenario['a_range']:.2f} 点），"
-            f"B浪至 {scenario['b_end']['day']} {scenario['b_end']['price']:.2f}；C浪测算位："
+            f"{scenario['label']}测算：A浪 {scenario['a_start']['day']} {fp(scenario['a_start']['price'])} → "
+            f"{scenario['a_end']['day']} {fp(scenario['a_end']['price'])}（幅度 {fp(scenario['a_range'])} 点），"
+            f"B浪至 {scenario['b_end']['day']} {fp(scenario['b_end']['price'])}；C浪测算位："
             + "，".join(scen_parts)
             + "。"
         )
@@ -1238,9 +1253,9 @@ def render(
         scen_str = f"ABC测算：近{STRUCT_DAYS}日无满足「反向≥5%且收回≥0.382」的B浪，不做ABC测算。"
 
     def ladder_text(levels: list[dict]) -> str:
-        return "、".join(f"{lvl['price']:.2f}（{_src(lvl)}）" for lvl in levels[:4]) or "无"
+        return "、".join(f"{fp(lvl['price'])}（{_src(lvl)}）" for lvl in levels[:4]) or "无"
 
-    gap_parts = [f"{g['day']} {g['type']} {g['range'][0]:.2f}~{g['range'][1]:.2f}" for g in gaps]
+    gap_parts = [f"{g['day']} {g['type']} {fp(g['range'][0])}~{fp(g['range'][1])}" for g in gaps]
     wedge_and_levels_str = (
         rails_str
         + "\n"
@@ -1253,12 +1268,12 @@ def render(
 
     proj_str = (
         f"① {projections['bull']['name']}：触发条件为{projections['bull']['trigger']}，"
-        f"回踩守住 {projections['bull']['retest_hold']:.2f}，上方目标看至 {projections['bull']['target_price']:.2f}"
+        f"回踩守住 {fp(projections['bull']['retest_hold'])}，上方目标看至 {fp(projections['bull']['target_price'])}"
         f"（{projections['bull']['target_source']}；失效条件：{projections['bull']['invalidation']}）；\n"
         f"  ② {projections['neutral']['name']}：条件为{projections['neutral']['condition']}，"
-        f"在 {projections['neutral']['range'][0]:.2f}~{projections['neutral']['range'][1]:.2f} 区间内围绕中枢 {projections['neutral']['target_price']:.2f} 震荡；\n"
+        f"在 {fp(projections['neutral']['range'][0])}~{fp(projections['neutral']['range'][1])} 区间内围绕中枢 {fp(projections['neutral']['target_price'])} 震荡；\n"
         f"  ③ {projections['bear']['name']}：触发条件为{projections['bear']['trigger']}，"
-        f"反抽不过 {projections['bear']['rebound_cap']:.2f}，下方目标看至 {projections['bear']['target_price']:.2f}"
+        f"反抽不过 {fp(projections['bear']['rebound_cap'])}，下方目标看至 {fp(projections['bear']['target_price'])}"
         f"（{projections['bear']['target_source']}；失效条件：{projections['bear']['invalidation']}）。"
     )
 
@@ -1272,7 +1287,7 @@ def render(
             + (
                 c_p["phase"]
                 if c_p["phase"].startswith("B浪")
-                else f"{c_p['phase']}，最远已到 {c_p['extreme']:.2f}（{c_p['day'][5:]}，C/A={c_p['c_over_a']:.2f}{reach_txt}）"
+                else f"{c_p['phase']}，最远已到 {fp(c_p['extreme'])}（{c_p['day'][5:]}，C/A={c_p['c_over_a']:.2f}{reach_txt}）"
             )
             + "。"
         )
@@ -1286,19 +1301,19 @@ def render(
 
     bg = background
     bg_parts = [
-        f"大级别背景（近{bg['days']}日，{bg['start_day']} → {bg['end_day']}）：区间最高为 {bg['high']['day']} 的 {bg['high']['price']:.2f}，"
-        f"最低为 {bg['low']['day']} 的 {bg['low']['price']:.2f}，当前价处于该区间的 {bg['percentile']:.2f}% 分位"
+        f"大级别背景（近{bg['days']}日，{bg['start_day']} → {bg['end_day']}）：区间最高为 {bg['high']['day']} 的 {fp(bg['high']['price'])}，"
+        f"最低为 {bg['low']['day']} 的 {fp(bg['low']['price'])}，当前价处于该区间的 {bg['percentile']:.2f}% 分位"
     ]
     if bg["ma250"]:
         m250 = bg["ma250"]
         bg_parts.append(
-            f"MA250（年线）为 {m250['value']:.2f}，当前价{'站上年线' if m250['diff_pct'] >= 0 else '位于年线下方'}"
+            f"MA250（年线）为 {fp(m250['value'])}，当前价{'站上年线' if m250['diff_pct'] >= 0 else '位于年线下方'}"
             f"（偏离 {m250['diff_pct']:+.2f}%），年线近20日{m250['direction']}（{m250['chg_20d_pct']:+.2f}%）"
         )
     if bg["ma120"]:
         bg_parts.append(f"MA120 近20日{bg['ma120']['direction']}（{bg['ma120']['chg_20d_pct']:+.2f}%）")
     bg_parts.append(
-        f"长周期{bg['fib']['kind']}：" + "、".join(f"{lvl['ratio']:.3f} 位 {lvl['price']:.2f}" for lvl in bg["fib"]["retracements"])
+        f"长周期{bg['fib']['kind']}：" + "、".join(f"{lvl['ratio']:.3f} 位 {fp(lvl['price'])}" for lvl in bg["fib"]["retracements"])
     )
     background_str = "；".join(bg_parts) + f"。以上只描述大级别位置，不参与短线触发位和目标位；短线结构与三条推演只基于近{len(sview)}日。"
 
