@@ -139,6 +139,10 @@ def test_report_md_numbers_match_json(cn_pipeline) -> None:
     assert f"{fp['q90'][last]:.2f} |" in md
     cov80 = fp["calibration_audit"]["nominal_80pct_empirical_coverage"]
     assert f"80% 区间 {cov80 * 100:.1f}%" in md
+    # 审计期覆盖全部 760 根历史，15 日区间约 42 个独立样本、覆盖率达标：报告显示已达标并说明门槛
+    assert fp["calibration_audit"]["effective_independent_samples"] >= 20
+    assert fp["promotion_status"] == "PROMOTED"
+    assert "状态：已达标" in md and "约 20 个以上独立样本" in md
     trades = backtest["backtest"]["all_long_signals"]["trades"]
     assert f"| 全部做多信号 | {trades} |" in md
     assert md.rstrip().endswith("*以上为规则化技术分析，仅供研究参考，不构成投资建议。*")

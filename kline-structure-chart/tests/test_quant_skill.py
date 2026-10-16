@@ -28,7 +28,7 @@ from contracts import (  # noqa: E402
     sanitize_filename,
     validate_report,
 )
-from data_gateway import load_bundle  # noqa: E402
+from data_gateway import FETCH_BARS, load_bundle  # noqa: E402
 from evaluation import (  # noqa: E402
     label_triple_barrier_event,
     run_causal_replay_audit,
@@ -594,13 +594,15 @@ def test_c01_ema200_is_warmed_up_and_never_substituted(replay_recorded) -> None:
 
 
 def test_c02_c03_conformal_bands_are_calibrated_and_q50_has_no_drift() -> None:
-    bars = load_recorded("sina_daily/sh600519.json")
+    bars = load_recorded("sina_daily/sh600519.json")[-FETCH_BARS:]
     meta = {"market": "CN", "asset_type": "equity", "symbol": "600519.SH"}
     fc = compute_conformal_forecast(bars, meta=meta, horizon_bars=15)
     audit = fc["calibration_audit"]
-    assert audit["calibrated"] is True and audit["evaluation_samples"] >= 60
+    # 审计期覆盖全部 760 根历史：N_eval = n - 2H - 99 = 631，约 42 个独立样本，覆盖率达标即晋级
+    assert audit["calibrated"] is True and audit["evaluation_samples"] == FETCH_BARS - 2 * 15 - 99 == 631
     assert abs(audit["nominal_50pct_empirical_coverage"] - 0.50) <= 0.10
     assert abs(audit["nominal_80pct_empirical_coverage"] - 0.80) <= 0.10
+    assert audit["effective_independent_samples"] == 631 // 15 >= audit["min_effective_independent_samples"]
     assert fc["promotion_status"] == "PROMOTED"
     assert len(audit["per_horizon_coverage"]) == 15
     assert audit["q50_mae_pct"] == audit["random_walk_mae_pct"]
@@ -614,6 +616,45 @@ def test_c02_c03_conformal_bands_are_calibrated_and_q50_has_no_drift() -> None:
     # C-03：中位数恒为最新收盘价，不受规则分漂移影响
     assert set(fc["base_median_q50"]) == {round(last_c, 2)}
     assert fc["q50_method"] == "MARTINGALE_LAST_CLOSE"
+
+
+def test_c11_promotion_requires_effective_independent_samples_floor() -> None:
+    """已达标需有效独立样本 >= 20：同一只 600519、H=15，取最近 429 根（300 个样本，20 个）达标，428 根（299 个，19 个）覆盖率合格也不晋级。"""
+    bars = load_recorded("sina_daily/sh600519.json")
+    meta = {"market": "CN", "asset_type": "equity", "symbol": "600519.SH"}
+    for n, eff, status in ((429, 20, "PROMOTED"), (428, 19, "RESEARCH_CALIBRATION_WARMUP")):
+        fc = compute_conformal_forecast(bars[-n:], meta=meta, horizon_bars=15)
+        audit = fc["calibration_audit"]
+        assert audit["min_effective_independent_samples"] == 20
+        assert audit["evaluation_samples"] == n - 2 * 15 - 99
+        assert audit["effective_independent_samples"] == eff == audit["evaluation_samples"] // 15
+        assert abs(audit["nominal_50pct_empirical_coverage"] - 0.50) <= 0.10
+        assert abs(audit["nominal_80pct_empirical_coverage"] - 0.80) <= 0.10
+        assert not audit["uncalibrated_overlays"]
+        assert fc["promotion_status"] == status
+
+
+@pytest.mark.parametrize(
+    "rel,meta",
+    [
+        ("sina_daily/sh600519.json", {"market": "CN", "asset_type": "equity", "symbol": "600519.SH"}),
+        ("yahoo_daily/0700.HK.json", {"market": "HK", "asset_type": "equity", "symbol": "00700.HK"}),
+        ("yahoo_daily/NVDA.json", {"market": "US", "asset_type": "equity", "symbol": "NVDA.US"}),
+    ],
+)
+def test_c12_audit_period_decoupled_from_display_calibration_window(rel: str, meta: dict) -> None:
+    """审计期随历史变长而扩大，展示区间只由最近 CALIBRATION_WINDOW 个截面决定，宽度与审计期长短无关。"""
+    bars = load_recorded(rel)
+    long_fc = compute_conformal_forecast(bars[-FETCH_BARS:], meta=meta, horizon_bars=15)
+    # 展示区间只依赖最近 1 + H + 160 个截面及其前 60 根 σ 回看
+    short_fc = compute_conformal_forecast(bars[-(1 + 15 + 160 + 60 + 1) :], meta=meta, horizon_bars=15)
+    for key in ("q10", "q25", "base_median_q50", "optimistic_q75", "q90", "conformal_50pct_band", "conformal_80pct_band"):
+        assert long_fc[key] == short_fc[key]
+    la, sa = long_fc["calibration_audit"], short_fc["calibration_audit"]
+    assert la["q80_residual_multiplier"] == sa["q80_residual_multiplier"]
+    assert la["evaluation_samples"] == FETCH_BARS - 2 * 15 - 99
+    assert sa["evaluation_samples"] == 237 - 2 * 15 - 99
+    assert la["effective_independent_samples"] >= 20 > sa["effective_independent_samples"]
 
 
 def test_c04_c05_c10_backtest_replays_live_plan_with_bootstrap_ci(replay_recorded) -> None:
