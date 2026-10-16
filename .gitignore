@@ -1,0 +1,12 @@
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# 运行产物（生成物，不提交、不随 skill 分发）
+artifacts/
+kline-structure-chart/artifacts/
