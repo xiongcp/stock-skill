@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import math
+import re
+import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -11,11 +13,15 @@ from zoneinfo import ZoneInfo
 from contracts import AnalysisRequest, MarketDataBundle, validate_bars
 from market_rules import (
     DEFAULT_BENCHMARKS,
+    KNOWN_INSTRUMENTS,
     MARKET_SESSIONS,
     TENCENT_INDEX_SOURCES,
     apply_point_in_time_adjustment,
     is_daily_bar_complete,
+    latest_closed_session,
+    is_st_instrument,
     resolve_instrument,
+    tencent_quote_code_for,
     yahoo_events_symbol_for,
     yahoo_symbol_for,
 )
@@ -37,10 +43,15 @@ def _http_get(url: str, encoding: str = "utf-8", timeout: int = 12) -> str:
         return resp.read().decode(encoding, errors="ignore")
 
 
+def _url_token(token: str) -> str:
+    """代码拼进 URL 前做百分号编码（只保留行情代码会用到的 ^ . - 字符），杜绝路径或查询参数注入。"""
+    return urllib.parse.quote(token, safe="^.-")
+
+
 def fetch_sina_daily_bars(sina_symbol: str, datalen: int = 450) -> list[dict[str, Any]]:
     url = (
         "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
-        f"CN_MarketData.getKLineData?symbol={sina_symbol}&scale=240&ma=no&datalen={datalen}"
+        f"CN_MarketData.getKLineData?symbol={_url_token(sina_symbol)}&scale=240&ma=no&datalen={datalen}"
     )
     raw = _http_get(url)
     rows = json.loads(raw)
@@ -63,7 +74,7 @@ def fetch_sina_daily_bars(sina_symbol: str, datalen: int = 450) -> list[dict[str
 
 
 def fetch_yahoo_daily_bars(yahoo_symbol: str, range_str: str = "2y") -> list[dict[str, Any]]:
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}?interval=1d&range={range_str}"
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{_url_token(yahoo_symbol)}?interval=1d&range={range_str}"
     raw = _http_get(url)
     payload = json.loads(raw)
     result = (payload.get("chart") or {}).get("result") or []
@@ -111,7 +122,7 @@ def fetch_yahoo_daily_bars(yahoo_symbol: str, range_str: str = "2y") -> list[dic
 
 def fetch_tencent_index_daily_bars(tencent_code: str, datalen: int = 760) -> list[dict[str, Any]]:
     """腾讯指数日线（行字段顺序：日期, 开, 收, 高, 低, 成交量），用于 Yahoo 无历史的港股指数（如恒生科技指数）。"""
-    url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_code},day,,,{datalen},qfq"
+    url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={_url_token(tencent_code)},day,,,{datalen},qfq"
     payload = json.loads(_http_get(url))
     node = ((payload.get("data") or {}).get(tencent_code)) or {}
     rows = node.get("day") or node.get("qfqday") or []
@@ -136,10 +147,70 @@ def fetch_tencent_index_daily_bars(tencent_code: str, datalen: int = 760) -> lis
     return bars
 
 
+def fetch_tencent_quote_meta(tencent_code: str) -> dict[str, Any]:
+    """腾讯行情快照：返回证券简称与港股每手股数（字段 60）。仅用于标的元数据，不参与任何价格计算。"""
+    raw = _http_get(f"https://qt.gtimg.cn/q={_url_token(tencent_code)}", encoding="gbk")
+    _, _, value = raw.strip().partition("=")
+    parts = value.strip().rstrip(";").strip('"').split("~")
+    if len(parts) < 4 or not parts[1].strip():
+        raise RuntimeError(f"Tencent quote empty for {tencent_code}")
+    lot_size: int | None = None
+    if tencent_code.startswith("hk") and len(parts) > 60:
+        try:
+            lot_size = int(float(parts[60])) or None
+        except ValueError:
+            lot_size = None
+    return {"code": tencent_code, "name": re.sub(r"\s+", "", parts[1]), "lot_size": lot_size}
+
+
+def _enrich_instrument(
+    inst: dict[str, Any],
+    request: AnalysisRequest,
+    allow_network: bool,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """用行情快照补全证券简称、A 股 ST 标识与港股每手股数；取不到时保留原值并在状态中写明原因（非致命）。
+
+    名称优先级：用户 --name > 内置名称 > 行情快照简称 > 代码。ST 由显式 --st 或快照简称前缀识别。
+    """
+    status: dict[str, Any] = {"source": None, "vendor_name": None, "lot_size_source": None, "error": None}
+    quote: dict[str, Any] | None = None
+    if not allow_network:
+        status["error"] = "网络已禁用(--offline)"
+    else:
+        try:
+            code = tencent_quote_code_for(inst["symbol"], inst["market"])
+            quote = fetch_tencent_quote_meta(code)
+            status["source"] = f"TENCENT_QUOTE({code})"
+            status["vendor_name"] = quote["name"]
+        except Exception as exc:  # noqa: BLE001 - 元数据缺失不阻断分析，但必须披露
+            status["error"] = f"{type(exc).__name__}: {exc}"
+    out = dict(inst)
+    if quote and not request.get("name") and inst["symbol"] not in KNOWN_INSTRUMENTS:
+        out["name"] = quote["name"]
+    if out["market"] == "CN" and out["asset_type"] != "index":
+        out["is_st"] = is_st_instrument(
+            out["symbol"], (quote or {}).get("name") or out.get("name", ""), bool(request.get("is_st")) or bool(out.get("is_st"))
+        )
+    if out["market"] == "HK" and out["asset_type"] != "index":
+        builtin_lot = KNOWN_INSTRUMENTS.get(out["symbol"], {}).get("lot_size")
+        if quote and quote.get("lot_size"):
+            out["lot_size"] = out["min_order_shares"] = out["lot_step"] = int(quote["lot_size"])
+            status["lot_size_source"] = "VENDOR_QUOTE"
+        elif builtin_lot:
+            out["lot_size"] = out["min_order_shares"] = out["lot_step"] = int(builtin_lot)
+            status["lot_size_source"] = "BUILTIN"
+        else:
+            # 每手股数未知：不沿用 resolve_instrument 的 100 股猜测，交由规则层按假设值计算并在报告中披露
+            for key in ("lot_size", "min_order_shares", "lot_step"):
+                out.pop(key, None)
+            status["lot_size_source"] = "ASSUMED_DEFAULT"
+    return out, status
+
+
 def fetch_yahoo_corporate_actions(yahoo_symbol: str, range_str: str = "5y") -> list[dict[str, Any]]:
     """Yahoo 除权除息事件：[{ex_date, split_ratio, dividend}]，日期按交易所时区换算。"""
     url = (
-        f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}"
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{_url_token(yahoo_symbol)}"
         f"?interval=1d&range={range_str}&events=div%2Csplits"
     )
     payload = json.loads(_http_get(url))
@@ -403,6 +474,7 @@ def load_bundle(
         name=request.get("name"),
         is_st=bool(request.get("is_st", False)),
     )
+    inst, instrument_meta = _enrich_instrument(inst, request, allow_network)
     market = inst["market"]
     as_of = request.get("as_of")
     datalen = FETCH_BARS
@@ -415,8 +487,13 @@ def load_bundle(
     )
     # 未收盘K线不得当作已收盘参与指标/预测计算（指定历史 as_of 时不涉及）
     intraday = None
+    missing_session = None
     if not as_of:
         target_bars, intraday = split_incomplete_last_bar(target_bars, market, now)
+        # 已收盘的最近交易日不在数据里：数据源尚未更新或标的停牌，不补数，只披露
+        latest_closed = latest_closed_session(market, now)
+        if target_bars[-1]["day"] < latest_closed:
+            missing_session = latest_closed
     adj_mode = request.get("adjustment", "total_return" if inst["asset_type"] != "index" else "raw")
     actions, adjustment_status = _load_corporate_actions(inst, target_bars, target_src, adj_mode, allow_network)
     target_bars = apply_point_in_time_adjustment(
@@ -473,5 +550,7 @@ def load_bundle(
             "adjustment_status": adjustment_status,
             "errors": target_errors,
             "intraday_excluded_day": intraday["day"] if intraday else None,
+            "missing_closed_session": missing_session,
+            "instrument_meta": instrument_meta,
         },
     }

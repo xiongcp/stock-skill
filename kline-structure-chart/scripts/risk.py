@@ -38,7 +38,13 @@ def compute_triple_barrier_plan(
     is_st = bool(meta.get("is_st", False))
     is_ipo_no_limit = bool(meta.get("is_ipo_no_limit", False))
     rules = get_market_microstructure_rules(
-        market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=as_of_day
+        market,
+        asset_type,
+        symbol,
+        is_st=is_st,
+        is_ipo_no_limit=is_ipo_no_limit,
+        day_str=as_of_day,
+        board_lot=meta.get("board_lot"),
     )
 
     last_bar = bars[-1]
@@ -89,7 +95,9 @@ def compute_triple_barrier_plan(
 
     # Independent Risk Officer Veto checks
     veto_reasons: list[str] = []
-    if float(benchmark_info.get("regime_score") or 50.0) < 35.0:
+    if benchmark_info.get("benchmark_missing"):
+        veto_reasons.append("缺少大盘基准行情，无法执行先大盘、后个股检查，禁止给出做多确认")
+    elif float(benchmark_info.get("regime_score") or 50.0) < 35.0:
         veto_reasons.append(f"大盘环境评分偏弱 ({benchmark_info.get('regime_score')}<35)，压降个股做多评级")
     if rr_ratio < 1.20:
         veto_reasons.append(f"扣除交易成本后 TP1 净盈亏比不足 ({rr_ratio:.2f} < 1.20)")

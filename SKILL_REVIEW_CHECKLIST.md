@@ -1,6 +1,7 @@
 # `kline-structure-chart` Skill 与 `AGENTS.md` 审查清单与修复台账
 
 - 审查与收口日期：2026-10-15（本机时区 `America/Los_Angeles`，此时北京/香港为 `2026-10-16`）
+- 第二轮复查：2026-10-16（输出准确性、可读性与安装使用文档），见第 5 节；第 0~3 节保留首轮记录，第 4 节勾选清单已按当前状态更新
 - 审查对象：`AGENTS.md`，以及 `kline-structure-chart/` 下的 `SKILL.md`、`references/*`、`assets/*`、`scripts/*`、`tests/*`、`artifacts/*`
 - 审查与验证方法：
   1. 通读全部源码、测试与文档。
@@ -202,7 +203,8 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 - [x] PNG 和 HTML 醒目显示数据源、数据质量与风控状态；数据非 `OK` 时带红色告警横幅与水印
 - [x] 输出里无写死外部数据（VIX 实时拉取 Yahoo `^VIX` 或置 `null`）
 - [x] 最后一根 K 线按交易所时区与收盘时间判定是否收盘，未收盘 K 线拆为 `intraday` 并在 `quality.notes` 披露
-- [x] `tests/fixtures/recorded/MANIFEST.json` 完整记录 25 份真实录制文件的来源、起止日期与 `sha256`
+- [x] `tests/fixtures/recorded/MANIFEST.json` 完整记录 47 份真实录制文件的来源、起止日期与 `sha256`（含腾讯行情快照 19 份）
+- [x] 数据源缺少最近已收盘交易日时只在 `quality.notes` 披露，不用其他来源补数（`test_missing_closed_session_is_disclosed_not_filled`）
 
 **D. 市场制度**
 - [x] 每条规则在 `references/{cn,hk,us}-market.md` 写明生效日期与权威来源
@@ -215,7 +217,7 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 **E. 计算与统计**
 - [x] 指标固定在 420 根历史上预热，EMA200 不足时显式为 `None` / `N/A`，绝不用 EMA60 冒充
 - [x] 保形预测 `calibration_audit` 针对经涨跌停截断与价位表取整后的实际输出区间做滚动样本外实测，并同时披露 `q50_mae_pct` 与 `random_walk_mae_pct`
-- [x] 回测逐日回放线上真实计划（`LIVE_PLAN_REPLAY_V6`），不学习任何参数，并提供胜率与均值收益的 Bootstrap 95% 置信区间
+- [x] 回测逐日回放线上真实计划（`LIVE_PLAN_REPLAY_V6`），不学习任何参数；胜率给 Wilson 95% 区间、均值收益给 Bootstrap 95% 区间（公式见 `references/math-patterns.md` 第 6 节）
 - [x] 所有形态与因子命名同算法严格一致，无未实现能力宣称（`test_no_unimplemented_capability_claims`）
 
 **F. 因果与不变性**
@@ -229,5 +231,59 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 - [x] 浏览器实测控制台零报错，7 个图层开关、RS 视图切换、时间回放滑块均正常
 
 **H. 测试与文档**
-- [x] 门禁命令包含全量 `pytest`（85 项，含 TA-Lib 与 Supertrend 金标准、真实数据回放、网络异常、文档契约）与真实录制数据跨窗口不变性校验
+- [x] 门禁命令包含全量 `pytest`（110 项，含 TA-Lib 与 Supertrend 金标准、真实数据回放、网络异常、文档契约）与真实录制数据跨窗口不变性校验
 - [x] `.gitignore` 已忽略生成物与虚拟环境，`artifacts/` 已更新为最新真实行情产物
+
+**I. 输出与使用文档**
+- [x] 每次运行生成 `*_report.md`，数字全部取自 `*_result.json`，风控否决置于结论之前（`test_report_md_*`）
+- [x] 参数错误以 `[INVALID_ARGUMENT]`、行情不可用以 `[DATA_UNAVAILABLE]` 非零退出，无 traceback（`test_cli_errors_are_labelled_without_traceback`）
+- [x] 仓库根目录 `README.md` 说明安装、注册、验证与使用；参数表、错误前缀、产物文件名与链接由 `test_readme_*` 守护
+
+---
+
+## 5. 第二轮复查（2026-10-16）：输出准确性与使用文档
+
+### 5.1 新发现与修复台账
+
+| ID | 级别 | 位置 | 问题 | 修复状态与验证测试 |
+| --- | --- | --- | --- | --- |
+| S-01 | P1 | `scripts/market_rules.py` `yahoo_symbol_for`、`scripts/data_gateway.py` 各取数 URL | 美股代码未校验即拼进 Yahoo 请求 URL，可注入查询参数或路径（后台安全审查发现） | ✅ 美股代码按 `US_TICKER_PATTERN` 校验，所有取数 URL 的代码经 `_url_token` 百分号编码；`test_us_ticker_validation_and_share_classes`、`test_url_tokens_are_percent_encoded` |
+| S-02 | P2 | `scripts/render_structure_chart.py` | 明文 `http://` 回退（后台安全审查发现） | ✅ 已由提交 `1eb657f` 移除（即 P-08），本轮复核确认 |
+| M-01 | P1 | `scripts/data_gateway.py` `_enrich_instrument` | 未在内置表登记的代码，报告标题只显示代码 | ✅ 从腾讯行情快照取证券简称（`--name` 优先）；`test_vendor_name_fills_unregistered_symbol` |
+| M-02 | P1 | `scripts/market_rules.py` `get_market_microstructure_rules` | 港股每手股数固定按 100 股，小米（200）、汇丰（400）等仓位股数错误 | ✅ 每手股数取自行情快照，取不到时按 100 股假设并在 `lot_size_source` 与 `quality.notes` 披露；`test_hk_board_lot_comes_from_vendor_quote`、`test_hk_board_lot_fallback_is_disclosed` |
+| M-03 | P1 | `scripts/market_rules.py` `is_st_instrument` | ST 状态只能手动传 `--st` | ✅ 按 A 股证券简称前缀自动识别，港美股不误判；`test_st_detection_only_by_a_share_name_prefix`、`test_st_flag_from_vendor_name_drives_historical_limits` |
+| M-04 | P2 | `scripts/market_rules.py` `yahoo_symbol_for` | `BRK.B.US` 等带类别后缀的美股无法解析 | ✅ 映射为 Yahoo 的 `BRK-B`；`test_us_ticker_validation_and_share_classes` |
+| O-01 | P1 | `scripts/render_report_md.py`（新增） | 没有确定性的中文报告，agent 需自行从 JSON 拼数字，容易改错或漏掉否决 | ✅ 每次运行生成 `*_report.md`，按回复契约排序，数字全部取自 JSON；`test_report_md_numbers_match_json`、`test_report_md_puts_veto_before_conclusions`、`test_report_md_hides_all_prices_when_data_unavailable` |
+| O-02 | P1 | `scripts/risk.py`、`scripts/analysis.py` | 本地文件缺少基准时仍可能给出确认做多，报告还误写“标的本身即市场基准” | ✅ 新增 `benchmark_missing`，缺基准即风控否决；`test_missing_benchmark_blocks_long_confirmation`、`test_default_benchmark_itself_needs_no_external_benchmark` |
+| O-03 | P2 | `scripts/analyze_and_forecast.py` | 非法代码直接抛 traceback；`--days` 越界被标成 `[DATA_UNAVAILABLE]`；`--help` 因未转义的 `%` 崩溃 | ✅ 参数错误统一为 `[INVALID_ARGUMENT]`，`--help` 可用；`test_cli_errors_are_labelled_without_traceback`、`test_cli_help_renders` |
+| O-04 | P2 | `scripts/market_rules.py` `price_decimals` | 港股 0.02 价位被判为 3 位小数 | ✅ 价位先 `normalize()` 再取位数；`test_report_md_uses_market_tick_precision` |
+| O-05 | P1 | `scripts/market_rules.py`、`scripts/data_gateway.py`、`scripts/analysis.py` | 收盘后数据源尚未入库当日日线时没有任何提示，“未来第 1 日”其实已经收盘（实测北京时间 2026-10-16 15:19，新浪日线仍只到 10-15） | ✅ 新增 `latest_closed_session`，缺最近已收盘交易日时在 `quality.notes` 披露，不补数；`test_latest_closed_session_follows_exchange_clock_and_calendar`、`test_missing_closed_session_is_disclosed_not_filled` |
+| O-06 | P2 | `scripts/evaluation.py` `_summarize_returns` | 胜率 Bootstrap 区间在小样本全亏时退化为 0%~0%，呈现虚假的确定性 | ✅ 胜率改用 Wilson 区间（3 笔全亏为 0%~56.15%），均值收益 Bootstrap 结果不变；`test_win_rate_interval_does_not_collapse_on_small_samples` |
+| O-07 | P3 | `scripts/render_report_md.py` | 交收制度显示原始枚举（如 `T+0_TRADING_T+2_CLEARING`） | ✅ 报告改为中文说明，JSON 字段不变；`test_report_md_explains_settlement_codes_in_chinese` |
+| O-08 | P3 | `scripts/render_report_md.py` | 零成交行显示 `0.0%` | ✅ 显示 `—`；`test_report_md_zero_trade_rows_show_dash` |
+| D-01 | P2 | `README.md`（新增） | 缺少面向使用者的安装与使用说明 | ✅ 覆盖安装、注册到各 agent、验证、对话用法、CLI 参数、输出、读结果、故障排查与已知限制；`test_readme_commands_and_links_resolve`、`test_readme_cli_parameters_and_outputs_match_code` |
+| D-02 | P3 | `scripts/render_structure_chart.py` `FONT_CANDIDATES` | 缺 Linux Noto CJK 与 Windows 字体路径 | ✅ 已补充候选路径（Windows 全流程未实测） |
+
+### 5.2 本轮验证证据
+
+- 门禁：`pytest` **110 passed in 64.30s**；`check_days_invariance.py --step 40` 输出 `runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]`。
+- 联网实跑（北京时间 2026-10-16 15:19 前后，4 个标的全部退出码 0，单次 4~7 秒）：
+  - `600519.SH`（含 `--backtest --backtest-step 5`）：报告注明“数据只到 2026-10-15”；胜率区间显示为 `0.0%（0.0% ~ 56.1%）`。
+  - `600289.SH`：简称“ST信通”自动识别为 ST，主板 ST 涨跌幅 `±10%`。
+  - `01810.HK`：每手 200 股（腾讯快照），30 万港元、1% 风险对应 1400 股；10-16 未收盘 K 线已排除并注明。
+  - `BRK.B.US`：解析为 Yahoo `BRK-B`，简称“伯克希尔B”。
+- 浏览器（内置浏览器，`600519.SH` 与 `BRK.B.US` 看板）：7 个图层全关再全开后画布恢复一致；相对强弱视图可切换；回放滑块 6 个截面均正常；控制台 0 条消息。
+- PNG 目视：A 股、港股红涨绿跌，美股绿涨红跌，图例与页脚文字随市场切换。
+
+### 5.3 仍可继续改进（未在本轮修改）
+
+1. **结构层使用盘中价**：`structure._abc_one` 用盘中价判断 ABC 结构是否失效，C 浪进度也包含盘中高低点（已标注“盘中”）。这与铁律 0“未收盘 K 线不得参与形态计算”的字面要求有张力，建议盘中价只用于标注、不参与情景筛选。
+2. **PNG 标签精度与报告不一致**：`structure.fmt_price` 对 ≥100 的价格取整、<10 的价格保留 3 位，例如 `BRK.B.US` 图上“突破 534”而报告为 533.55，`600289.SH` 图上“突破 5.123”而报告为 5.12。`test_g03_*` 把取整固定为设计，如需按价位表精度显示，需要同时改测试。
+3. **区间校准“已达标”的样本量**：`600519.SH` 评估样本 107 个，约等于 7 个独立样本时状态即为“已达标”。建议晋级条件增加有效独立样本下限。
+4. **ST 历史状态**：ST 按当前简称识别并沿用到全部历史，可接入 ST 变更历史。
+5. **港股 ETF 识别**：仍需手动传 `--asset-type etf`（影响印花税豁免）。
+6. **外部数据缺口**：财报日无数据源；北交所无除权除息事件；A 股 2027 年休市表待公布后补录。
+7. **数据源稳定性**：新浪、Yahoo、腾讯均为非官方网页接口，可评估付费或官方备用源（同样必须是真实行情）。
+8. **HTML 看板制度栏**：`render_html.py` 仍显示交收制度原始枚举，可复用报告的中文说明。
+9. **Windows**：全流程未实测。
+

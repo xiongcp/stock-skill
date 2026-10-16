@@ -204,26 +204,27 @@ def label_triple_barrier_event(
     }
 
 
-def _bootstrap_ci(rets: list[float], n_boot: int = 400) -> tuple[list[float] | None, list[float] | None]:
-    """计算胜率与单笔均值收益的确定性 Bootstrap 95% 置信区间（样本数 >= 2 时提供）。"""
+def _wilson_ci(wins: int, n: int, z: float = 1.96) -> list[float] | None:
+    """胜率的 Wilson 95% 区间（样本数 >= 2 时提供）：小样本或全胜/全负时不会像 Bootstrap 那样退化成 [p, p]。"""
+    if n < 2:
+        return None
+    p = wins / n
+    denom = 1.0 + z * z / n
+    center = (p + z * z / (2 * n)) / denom
+    half = z * math.sqrt(p * (1.0 - p) / n + z * z / (4 * n * n)) / denom
+    return [round(max(0.0, center - half) * 100.0, 2), round(min(1.0, center + half) * 100.0, 2)]
+
+
+def _bootstrap_mean_ci(rets: list[float], n_boot: int = 400) -> list[float] | None:
+    """单笔均值收益的确定性 Bootstrap 95% 置信区间（样本数 >= 2 时提供）。"""
     m = len(rets)
     if m < 2:
-        return None, None
+        return None
     rng = random.Random(42 + m)
-    win_rates: list[float] = []
-    mean_rets: list[float] = []
-    for _ in range(n_boot):
-        sample = [rets[rng.randrange(m)] for _ in range(m)]
-        win_rates.append(sum(1 for x in sample if x > 0) / m * 100.0)
-        mean_rets.append(sum(sample) / m * 100.0)
-    win_rates.sort()
-    mean_rets.sort()
+    mean_rets = sorted(sum(rets[rng.randrange(m)] for _ in range(m)) / m * 100.0 for _ in range(n_boot))
     lo_i = max(0, int(0.025 * n_boot))
     hi_i = min(n_boot - 1, int(0.975 * n_boot))
-    return (
-        [round(win_rates[lo_i], 2), round(win_rates[hi_i], 2)],
-        [round(mean_rets[lo_i], 2), round(mean_rets[hi_i], 2)],
-    )
+    return [round(mean_rets[lo_i], 2), round(mean_rets[hi_i], 2)]
 
 
 def _summarize_returns(rets: list[float], years: float) -> dict[str, Any]:
@@ -253,13 +254,12 @@ def _summarize_returns(rets: list[float], years: float) -> dict[str, Any]:
     trades_per_year = len(rets) / years if years > 0 else 0.0
     sharpe = (mean_r / sd_r) * math.sqrt(trades_per_year) if sd_r > 0 else 0.0
     pf = (sum(wins) / sum(losses)) if losses and sum(losses) > 0 else (9.99 if wins else 0.0)
-    wr_ci, mr_ci = _bootstrap_ci(rets)
     return {
         "trades": len(rets),
         "cumulative_return_pct": round((eq - 1.0) * 100.0, 2),
         "win_rate_pct": round(len(wins) / len(rets) * 100.0, 2),
-        "win_rate_95ci_pct": wr_ci,
-        "mean_return_95ci_pct": mr_ci,
+        "win_rate_95ci_pct": _wilson_ci(len(wins), len(rets)),
+        "mean_return_95ci_pct": _bootstrap_mean_ci(rets),
         "sharpe": round(sharpe, 2),
         "max_drawdown_pct": round(max_dd * 100.0, 2),
         "profit_factor": round(pf, 2),

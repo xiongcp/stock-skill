@@ -182,6 +182,193 @@
       "first_day": null,
       "last_day": null,
       "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "tencent_quote/sh000001.json": {
+      "source": "TENCENT qt.gtimg.cn q=sh000001（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "5b21fd697f44ce4b33fdc89dbcfeb5b6cb4297a49c2e30c3adc4cd607014f8d4",
+      "kind": "object"
+    },
+    "tencent_quote/sh000300.json": {
+      "source": "TENCENT qt.gtimg.cn q=sh000300（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "08b146e44a3181af554d1f248b2c9c63614dd67e78716185d9ae0218e43e422a",
+      "kind": "object"
+    },
+    "tencent_quote/sh000688.json": {
+      "source": "TENCENT qt.gtimg.cn q=sh000688（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "b104a974c66a5e9c6b01aa855b9c6231b6f3b48a36224fcbf4d3e9429ad02334",
+      "kind": "object"
+    },
+    "tencent_quote/sz399001.json": {
+      "source": "TENCENT qt.gtimg.cn q=sz399001（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "0d0a0be7bc21bc5f5d4fe096e562404824fe1490e00d4dc1e1802ac023bc384e",
+      "kind": "object"
+    },
+    "tencent_quote/sz399006.json": {
+      "source": "TENCENT qt.gtimg.cn q=sz399006（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "6f71297602872fc670dcb018017a3df6840abc3bd93a6d822abdab2591ea47a6",
+      "kind": "object"
+    },
+    "tencent_quote/sh600519.json": {
+      "source": "TENCENT qt.gtimg.cn q=sh600519（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "c8088e8d37ba20d25d35674327474caa5f43a402aff41af280d63662fce5e862",
+      "kind": "object"
+    },
+    "tencent_quote/sh601318.json": {
+      "source": "TENCENT qt.gtimg.cn q=sh601318（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "f319cd3437ab810840b0d7c8da40d31a318ad48165e9c1af4b0336f5e39d68b9",
+      "kind": "object"
+    },
+    "tencent_quote/sz000002.json": {
+      "source": "TENCENT qt.gtimg.cn q=sz000002（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "b20c2ee6b11d3a5edb4a7a6ad6bf1581d31f994e60f1531c46037cf27f728011",
+      "kind": "object"
+    },
+    "tencent_quote/sz002594.json": {
+      "source": "TENCENT qt.gtimg.cn q=sz002594（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "d7108776e59837bdfa4daa45a01c6ee36330e39786fb07ba92d6eee2cbe6bdc5",
+      "kind": "object"
+    },
+    "tencent_quote/sh510300.json": {
+      "source": "TENCENT qt.gtimg.cn q=sh510300（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "fa33e29bb3140177b40d29387b3668650f4f98c83325b3a3275777b9995c5c86",
+      "kind": "object"
+    },
+    "tencent_quote/sh600289.json": {
+      "source": "TENCENT qt.gtimg.cn q=sh600289（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "333e0932cccb26fee709bad04b8b0d50c0819c315822a69ac9b032888b0cfd2b",
+      "kind": "object"
+    },
+    "tencent_quote/hkHSI.json": {
+      "source": "TENCENT qt.gtimg.cn q=hkHSI（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "bc2e4cb39969ac5d10e2260bc59e27ae3b29b1f904d0604dc90d2cba292c86f6",
+      "kind": "object"
+    },
+    "tencent_quote/hkHSTECH.json": {
+      "source": "TENCENT qt.gtimg.cn q=hkHSTECH（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "1a250b016e62917a0818a02c8240b1dfeae4c9c1848be1c399f4217b8e067dcb",
+      "kind": "object"
+    },
+    "tencent_quote/hk00700.json": {
+      "source": "TENCENT qt.gtimg.cn q=hk00700（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "2192fdbb84aa55a088f2874d26540fc21cfa362d75ae88b6f9f907cd0f018ba6",
+      "kind": "object"
+    },
+    "tencent_quote/hk01810.json": {
+      "source": "TENCENT qt.gtimg.cn q=hk01810（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "cbfe32a56a02e24cfa29e9904ae8a5cbee16eb9c25069d5563cb20995627e8bf",
+      "kind": "object"
+    },
+    "tencent_quote/hk00005.json": {
+      "source": "TENCENT qt.gtimg.cn q=hk00005（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "12d4b05520afa268eee1222262a5c6c50ab0740ab2174a28154da9a259d7e425",
+      "kind": "object"
+    },
+    "tencent_quote/usNVDA.json": {
+      "source": "TENCENT qt.gtimg.cn q=usNVDA（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "970258ea350e7a71440f49a935d945d159163206573084e583164fc1e4450e09",
+      "kind": "object"
+    },
+    "tencent_quote/usSPY.json": {
+      "source": "TENCENT qt.gtimg.cn q=usSPY（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "5fb289aed6f10a1bcc63f78029b95efbc05f50cc8a1567363898a8ad2e3f212a",
+      "kind": "object"
+    },
+    "tencent_quote/usBRK.B.json": {
+      "source": "TENCENT qt.gtimg.cn q=usBRK.B（简称/每手股数）",
+      "recorded_at_utc": "2026-10-16T07:03:15+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "3a5ee15aed2ca83f31a08d66275a44eba7bf61e7a51d5cbf4e48e288b7be066f",
+      "kind": "object"
+    },
+    "sina_daily/sh600289.json": {
+      "source": "SINA getKLineData symbol=sh600289 scale=240 (不复权)",
+      "recorded_at_utc": "2026-10-16T07:03:17+00:00",
+      "rows": 1023,
+      "first_day": "2022-05-13",
+      "last_day": "2026-10-15",
+      "sha256": "6000d1056434e8f9d9ae8d2d2313a3668656e83378b838d77412ff4d11bcbb7b"
+    },
+    "yahoo_events/600289.SS.json": {
+      "source": "YAHOO chart 600289.SS events=div,splits",
+      "recorded_at_utc": "2026-10-16T07:03:17+00:00",
+      "rows": 0,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
     }
   }
 }

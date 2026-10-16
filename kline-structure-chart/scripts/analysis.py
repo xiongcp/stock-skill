@@ -268,8 +268,14 @@ def analyze_bundle(
             "relative_strength_vs_index": rs_val,
             "rs_series": rs_series,
             "source": bench_bundle.get("source", "BUNDLE"),
+            "benchmark_missing": False,
         }
     else:
+        # 指数或默认基准本身无需外部基准；个股缺少基准（如本地文件输入）时只能用自身状态占位，并显式标记
+        is_market_benchmark = (
+            inst["asset_type"] == "index"
+            or inst["symbol"].upper() == DEFAULT_BENCHMARKS.get(inst["market"], {}).get("symbol", "").upper()
+        )
         benchmark_info = {
             "index_symbol": inst["symbol"],
             "index_name": inst["name"],
@@ -279,6 +285,7 @@ def analyze_bundle(
             "relative_strength_vs_index": 1.0,
             "rs_series": [],
             "source": bundle.get("provenance", {}).get("source", "SELF_INDEX"),
+            "benchmark_missing": not is_market_benchmark,
         }
 
     # 5. 五大策略池与多周期共振评分
@@ -302,6 +309,7 @@ def analyze_bundle(
         is_st=is_st,
         is_ipo_no_limit=is_ipo_no_limit,
         day_str=view[-1]["day"],
+        board_lot=inst.get("lot_size") if inst["market"] == "HK" else None,
     )
     color_scheme = request.get("color_scheme")
     if not color_scheme or color_scheme == "auto":
@@ -314,6 +322,8 @@ def analyze_bundle(
         "asset_type": inst["asset_type"],
         "is_st": rules.get("is_st", is_st),
         "is_ipo_no_limit": is_ipo_no_limit,
+        # 只传递真实取得的港股每手股数；假设值不写入 meta，避免下游把假设当成已知
+        "board_lot": inst.get("lot_size") if inst["market"] == "HK" and inst["asset_type"] != "index" else None,
         "currency": inst["currency"],
         "timeframe": (request.get("timeframes") or ["1D"])[0],
         "as_of": view[-1]["day"],
@@ -470,6 +480,21 @@ def analyze_bundle(
     if adj_status.get("requested", "raw") != "raw" and adj_status.get("applied") == "raw":
         report["quality"]["notes"].append(
             f"复权未生效（{adj_status.get('error')}），价格为不复权原始价，除权除息缺口可能被误识别为跳空/FVG"
+        )
+    missing_session = bundle.get("provenance", {}).get("missing_closed_session")
+    if missing_session:
+        report["quality"]["notes"].append(
+            f"数据只到 {completed[-1]['day']}：最近已收盘的交易日 {missing_session} 的日线数据源尚未提供（或标的停牌），"
+            "本次分析不含该日行情，可稍后重跑"
+        )
+    inst_meta = bundle.get("provenance", {}).get("instrument_meta") or {}
+    if rules.get("lot_size_source") == "ASSUMED_DEFAULT":
+        report["quality"]["notes"].append(
+            f"港股每手股数未能从行情快照获取（{inst_meta.get('error')}），仓位按 100 股/手假设计算，下单前请向券商核对"
+        )
+    if inst["market"] == "CN" and inst["asset_type"] != "index" and inst_meta.get("error") and not request.get("is_st"):
+        report["quality"]["notes"].append(
+            f"证券简称未能从行情快照获取（{inst_meta.get('error')}），ST 风险警示状态只依据 --st / --name 判断"
         )
     cal = future_proj["calendar_coverage"]
     if not cal["covered"]:

@@ -12,6 +12,7 @@
 | `kline-structure-chart/SKILL.md` | 使用该技能回答用户的 agent | 运行命令、运行后必检、回复契约、术语与免责要求 |
 | `kline-structure-chart/references/*.md` | 两者按需查阅 | 公式定义（`math-patterns.md`）与三市场制度规则（带生效日期与来源） |
 | `SKILL_REVIEW_CHECKLIST.md` | 审查者 | 问题清单、修复进度与可复用勾选清单 |
+| `README.md` | 想安装、使用这个技能的人 | 安装、注册到各 Agent、命令行用法、输出解读与故障排查 |
 
 - `AGENTS.md` 不随 skill 分发。运行期规则必须在 `SKILL.md` 与 `references/` 中自洽，本文件只引用、不重复。
 - 公式与制度规则只在 `references/` 定义一次。代码、`SKILL.md`、本文件出现的数值必须与之一致，修改时同步更新对应测试。
@@ -24,7 +25,7 @@
    - 面向用户的产物与全部自动化测试只能基于真实行情（新浪 / Yahoo / 腾讯实时取数，`tests/fixtures/recorded/` 录制的真实行情，或用户提供的本地真实文件）。取不到时 `data_gateway.load_bundle` 抛出 `RuntimeError`，CLI 以 `[DATA_UNAVAILABLE]` 非零退出，**严禁回退、估算、补数或生成任何合成行情**。
    - `quality.status` 只能由 `contracts.assess_data_quality` 按来源枚举判定，标的与基准分别判定。若任何外部输入被标记为合成或离线假样本（`SYNTHETIC`），`quality.status = UNAVAILABLE`，PNG 与 HTML 必须带红色告警横幅和水印。
    - 外部数据（VIX、除权除息、财报日）取不到时写 `null` 并注明来源，禁止写死默认值。
-   - 未收盘的K线（按交易所时区与收盘时间判定）不得参与指标、形态、风控与预测计算，必须拆出为盘中K线并在 `quality.notes` 中披露。
+   - 未收盘的K线（按交易所时区与收盘时间判定）不得参与指标、形态、风控与预测计算，必须拆出为盘中K线并在 `quality.notes` 中披露。数据源缺少最近已收盘交易日（`market_rules.latest_closed_session`）时同样只在 `quality.notes` 披露，不得用其他来源补数。
 
 1. **算图分离（Compute-Render Separation）**
    - 所有指标、形态、SMC、Volume Profile、规则分、三重屏障点位与分位区间，必须 100% 由 Python 脚本从 OHLCV 序列计算并写入 JSON。**严禁调用视觉模型（CV/VLM）看图识别形态或猜价格，严禁调用任何图像生成模型绘制 K 线图。**
@@ -64,7 +65,7 @@ kline-structure-chart/
 │   ├── analyze_and_forecast.py       # 主 CLI：取数 -> 结构层 -> 分析 -> JSON+PNG+HTML (+回测)
 │   ├── contracts.py                  # TypedDict 契约、数据来源枚举与质量判定、NaN/分位单调校验、安全文件名
 │   ├── market_rules.py               # CN/HK/US 日历、涨跌停、价位表、印花税、收盘判定、代码映射与点位复权
-│   ├── data_gateway.py               # 新浪/Yahoo/腾讯取数、厂商数据校验、除权除息事件、未收盘K线拆分、基准配对
+│   ├── data_gateway.py               # 新浪/Yahoo/腾讯取数、厂商数据校验、除权除息事件、腾讯快照补全简称/ST/港股每手股数、未收盘K线拆分、基准配对
 │   ├── structure.py                  # 结构层纯计算（拐点/轨道/ABC/斐波那契/阶梯/三条推演），JSON 与 PNG 共用
 │   ├── indicators.py                 # SMA/EMA/MACD/RSI/Stoch/ATR/ADX/Supertrend/BB/RVOL/VWAP + 量价因子
 │   ├── patterns.py                   # 因果核平滑、因果 ZigZag、蜡烛形态、双底/双顶/通道、RSI 背离、SMC、Volume Profile
@@ -74,6 +75,7 @@ kline-structure-chart/
 │   ├── evaluation.py                 # 因果回放审计、线上计划逐日回放回测
 │   ├── analysis.py                   # 纯计算编排器与历史回放快照
 │   ├── render_html.py                # 单文件离线交互 HTML（XSS 安全转义、数据质量横幅）
+│   ├── render_report_md.py           # 按 SKILL.md 回复契约生成中文 Markdown 报告（数字全部取自 JSON）
 │   └── render_structure_chart.py     # 1920x1160 PNG 渲染器（按市场配色；保留 v4.1 CLI）
 ├── references/                       # 公式字典与三市场制度规则（单一信息源）
 ├── artifacts/                        # 运行产物（生成物，不提交、不随 skill 分发）
@@ -83,6 +85,7 @@ kline-structure-chart/
     ├── test_indicator_golden.py      # 在录制的真实行情上与 TA-Lib 逐点对照
     ├── test_data_sources.py          # 录制数据端到端回放 + 网络/厂商数据异常 mock
     ├── test_docs_contract.py         # 文档契约：无绝对路径、引用文件存在、目录树与代码同步
+    ├── test_report_and_metadata.py   # 代码校验、行情快照元数据（简称/ST/每手股数）与 Markdown 报告
     ├── check_days_invariance.py      # 跨展示窗口 (60~500日) 结构层不变性回归校验
     ├── record_fixtures.py            # 联网录制真实行情 fixture（手动执行）
     └── fixtures/
@@ -126,6 +129,8 @@ uv run --directory kline-structure-chart python tests/check_days_invariance.py -
 ### 3.4 重新录制真实行情 fixture（需联网，按需手动执行）
 ```bash
 uv run --directory kline-structure-chart python tests/record_fixtures.py
+# 只补录某一类（sina / yahoo / tencent / events / quotes），其余文件与 MANIFEST 条目保持不变
+uv run --directory kline-structure-chart python tests/record_fixtures.py --only quotes
 ```
 
 ---

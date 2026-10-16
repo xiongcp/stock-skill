@@ -4,8 +4,9 @@
 一次运行同时产出：
 1. result.json        — 通过 assets/analysis.schema.json 顶层契约校验的指标、形态公式证据、三重屏障与15步分位区间
 2. preview.png        — 供 AI 聊天窗口直接内嵌展示的 1920x1160 高清结构与预测图
-3. dashboard.html     — 零外部依赖、支持图层开关、公式悬停、相对强弱切换与时间推演回放的单文件交互终端
+3. dashboard.html     — 零外部依赖、支持图层开关、悬停查看 OHLC/均线/RSI/分位、相对强弱切换与时间推演回放的单文件交互终端
 4. backtest.json      — (当传入 --backtest 时) 因果回放审计、线上计划逐日回放回测与分位区间覆盖率审计
+5. report.md          — 按 SKILL.md 回复契约组织的中文分析报告，数字全部取自 result.json（与 backtest.json）
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from contracts import AnalysisRequest, sanitize_filename, validate_report
 from data_gateway import load_bundle
 from evaluation import run_causal_replay_audit, run_plan_backtest
 from render_html import render_html
+from render_report_md import render_report_markdown
 from render_structure_chart import render as render_png_chart
 from structure import compute_structure_layer
 
@@ -34,9 +36,9 @@ def run_pipeline(
     disp_days = int(request.get("display_bars") or 120)
     horizon_bars = int(request.get("horizon_bars") or 15)
     if not 60 <= disp_days <= 500:
-        raise RuntimeError(f"--days must be between 60 and 500, got {disp_days}")
+        raise ValueError(f"--days must be between 60 and 500, got {disp_days}")
     if not 1 <= horizon_bars <= 60:
-        raise RuntimeError(f"--horizon-bars must be between 1 and 60, got {horizon_bars}")
+        raise ValueError(f"--horizon-bars must be between 1 and 60, got {horizon_bars}")
     output_dir.mkdir(parents=True, exist_ok=True)
     bundle = load_bundle(
         request,
@@ -80,6 +82,7 @@ def run_pipeline(
         "dashboard_html": str(html_path.resolve()),
     }
 
+    bt_payload: dict[str, Any] | None = None
     if run_backtest:
         bt_res = run_plan_backtest(
             bundle,
@@ -98,9 +101,14 @@ def run_pipeline(
         bt_path.write_text(json.dumps(bt_payload, ensure_ascii=False, indent=2), encoding="utf-8")
         report["rendered_paths"]["backtest_json"] = str(bt_path.resolve())
 
+    md_path = output_dir / f"{safe_sym}_report.md"
+    report["rendered_paths"]["report_md"] = str(md_path.resolve())
+
     validate_report(report)
     render_html(report, html_path)
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 面向回答的中文 Markdown 报告：数字全部取自上面的 JSON，供 agent 直接转述
+    md_path.write_text(render_report_markdown(report, bt_payload), encoding="utf-8")
     return report
 
 
@@ -129,7 +137,7 @@ def main() -> None:
         help="Candlestick color scheme (default: auto = cn_red_up for CN/HK, us_green_up for US)",
     )
     parser.add_argument("--account-equity", type=float, default=None, help="Optional account equity for lot-size position sizing")
-    parser.add_argument("--max-risk-pct", type=float, default=0.01, help="Max risk fraction per trade (default 0.01 = 1%)")
+    parser.add_argument("--max-risk-pct", type=float, default=0.01, help="Max risk fraction per trade (default 0.01 = 1%%)")
     parser.add_argument("--input", default=None, help="Optional local real JSON bundle or bar array file")
     parser.add_argument("--output-dir", required=True, help="Output directory for JSON + PNG + HTML artifacts")
     parser.add_argument("--offline", action="store_true", help="Disable live network requests (requires --input local file)")
@@ -174,7 +182,11 @@ def main() -> None:
             backtest_step=max(1, args.backtest_step),
         )
     except RuntimeError as exc:
+        # 真实行情取不到：数据源失败、限流、数据损坏或历史不足
         raise SystemExit(f"[DATA_UNAVAILABLE] {exc}") from exc
+    except ValueError as exc:
+        # 参数或输入不合法：代码无法识别、参数越界、本地文件格式错误
+        raise SystemExit(f"[INVALID_ARGUMENT] {exc}") from exc
     summary_out = {
         "meta": report["meta"],
         "quality": {k: report["quality"][k] for k in ("status", "data_source_class", "benchmark_source", "warnings", "notes")},

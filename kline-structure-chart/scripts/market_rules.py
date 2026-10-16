@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
@@ -131,19 +132,39 @@ def sina_symbol_for(symbol: str) -> str:
     return f"{prefix}{code}"
 
 
+# 美股代码白名单：1~6 位字母数字，可带一个份额类别后缀（BRK.B / BF-B）。代码会拼进请求 URL，必须先校验
+US_TICKER_PATTERN = re.compile(r"[A-Z0-9]{1,6}(?:[.-][A-Z0-9]{1,3})?")
+
+
 def yahoo_symbol_for(symbol: str) -> str:
-    """由本地代码推导 Yahoo 代码：01810.HK -> 1810.HK，00700.HK -> 0700.HK，NVDA.US -> NVDA。"""
+    """由本地代码推导 Yahoo 代码：01810.HK -> 1810.HK，00700.HK -> 0700.HK，NVDA.US -> NVDA，BRK.B.US -> BRK-B。"""
     upper = symbol.strip().upper()
     if upper in YAHOO_ALIASES:
         return YAHOO_ALIASES[upper]
-    code, _, suffix = upper.partition(".")
+    code, _, suffix = upper.rpartition(".")
     if suffix == "HK":
         if not code.isdigit():
             raise ValueError(f"Cannot derive Yahoo symbol for {symbol!r}")
         return f"{int(code):04d}.HK"
-    if suffix == "US" and code:
-        return code
+    if suffix == "US" and US_TICKER_PATTERN.fullmatch(code):
+        return code.replace(".", "-")
     raise ValueError(f"Cannot derive Yahoo symbol for {symbol!r}")
+
+
+def tencent_quote_code_for(symbol: str, market: str) -> str:
+    """腾讯行情快照代码：600519.SH -> sh600519，01810.HK -> hk01810，HSTECH.HK -> hkHSTECH，BRK.B.US -> usBRK.B。"""
+    upper = symbol.strip().upper()
+    if market == "CN":
+        return sina_symbol_for(upper)
+    code, _, suffix = upper.rpartition(".")
+    if market == "HK" and suffix == "HK":
+        if code.isdigit():
+            return f"hk{int(code):05d}"
+        if code in ("HSI", "HSTECH"):
+            return f"hk{code}"
+    if market == "US" and suffix == "US" and US_TICKER_PATTERN.fullmatch(code):
+        return f"us{code}"
+    raise ValueError(f"Cannot derive Tencent quote code for {symbol!r}")
 
 
 def yahoo_events_symbol_for(symbol: str) -> str:
@@ -172,15 +193,31 @@ def is_daily_bar_complete(day_str: str, market: str, now: datetime | None = None
     return now_local.time() >= close_time
 
 
+def latest_closed_session(market: str, now: datetime | None = None) -> str:
+    """交易所本地时间下最近一个已收盘的交易日（按休市表判断，超出覆盖范围时按工作日估算）。"""
+    tz_name, close_time = MARKET_SESSIONS[market]
+    now_local = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo(tz_name))
+    day = now_local.date()
+    if not (is_trading_day(day, market) and now_local.time() >= close_time):
+        day -= timedelta(days=1)
+        while not is_trading_day(day, market):
+            day -= timedelta(days=1)
+    return day.isoformat()
+
+
+_ST_NAME_PREFIX = re.compile(r"^\*?S?\*?ST")
+
+
 def is_st_instrument(symbol: str = "", name: str = "", is_st: bool = False) -> bool:
-    """识别风险警示股票（ST / *ST / SST / S*ST）：支持显式 is_st 参数或从证券名称/代码标识识别。"""
+    """识别 A 股风险警示股票：显式 is_st，或证券简称以 ST / *ST / SST / S*ST 开头。
+
+    风险警示制度只存在于 A 股，港股、美股一律返回 False；只认名称前缀，避免英文名中间含 "ST" 误判。
+    """
     if is_st:
         return True
-    for text in (name, symbol):
-        u = (text or "").upper()
-        if "ST" in u and not u.endswith((".US", ".HK")):
-            return True
-    return False
+    if symbol and not symbol.strip().upper().endswith((".SH", ".SZ", ".BJ")):
+        return False
+    return bool(_ST_NAME_PREFIX.match(re.sub(r"\s+", "", name or "").upper()))
 
 
 def _cn_lot_rules(asset_type: str, board: str) -> tuple[int, int, int]:
@@ -423,7 +460,8 @@ def price_decimals(
 ) -> int:
     """返回价格展示与取整应保留的小数位数（至少 2 位，ETF/低价港股 3 位，1美元以下美股 4 位）。"""
     tick = tick_size_for(max(price, 1e-4), market, asset_type, day_str)
-    exp = max(2, -int(tick.as_tuple().exponent))
+    # 价位表以 "0.020" 这类定宽字符串存储，先 normalize 去掉尾随 0，避免 0.02 档被当成 3 位小数
+    exp = max(2, -int(tick.normalize().as_tuple().exponent))
     return exp
 
 
@@ -452,7 +490,9 @@ def get_market_microstructure_rules(
     is_st: bool = False,
     is_ipo_no_limit: bool = False,
     day_str: str | None = None,
+    board_lot: int | None = None,
 ) -> dict[str, Any]:
+    """board_lot：港股每手股数（各股票不同，如小米 200、汇丰 400），由行情快照提供；缺省时按 100 股假设并标注来源。"""
     st_flag = is_st_instrument(symbol, is_st=is_st)
     limit_pct = get_daily_price_limit_pct(
         market, asset_type, symbol, is_st=st_flag, is_ipo_no_limit=is_ipo_no_limit, day_str=day_str
@@ -491,7 +531,12 @@ def get_market_microstructure_rules(
     if market == "HK":
         # 港股印花税自 2023-11-17 起买卖双方各 0.1%；ETF 豁免
         hk_stamp = 10.0 if asset_type == "equity" else 0.0
-        lot = 100 if asset_type == "equity" else 1
+        if not tradable:
+            lot, lot_source = 1, "NOT_TRADABLE"
+        elif board_lot and int(board_lot) > 0:
+            lot, lot_source = int(board_lot), "PROVIDED"
+        else:
+            lot, lot_source = 100, "ASSUMED_DEFAULT"
         return {
             "market": "HK",
             "settlement": "T+0_TRADING_T+2_CLEARING" if tradable else "INDEX_NON_TRADABLE",
@@ -500,6 +545,7 @@ def get_market_microstructure_rules(
             "lot_size": lot,
             "min_order_shares": lot,
             "lot_step": lot,
+            "lot_size_source": lot_source,
             "color_scheme": "cn_red_up",
             "session_hours_local": "09:30-12:00, 13:00-16:00 Asia/Hong_Kong",
             "commission_bps": 3.0,

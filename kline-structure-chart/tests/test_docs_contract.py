@@ -9,6 +9,7 @@ import pytest
 SKILL_DIR = Path(__file__).resolve().parent.parent
 REPO_DIR = SKILL_DIR.parent
 AGENTS = REPO_DIR / "AGENTS.md"
+README = REPO_DIR / "README.md"
 SKILL = SKILL_DIR / "SKILL.md"
 DOCS = [SKILL, *sorted((SKILL_DIR / "references").glob("*.md"))]
 
@@ -19,8 +20,14 @@ def _agents_text() -> str:
     return AGENTS.read_text(encoding="utf-8")
 
 
+def _readme_text() -> str:
+    if not README.exists():
+        pytest.skip("README.md 不随 skill 分发，仅在源码仓库中检查")
+    return README.read_text(encoding="utf-8")
+
+
 def test_no_machine_specific_absolute_paths() -> None:
-    docs = DOCS + ([AGENTS] if AGENTS.exists() else [])
+    docs = DOCS + [p for p in (AGENTS, README) if p.exists()]
     for doc in docs:
         text = doc.read_text(encoding="utf-8")
         assert not re.search(r"(/Users/|/home/|[A-Za-z]:\\\\)", text), f"{doc.name} 含本机绝对路径"
@@ -37,7 +44,7 @@ def test_skill_md_references_existing_files() -> None:
 
 def test_skill_md_keeps_runtime_contract_self_contained() -> None:
     text = SKILL.read_text(encoding="utf-8")
-    for must in ("DATA_UNAVAILABLE", "quality.status", "rule_score", "calibration_audit", "risk_officer_veto", "禁止合成数据"):
+    for must in ("DATA_UNAVAILABLE", "INVALID_ARGUMENT", "quality.status", "rule_score", "calibration_audit", "risk_officer_veto", "禁止合成数据"):
         assert must in text, f"SKILL.md 缺少运行期规则关键字 {must}"
 
 
@@ -57,8 +64,7 @@ def test_agents_md_directory_tree_matches_code() -> None:
     assert listed == actual, f"目录树与代码不同步：多列 {listed - actual}，漏列 {actual - listed}"
 
 
-def test_agents_md_commands_use_relative_existing_paths() -> None:
-    text = _agents_text()
+def _assert_bash_blocks_use_existing_paths(text: str) -> None:
     blocks = re.findall(r"```bash\n(.*?)```", text, re.S)
     assert blocks
     for block in blocks:
@@ -68,6 +74,33 @@ def test_agents_md_commands_use_relative_existing_paths() -> None:
             assert (SKILL_DIR / script).exists(), script
         for data_dir in re.findall(r"--data (\S+)", block):
             assert (SKILL_DIR / data_dir).is_dir(), data_dir
+
+
+def test_agents_md_commands_use_relative_existing_paths() -> None:
+    _assert_bash_blocks_use_existing_paths(_agents_text())
+
+
+def test_readme_commands_and_links_resolve() -> None:
+    text = _readme_text()
+    _assert_bash_blocks_use_existing_paths(text)
+    for target in re.findall(r"\]\(((?!https?://)[^)#\s]+)\)", text):
+        assert (REPO_DIR / target).exists(), f"README 链接不存在: {target}"
+
+
+def test_readme_cli_parameters_and_outputs_match_code() -> None:
+    """README 的参数表、错误前缀与产物文件名必须与 CLI 实现一致。"""
+    text = _readme_text()
+    cli = (SKILL_DIR / "scripts" / "analyze_and_forecast.py").read_text(encoding="utf-8")
+    table = text.split("### 5.1", 1)[1].split("### 5.2", 1)[0]
+    documented = set(re.findall(r"`(--[\w-]+)`", table))
+    actual = set(re.findall(r'add_argument\(\s*"(--[\w-]+)"', cli))
+    assert documented == actual, f"README 参数表与 CLI 不同步：多列 {documented - actual}，漏列 {actual - documented}"
+    for label in set(re.findall(r"\[([A-Z_]{5,})\]", text)):
+        assert f"[{label}]" in cli, f"README 提到的错误前缀 [{label}] 在 CLI 中不存在"
+    outputs = text.split("## 6.", 1)[1].split("## 7.", 1)[0]
+    documented_files = set(re.findall(r"`\*(_\w+\.\w+)`", outputs))
+    actual_files = set(re.findall(r'f"\{safe_sym\}(_\w+\.\w+)"', cli))
+    assert documented_files == actual_files, f"README 产物表与 CLI 不同步：{documented_files ^ actual_files}"
 
 
 def test_fixture_naming_does_not_impersonate_real_sources() -> None:

@@ -1,0 +1,290 @@
+"""把 AnalysisReport（及可选回测结果）确定性地渲染为中文 Markdown 分析报告 `*_report.md`。
+
+报告按 SKILL.md「回复契约」的顺序组织，agent 可直接据此回答用户：
+- 所有数字原样取自 report / backtest，不做任何再计算；价格按品种最小价位位数格式化。
+- 数据质量为 UNAVAILABLE 时只输出告警，不输出任何价位与结论。
+- 规则分、区间、回测统计都附带口径说明，避免被误读为胜率或方向预测。
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from market_rules import price_decimals
+
+MARKET_CN = {"CN": "A股", "HK": "港股", "US": "美股"}
+ASSET_CN = {"index": "指数", "equity": "股票", "etf": "ETF"}
+ADJUSTMENT_CN = {"raw": "不复权", "split": "仅拆股复权", "total_return": "前复权（含分红送转）"}
+DIRECTION_CN = {"BULLISH": "看多", "BEARISH": "看空", "NEUTRAL": "中性"}
+SETTLEMENT_CN = {
+    "T+1": "T+1 交易（当日买入、次日才能卖出）",
+    "T+0_TRADING_T+2_CLEARING": "可当日回转交易、T+2 交收",
+    "T+1_SEC_SETTLEMENT": "可当日回转交易、T+1 交收",
+    "INDEX_NON_TRADABLE": "指数本身不可交易",
+}
+DISCLAIMER = "以上为规则化技术分析，仅供研究参考，不构成投资建议。"
+
+
+def _cell(text: Any) -> str:
+    """表格单元格转义：竖线会破坏 Markdown 表格。"""
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
+def _pct(value: Any, digits: int = 1) -> str:
+    return "—" if value is None else f"{float(value) * 100:.{digits}f}%"
+
+
+def _num(value: Any, digits: int = 2) -> str:
+    return "—" if value is None else f"{float(value):.{digits}f}"
+
+
+def render_report_markdown(report: dict[str, Any], backtest: dict[str, Any] | None = None) -> str:
+    meta = report["meta"]
+    quality = report["quality"]
+    market = meta["market"]
+    asset_type = meta["asset_type"]
+    bars = report.get("series_export", {}).get("bars") or []
+    last_close = float(bars[-1]["close"]) if bars else 0.0
+    decimals = price_decimals(last_close, market, asset_type, meta["as_of"])
+
+    def price(value: Any) -> str:
+        return "—" if value is None else f"{float(value):.{decimals}f}"
+
+    lines: list[str] = [
+        f"# {meta['name']}（{meta['symbol']}）K 线结构分析报告",
+        "",
+        (
+            f"> 数据截至 **{meta['as_of']}**（{MARKET_CN.get(market, market)} · {ASSET_CN.get(asset_type, asset_type)}）"
+            f"｜数据源 `{meta['data_source']}`｜复权 {ADJUSTMENT_CN.get(meta.get('adjustment'), meta.get('adjustment'))}"
+            f"｜数据质量 **{quality['status']}**"
+        ),
+        "",
+    ]
+
+    if quality.get("warnings"):
+        lines += ["**数据告警**", ""] + [f"- {w}" for w in quality["warnings"]] + [""]
+    if quality["status"] == "UNAVAILABLE":
+        lines += [
+            "> **数据不可用：本报告不提供任何价位、区间与结论。** 请换用真实行情数据源后重新运行。",
+            "",
+            "---",
+            f"*{DISCLAIMER}*",
+            "",
+        ]
+        return "\n".join(lines)
+    if quality.get("notes"):
+        lines += ["**数据备注**", ""] + [f"- {n}" for n in quality["notes"]] + [""]
+
+    debate = report["debate_and_veto"]
+    decision = report["meta_labeling_decision"]
+    mtf = report["multi_timeframe_score"]
+    if debate.get("risk_officer_veto"):
+        lines += ["> **风控否决**：以下条件触发否决，本报告不构成任何做多建议。", ">"]
+        lines += [f"> - {r}" for r in debate.get("veto_reasons", [])]
+        lines += [""]
+
+    # 1. 结论速览
+    lines += [
+        "## 1. 结论速览",
+        "",
+        f"- 结论：{debate['final_verdict_cn']}",
+        f"- 规则分：**{mtf['rule_score']:.1f} / 100**（{mtf['rating_cn']}）。这是确定性规则加权分，不是胜率，也不是上涨概率。",
+        f"- 最新收盘：{price(last_close)}；计划类型：{decision['setup_label_cn']}。",
+        "",
+    ]
+
+    # 2. 大盘环境
+    bench = report["market_benchmark"]
+    lines += ["## 2. 大盘环境（先大盘、后个股）", ""]
+    if bench.get("benchmark_missing"):
+        lines += [
+            "- **缺少大盘基准行情**：无法评估大盘状态与相对强弱，风控已据此否决做多确认。",
+            f"- 以下仅为标的自身状态，不代表大盘：{bench['regime_label_cn']}，状态分 {bench['regime_score']:.1f} / 100。",
+            "",
+        ]
+    elif bench["index_symbol"].upper() == meta["symbol"].upper():
+        lines += [
+            f"- 标的本身即市场基准：{bench['regime_label_cn']}，状态分 {bench['regime_score']:.1f} / 100；不计算相对强弱。",
+            "",
+        ]
+    else:
+        rs = float(bench["relative_strength_vs_index"])
+        rs_text = "跑赢基准" if rs > 1 else ("跑输基准" if rs < 1 else "与基准持平")
+        lines += [
+            "| 基准 | 市场状态 | 状态分 | 近 20 日相对强弱 |",
+            "| --- | --- | --- | --- |",
+            f"| {_cell(bench['index_name'])}（{bench['index_symbol']}） | {bench['regime_label_cn']} "
+            f"| {bench['regime_score']:.1f} / 100 | {rs:.4f}（{rs_text}） |",
+            "",
+            "- 状态分低于 35 时风控会自动否决做多。",
+            "",
+        ]
+
+    # 3. 结构与条件推演
+    levels = report["mathematical_indicators"]["structure_levels"]
+    wedge = levels["wedge_structure"]
+    sc = report["rule_scenarios"]
+    lines += [
+        "## 3. 结构与条件推演（触发 → 目标 → 失效）",
+        "",
+        f"- 当前结构（近 120 日）：{wedge['pattern']}，{wedge['status_text']}。",
+        "",
+        "| 路径 | 触发条件 | 目标位（来源） | 失效条件 |",
+        "| --- | --- | --- | --- |",
+        f"| 上攻 | {_cell(sc['bull']['trigger'])} | {price(sc['bull']['target_price'])}（{_cell(sc['bull']['target_source'])}） "
+        f"| {_cell(sc['bull']['invalidation'])} |",
+        f"| 震荡 | {_cell(sc['neutral']['condition'])} | 区间 {price(sc['neutral']['range'][0])} ~ {price(sc['neutral']['range'][1])} | — |",
+        f"| 下探 | {_cell(sc['bear']['trigger'])} | {price(sc['bear']['target_price'])}（{_cell(sc['bear']['target_source'])}） "
+        f"| {_cell(sc['bear']['invalidation'])} |",
+        "",
+    ]
+    ladder = levels.get("key_levels") or {}
+    res = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("resistances") or [])[:3]]
+    sup = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("supports") or [])[:3]]
+    lines += [
+        f"- 上方压力（由近到远）：{'；'.join(res) if res else '无'}",
+        f"- 下方支撑（由近到远）：{'；'.join(sup) if sup else '无'}",
+        "",
+    ]
+
+    # 4. 风控计划
+    plan = report["triple_barrier_plan"]
+    rules = plan["market_microstructure"]
+    sizing = plan["position_sizing"]
+    lines += [
+        "## 4. 风控计划（三重屏障）",
+        "",
+        "| 计划类型 | 入场区 | 止损 | TP1 | TP2 | 时间屏障 | 扣费后盈亏比 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+        f"| {decision['setup_label_cn']} | {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])} "
+        f"| {price(plan['stop_loss_barrier'])} | {price(plan['take_profit_1'])} | {price(plan['take_profit_2'])} "
+        f"| {plan['time_barrier_bars']} 根 K 线 | {plan['risk_reward_ratio']:.2f} |",
+        "",
+    ]
+    limit = rules.get("daily_price_limit_pct")
+    rule_bits = [
+        SETTLEMENT_CN.get(rules["settlement"], f"交收 {rules['settlement']}"),
+        f"涨跌幅限制 {'无' if limit is None else f'±{limit * 100:.0f}%'}",
+        f"每手 {rules['lot_size']} 股（最小申报 {rules.get('min_order_shares', rules['lot_size'])} 股，步长 {rules.get('lot_step', rules['lot_size'])} 股）",
+        f"印花税 买 {rules.get('stamp_duty_buy_bps', 0.0):g} / 卖 {rules['stamp_duty_sell_bps']:g} bps",
+    ]
+    lines += [f"- 交易制度：{'；'.join(rule_bits)}。"]
+    if rules.get("lot_size_source") == "ASSUMED_DEFAULT":
+        lines += ["- 港股每手股数为假设值（100 股），下单前请向券商核对。"]
+    if rules.get("settlement_note"):
+        lines += [f"- 注意：{rules['settlement_note']}。"]
+    if rules.get("day_trading_rule"):
+        lines += [f"- 日内交易：{rules['day_trading_rule']}。"]
+    if sizing.get("recommended_shares") is not None:
+        lines += [
+            f"- 仓位：账户 {sizing['account_equity']:,.2f}、单笔风险 {sizing['max_risk_pct']:.2f}% 时，"
+            f"按止损距离计算为 **{sizing['recommended_shares']} 股**（约 {sizing['estimated_notional']:,.2f} {meta['currency']}）。"
+        ]
+    elif sizing.get("reason"):
+        lines += [f"- 仓位：{sizing['reason']}"]
+    if debate.get("risk_officer_veto"):
+        lines += ["- 风控已否决：以上点位只用于观察与复核，不构成做多建议。"]
+    lines += [""]
+
+    # 5. 形态与信号证据
+    lines += ["## 5. 形态与信号证据（公式可复核）", ""]
+    patterns = report.get("algebraic_patterns_detected") or []
+    for p in patterns[:6]:
+        lines += [
+            f"- {p['name_cn']}（{DIRECTION_CN.get(p['direction'], p['direction'])}，{p.get('confirmed_at') or p.get('observed_at')}）："
+            f"`{p['formula_verified']}`"
+        ]
+    for s in report.get("strategy_signals") or []:
+        if s.get("direction") != "NEUTRAL":
+            lines += [f"- 策略 {s['name_cn']} → {s['state']}：`{s['formula_verified']}`"]
+    breaks = (report.get("smc_structures") or {}).get("structure_breaks") or []
+    if breaks:
+        last_break = breaks[-1]
+        lines += [f"- 最近一次结构破位：{last_break['type']}（{last_break['day']}，破位价 {price(last_break['broken_level'])}）"]
+    if not patterns and not breaks and not any(s.get("direction") != "NEUTRAL" for s in report.get("strategy_signals") or []):
+        lines += ["- 当前窗口未触发蜡烛形态、背离或策略信号。"]
+    lines += [""]
+
+    # 6. 未来区间
+    fp = report["future_projection_15d"]
+    audit = fp["calibration_audit"]
+    horizon = int(fp["horizon_bars"])
+    steps = sorted({h for h in (1, 5, 10, horizon) if 1 <= h <= horizon})
+    lines += [
+        f"## 6. 未来 {horizon} 个交易日价格区间（只描述波动幅度，不含方向判断）",
+        "",
+        "| 日期 | 第几日 | 80% 下沿 q10 | 50% 下沿 q25 | 中枢 q50 | 50% 上沿 q75 | 80% 上沿 q90 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for h in steps:
+        i = h - 1
+        lines += [
+            f"| {fp['horizon_dates'][i]} | {h} | {price(fp['q10'][i])} | {price(fp['q25'][i])} | {price(fp['base_median_q50'][i])} "
+            f"| {price(fp['optimistic_q75'][i])} | {price(fp['q90'][i])} |"
+        ]
+    promoted = "已达标" if fp["promotion_status"] == "PROMOTED" else "校准观察期"
+    lines += [
+        "",
+        "- 中枢 q50 就是最新收盘价（不加任何漂移），区间宽度来自历史波动的分期限校准。",
+        (
+            f"- 历史样本外实测覆盖率：50% 区间 {_pct(audit['nominal_50pct_empirical_coverage'])}，"
+            f"80% 区间 {_pct(audit['nominal_80pct_empirical_coverage'])}（评估样本 {audit['evaluation_samples']} 个，"
+            f"相邻样本结果期重叠，约等于 {audit['effective_independent_samples']} 个独立样本；状态：{promoted}）。"
+        ),
+    ]
+    if audit.get("uncalibrated_overlays"):
+        lines += [f"- 未经历史校准的放大项：{'；'.join(audit['uncalibrated_overlays'])}。"]
+    cal = fp.get("calendar_coverage") or {}
+    if cal and not cal.get("covered", True):
+        lines += [f"- {len(cal['estimated_dates'])} 个未来日期超出休市表覆盖范围（至 {cal['coverage_end']}），按工作日估算。"]
+    lines += ["- 这是逐日的边际区间，不代表整条价格路径的联合概率。", ""]
+
+    # 7. 回测
+    if backtest:
+        bt = backtest.get("backtest") or {}
+        audit_bt = backtest.get("causal_replay_audit") or {}
+        window = bt.get("decision_window") or {}
+        lines += [
+            "## 7. 历史计划回放回测",
+            "",
+            f"- 回放区间 {window.get('start_day')} ~ {window.get('end_day')}，共 {window.get('decisions')} 个决策日；"
+            f"规则：{bt.get('entry_rule')}。",
+            "",
+            "| 口径 | 成交笔数 | 胜率（95% 区间） | 累计收益 | 最大回撤 | 盈亏比 |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        for label, key in (("全部做多信号", "all_long_signals"), ("确认做多", "long_confirmed"), ("观察做多", "watch_long_setup")):
+            row = bt.get(key) or {}
+            if not row.get("trades"):
+                lines += [f"| {label} | 0 | — | — | — | — |"]
+                continue
+            ci = row.get("win_rate_95ci_pct")
+            ci_text = f"{row['win_rate_pct']:.1f}%" + (f"（{ci[0]:.1f}% ~ {ci[1]:.1f}%）" if ci else "")
+            lines += [
+                f"| {label} | {row['trades']} | {ci_text} | {row['cumulative_return_pct']:.2f}% "
+                f"| {row['max_drawdown_pct']:.2f}% | {row['profit_factor']:.2f} |"
+            ]
+        lines += ["", f"- 同期买入持有收益：{bt.get('buy_and_hold_return_pct', 0):.2f}%。"]
+        if bt.get("sample_size_warning"):
+            lines += [f"- 样本提示：{bt['sample_size_warning']}。"]
+        if audit_bt:
+            lines += [
+                f"- 无前视审计：{'通过' if audit_bt.get('passed') else '未通过'}"
+                f"（检查 {audit_bt.get('checked_cutoffs')} 个截面，差异 {audit_bt.get('mismatches_count')} 处）。"
+            ]
+        lines += [""]
+
+    # 8. 文件
+    paths = report.get("rendered_paths") or {}
+    file_labels = (
+        ("report_md", "本报告"),
+        ("result_json", "完整计算结果 JSON"),
+        ("dashboard_html", "离线交互看板 HTML"),
+        ("preview_png", "结构推演图 PNG"),
+        ("backtest_json", "回测明细 JSON"),
+    )
+    listed = [(label, paths[key]) for key, label in file_labels if paths.get(key)]
+    if listed:
+        lines += ["## 8. 产物文件", ""] + [f"- {label}：`{path}`" for label, path in listed] + [""]
+
+    lines += ["---", f"*{DISCLAIMER}*", ""]
+    return "\n".join(lines)

@@ -35,10 +35,11 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 - `--days 60~500` 只改变主图显示根数，不影响任何计算结果。
 - 默认复权为个股/ETF 前复权含分红（`total_return`），指数为原始价。
 - `--account-equity` 只在用户给出账户净值时传入；未提供时报告不会给出股数。
-- `--st` / `--name` 用于标记 A 股 ST/\*ST 风险警示股票；`--ipo-no-limit` 用于标记上市前 5 日无涨跌停新股；`--color-scheme` 可切换涨跌配色。
+- 证券简称、A 股 ST/\*ST 标识与港股每手股数自动取自腾讯行情快照；取不到时报告 `quality.notes` 会写明，可用 `--name` / `--st` 手动指定。`--ipo-no-limit` 标记上市前 5 日无涨跌停新股，`--color-scheme` 切换涨跌配色。
 - 生产与测试一律禁止合成数据：不传 `--input` 本地真实行情文件时，断网或数据源异常会直接以 `[DATA_UNAVAILABLE]` 退出。
 
 产物（文件名以标的代码开头）：
+- `*_report.md`：按下文"回复契约"组织好的中文分析报告，数字全部取自 `*_result.json`，**回答用户时以它为骨架**。
 - `*_result.json`：全部计算结果，已通过 `assets/analysis.schema.json` 顶层契约校验。
 - `*_preview.png`：结构推演图，配色随市场（A股/港股红涨绿跌，美股绿涨红跌）。
 - `*_dashboard.html`：离线交互看板，提供 7 个图层开关、悬停查看 OHLC/均线/RSI/预测分位、相对强弱切换、历史回放滑块和导出 PNG。
@@ -48,15 +49,17 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 
 ## 二、运行后必检（按顺序，任一不满足即停止解读）
 
-1. **退出码**：脚本以 `[DATA_UNAVAILABLE]` 非零退出时，如实告诉用户行情不可用及原因，不输出任何价位，不得改用合成或估算数据。
+1. **退出码**：脚本非零退出时不输出任何价位。`[DATA_UNAVAILABLE]` 表示真实行情取不到，如实告诉用户原因，不得改用合成或估算数据；`[INVALID_ARGUMENT]` 表示代码或参数有误，按"失败处理"请用户补充。
 2. **`quality.status`**：
    - `UNAVAILABLE` → 不输出任何价位与结论。
    - `PARTIAL` → 回答首段逐条列出 `quality.warnings`，再谨慎解读。
    - `OK` → 正常解读。
-3. **`quality.notes`**：逐条转述，例如"某日 K 线未收盘，已排除出计算"、"复权未生效"、"未来日期超出休市表覆盖范围，按工作日估算"。
+3. **`quality.notes`**：逐条转述，例如"某日 K 线未收盘，已排除出计算"、"数据只到某日，最近已收盘交易日的日线数据源尚未提供"、"复权未生效"、"未来日期超出休市表覆盖范围，按工作日估算"。
 4. **空值**：`future_projection_15d.volatility_scaling.vix` 为 `null` 表示没有取得 VIX，不得自行补数。
 
 ## 三、回复契约（按此顺序组织回答）
+
+`*_report.md` 已按以下顺序写好，直接据此转述即可：不得改动其中任何数字，不得补充报告里没有的价位；用户追问细节时再查 `*_result.json`。
 
 1. **数据说明**：数据源（`meta.data_source`）、截止日（`meta.as_of`）、复权口径（`meta.adjustment`），以及上一步需要转述的告警或备注。
 2. **大盘先行**：基准的 `market_benchmark.regime`、`regime_score`，以及个股的 `relative_strength_vs_index`。
@@ -79,10 +82,11 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 | 情况 | 处理 |
 | --- | --- |
 | `[DATA_UNAVAILABLE]`（网络失败、代码无法映射、限流、数据损坏） | 转述错误原因，请用户核对代码格式或稍后重试；不估算、不改用合成数据 |
-| `Cannot resolve market` / `Ambiguous symbol` | 请用户补充交易所后缀或 `--market`，例如 `000001.SH`（上证指数）与 `000001.SZ`（平安银行）的区别 |
+| `[INVALID_ARGUMENT]`（`Cannot resolve market` / `Ambiguous symbol` / 参数越界） | 请用户补充交易所后缀或 `--market`，例如 `000001.SH`（上证指数）与 `000001.SZ`（平安银行）的区别；参数越界时改正后重跑 |
 | `历史长度不足` | 说明该标的上市时间太短或 `--as-of` 太早，无法计算 |
 | 基准指数取不到 | 整次分析失败，按 `[DATA_UNAVAILABLE]` 处理（不得跳过大盘直接分析个股） |
 | `quality.notes` 提示复权未生效（如北交所） | 告知价格为不复权原始价，除权缺口可能被误识别 |
+| `quality.notes` 提示港股每手股数或证券简称未取得 | 转述该提示；仓位股数按假设值计算，提醒用户下单前向券商核对 |
 | 用户要求下单、预测确定涨跌或给出个性化仓位 | 说明本技能只做规则化技术分析，不替用户交易、不承诺方向 |
 
 ## 五、参考文档（按需读取）

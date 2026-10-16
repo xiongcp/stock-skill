@@ -48,3 +48,12 @@
   - 乘数：$m_{h,\alpha}$ 取 $\{s_{i,h}\}$ 的有限样本分位（第 $\lceil (n+1)\alpha \rceil$ 个次序统计量），$\alpha \in \{0.5, 0.8\}$。
   - 区间：$C_{\text{now}}(1 \pm m_{h,\alpha}\,\sigma_{\text{now}}\sqrt{h})$，再按涨跌停逐步截断、按价位表取整。
   - 审计：对每个截面 $e$ 只用 $j + h \le e$ 的已成熟分数估计乘数，按同一构造施加涨跌停截断与价位表取整后直接检验 $e+h$ 的实际收盘价是否落在区间内，得到 `calibration_audit` 的滚动样本外覆盖率及相对随机游走的平均绝对误差（`q50_mae_pct` / `random_walk_mae_pct`）；相邻截面结果期重叠，有效独立样本约为样本数 / H。VIX、财报放大属于未校准叠加项，启用时列入 `uncalibrated_overlays`。
+
+## 6. 回测统计区间
+
+- **胜率 Wilson 95% 区间**（成交 $n \ge 2$ 时提供）：$\hat p = w/n$，$z = 1.96$，
+  $$\frac{\hat p + \frac{z^2}{2n} \pm z\sqrt{\frac{\hat p(1-\hat p)}{n} + \frac{z^2}{4n^2}}}{1 + \frac{z^2}{n}}$$
+  小样本或全胜/全负时不会像 Bootstrap 百分位法那样退化成 $[\hat p, \hat p]$（例：3 笔全亏为 0%~56.15%）。
+- **单笔均值收益 95% 区间**：固定种子的 Bootstrap 百分位法（400 次重抽样，取第 2.5%、97.5% 分位）。
+- 成交少于 30 笔时输出 `sample_size_warning`，胜率与夏普等统计量仅供参考。
+

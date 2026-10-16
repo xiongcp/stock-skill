@@ -53,8 +53,11 @@ FONT_CANDIDATES = (
     "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
     "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
     "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",  # Arch Linux
     "/System/Library/Fonts/Hiragino Sans GB.ttc",  # macOS 冬青黑体（W3/W6 双字重，字形清晰现代）
     "/System/Library/Fonts/STHeiti Medium.ttc",    # macOS 备选黑体
+    "C:/Windows/Fonts/msyh.ttc",                   # Windows 微软雅黑
+    "C:/Windows/Fonts/simhei.ttf",                 # Windows 黑体
 )
 
 # 专业深色看盘配色 (TradingView Pro Dark 风格)

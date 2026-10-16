@@ -45,7 +45,14 @@ def replay_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
     def events(symbol: str, range_str: str = "5y") -> list[dict]:
         return [dict(e) for e in load_recorded(f"yahoo_events/{symbol}.json")]
 
+    def quote(code: str) -> dict:
+        path = RECORDED_DIR / "tencent_quote" / f"{code}.json"
+        if not path.exists():
+            raise OSError(f"quote not recorded: {code}")
+        return json.loads(path.read_text(encoding="utf-8"))
+
     monkeypatch.setattr(data_gateway, "fetch_sina_daily_bars", sina)
     monkeypatch.setattr(data_gateway, "fetch_yahoo_daily_bars", yahoo)
     monkeypatch.setattr(data_gateway, "fetch_tencent_index_daily_bars", tencent)
     monkeypatch.setattr(data_gateway, "fetch_yahoo_corporate_actions", events)
+    monkeypatch.setattr(data_gateway, "fetch_tencent_quote_meta", quote)

@@ -625,9 +625,14 @@ def test_c04_c05_c10_backtest_replays_live_plan_with_bootstrap_ci(replay_recorde
     assert sum(bt["actions_seen"].values()) == bt["decision_window"]["decisions"]
     trades = bt["sample_trades"]
     assert trades, "真实茅台历史样本上应产生可核对的计划成交"
-    # C-10：样本数 >= 2 时提供 Bootstrap 95% 置信区间
+    # C-10：样本数 >= 2 时提供胜率 Wilson 区间与均值收益 Bootstrap 95% 区间
     assert bt["all_long_signals"]["win_rate_95ci_pct"] is not None
     assert bt["all_long_signals"]["mean_return_95ci_pct"] is not None
+    for key in ("all_long_signals", "long_confirmed", "watch_long_setup"):
+        row = bt[key]
+        if row["trades"] >= 2:
+            lo, hi = row["win_rate_95ci_pct"]
+            assert lo <= row["win_rate_pct"] <= hi and hi - lo > 0, row
     for tr in trades:
         t = next(i for i, b in enumerate(bundle["target"]["bars"]) if b["day"] == tr["signal_day"])
         pit_bars = rescale_bars_as_of(bundle["target"]["bars"][: t + 2], t)
@@ -793,8 +798,8 @@ def test_g03_to_g07_rendering_invariants_and_low_price_etf(replay_recorded, tmp_
     sl_val = rep_60["triple_barrier_plan"]["stop_loss_barrier"]
     assert f"{sl_val:.3f}" in rep_60["triple_barrier_plan"]["left_side_constraints"]["exit_rule"]
 
-    # CLI 参数边界拦截：--days 超出 60~500 范围必须报错
-    with pytest.raises(RuntimeError, match="--days must be between 60 and 500"):
+    # CLI 参数边界拦截：--days 超出 60~500 范围必须报错（参数错误为 ValueError，CLI 输出 [INVALID_ARGUMENT]）
+    with pytest.raises(ValueError, match="--days must be between 60 and 500"):
         run_pipeline({"symbol": "510300.SH", "market": "CN", "asset_type": "etf", "display_bars": 20}, output_dir=tmp_path / "bad_days")
 
     # G-04 & C-12：--days 60 下每个历史回放快照自带截至 as_of 的历史窗口且含 rule_score，无未来 K 线泄漏
