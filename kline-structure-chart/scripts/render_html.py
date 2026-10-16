@@ -1,0 +1,905 @@
+from __future__ import annotations
+
+import html
+import json
+from pathlib import Path
+from typing import Any
+
+from contracts import AnalysisReport, validate_report
+
+
+def _safe_json_for_script(data: Any) -> str:
+    raw = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    return (
+        raw.replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
+def _render_quality_banner(quality: dict[str, Any]) -> str:
+    """服务端渲染数据质量横幅（全部字串经 html.escape），非 OK 状态为红色告警，盘中提示为灰色备注。"""
+    status = str(quality.get("status") or "UNKNOWN")
+    warnings = [str(w) for w in quality.get("warnings") or []]
+    notes = [str(n) for n in quality.get("notes") or []]
+    parts: list[str] = []
+    if status != "OK" or warnings:
+        items = "".join(f"<li>{html.escape(w)}</li>" for w in warnings)
+        parts.append(
+            f'<div class="quality-banner quality-alert" role="alert" data-quality-status="{html.escape(status)}">'
+            f"<strong>数据质量：{html.escape(status)}</strong>（数据源：{html.escape(str(quality.get('data_source')))}"
+            f"；基准：{html.escape(str(quality.get('benchmark_source')))}）<ul>{items}</ul></div>"
+        )
+    if notes:
+        items = "".join(f"<li>{html.escape(n)}</li>" for n in notes)
+        parts.append(f'<div class="quality-banner quality-note"><ul>{items}</ul></div>')
+    return "\n".join(parts)
+
+
+def render_html(report: AnalysisReport, output_path: Path) -> Path:
+    """将已通过 Schema 校验的 AnalysisReport 渲染为零外部依赖、断网双击即开的单文件交互式 HTML 终端。"""
+    validate_report(report)
+    meta = report["meta"]
+    title_str = html.escape(f"{meta['name']} ({meta['symbol']}) · K线数学结构与15日保形预测终端")
+    safe_json = _safe_json_for_script(report)
+    quality_banner = _render_quality_banner(report.get("quality") or {})
+
+    html_doc = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>{title_str}</title>
+<style>
+  :root {{
+    --bg: #0b0f17;
+    --panel: #111827;
+    --card: #161f30;
+    --border: #2a364f;
+    --text: #eef2f8;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --bull: #f24444;
+    --bear: #10bc84;
+    --warn: #facc15;
+  }}
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.45;
+    padding: 16px;
+  }}
+  .header-banner {{
+    background: linear-gradient(135deg, #131c2e 0%, #1a263d 100%);
+    border: 1px solid var(--border);
+    border-left: 5px solid var(--accent);
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }}
+  .header-title {{ font-size: 20px; font-weight: 700; letter-spacing: 0.3px; }}
+  .header-sub {{ font-size: 13px; color: var(--muted); margin-top: 4px; }}
+  .verdict-line {{
+    width: 100%;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    font-size: 14px;
+    color: #f8fafc;
+  }}
+  .badge {{
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(56, 189, 248, 0.15);
+    color: var(--accent);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    margin-right: 6px;
+  }}
+  .toolbar {{
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+  }}
+  .layer-group {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }}
+  .layer-pill {{
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }}
+  .layer-pill input {{ accent-color: var(--accent); cursor: pointer; }}
+  .btn {{
+    background: #1e293b;
+    color: var(--text);
+    border: 1px solid var(--accent);
+    border-radius: 7px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }}
+  .btn:hover {{ background: rgba(56, 189, 248, 0.2); }}
+  .workspace {{
+    display: grid;
+    grid-template-columns: minmax(0, 2.35fr) minmax(320px, 1fr);
+    gap: 14px;
+  }}
+  @media (max-width: 1100px) {{
+    .workspace {{ grid-template-columns: 1fr; }}
+  }}
+  .chart-card {{
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    position: relative;
+  }}
+  canvas {{
+    width: 100%;
+    height: 620px;
+    display: block;
+    border-radius: 6px;
+    background: #0b0f17;
+    cursor: crosshair;
+  }}
+  .hover-bar {{
+    min-height: 30px;
+    font-size: 12px;
+    color: #cbd5e1;
+    padding: 6px 8px;
+    background: var(--card);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }}
+  .replay-box {{
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+  }}
+  .replay-box input[type=range] {{ flex: 1; accent-color: var(--accent); }}
+  .side-col {{ display: flex; flex-direction: column; gap: 12px; }}
+  .side-card {{
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 13px 15px;
+  }}
+  .side-card h3 {{
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    padding-bottom: 5px;
+  }}
+  .kv-grid {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px 10px;
+    font-size: 12px;
+  }}
+  .kv-item span {{ color: var(--muted); display: block; font-size: 11px; }}
+  .kv-item strong {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }}
+  .evidence-list {{ list-style: none; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }}
+  .evidence-list li {{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+  }}
+  .formula-code {{
+    display: block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: #93c5fd;
+    margin-top: 3px;
+    word-break: break-all;
+  }}
+  .footer-note {{
+    margin-top: 14px;
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+  }}
+  .quality-banner {{
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    font-size: 13px;
+  }}
+  .quality-banner ul {{ margin: 6px 0 0 18px; }}
+  .quality-alert {{ background: #7f1d1d; border: 2px solid #ef4444; color: #fff; }}
+  .quality-note {{ background: var(--card); border: 1px solid var(--border); color: var(--muted); }}
+</style>
+</head>
+<body>
+{quality_banner}
+
+<div class="header-banner" id="headerBanner">
+  <div>
+    <div class="header-title" id="headerTitle"></div>
+    <div class="header-sub" id="headerSub"></div>
+  </div>
+  <div id="headerBadges"></div>
+  <div class="verdict-line" id="headerVerdict"></div>
+</div>
+
+<div class="toolbar">
+  <div class="layer-group" id="layerControls">
+    <label class="layer-pill"><input type="checkbox" data-layer="conformal" checked /> 未来15日保形预测扇形(50%/80%)</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="quantiles" checked /> 三情景分位数路径(q75/q50/q25)</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="barriers" checked /> Triple-Barrier 止盈止损框</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="structure" checked /> 核平滑与楔形/波段轨道</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="poc" checked /> 成交分布近似 POC</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="smc" checked /> SMC 订单块/FVG缺口</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="ma" checked /> 均线簇(MA20/60/120/250)</label>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <button class="btn" id="viewModeBtn" type="button">视图: 标的主图</button>
+    <button class="btn" id="exportPngBtn" type="button">导出当前视图为高清 PNG</button>
+  </div>
+</div>
+
+<div class="workspace">
+  <div class="chart-card">
+    <div class="hover-bar" id="hoverInspector">将鼠标移至 K 线或右侧预测区查看 OHLC、均线、RSI、RVOL 与未来分位价位。</div>
+    <canvas id="klineCanvas" width="1440" height="760"></canvas>
+    <div class="replay-box">
+      <strong>时间推演回放 (Time-Travel Replay):</strong>
+      <input type="range" id="replaySlider" min="0" max="0" value="0" />
+      <span id="replayLabel">最新截面</span>
+    </div>
+  </div>
+
+  <div class="side-col">
+    <div class="side-card">
+      <h3>1. 大盘温度计与市场状态 (Market Regime)</h3>
+      <div class="kv-grid" id="regimeGrid"></div>
+    </div>
+    <div class="side-card">
+      <h3>2. Triple-Barrier 风控与交易计划</h3>
+      <div class="kv-grid" id="barrierGrid"></div>
+    </div>
+    <div class="side-card">
+      <h3>3. 多空双向证伪 & 独立风控否决权</h3>
+      <ul class="evidence-list" id="debateList"></ul>
+    </div>
+    <div class="side-card">
+      <h3>4. 100% 数学形态与 SMC 公式证据</h3>
+      <ul class="evidence-list" id="patternList"></ul>
+    </div>
+  </div>
+</div>
+
+<div class="footer-note" id="footerNote"></div>
+
+<script id="report-data" type="application/json">{safe_json}</script>
+<script>
+(function() {{
+  const REPORT = JSON.parse(document.getElementById('report-data').textContent);
+  const meta = REPORT.meta;
+  const bench = REPORT.market_benchmark;
+  const ind = REPORT.mathematical_indicators;
+  const tb = REPORT.triple_barrier_plan;
+  const mtf = REPORT.multi_timeframe_score;
+  const dec = REPORT.meta_labeling_decision;
+  const fp = REPORT.future_projection_15d;
+  const debate = REPORT.debate_and_veto;
+  const series = REPORT.series_export;
+  const bars = series.bars || [];
+  const replays = REPORT.replay_snapshots || [];
+
+  const isCnColor = meta.color_scheme === 'cn_red_up';
+  const UP_COL = isCnColor ? '#f24444' : '#10bc84';
+  const DN_COL = isCnColor ? '#10bc84' : '#f24444';
+
+  // Populate Header safely via textContent
+  document.getElementById('headerTitle').textContent =
+    meta.name + ' (' + meta.symbol + ') · ' + meta.market + ' · ' + meta.timeframe;
+  document.getElementById('headerSub').textContent =
+    '数据截止: ' + meta.as_of + ' | 复权口径: ' + meta.adjustment +
+    ' | 数据源: ' + meta.data_source + ' | 报告哈希: ' + REPORT.reproducibility.report_hash;
+
+  const badgeWrap = document.getElementById('headerBadges');
+  const b1 = document.createElement('span');
+  b1.className = 'badge';
+  b1.textContent = '大盘基准: ' + bench.index_name + ' (' + bench.regime_label_cn + ' ' + bench.regime_score + '分)';
+  const b2 = document.createElement('span');
+  b2.className = 'badge';
+  b2.textContent = '多周期规则分: ' + mtf.rule_score + '/100 (' + dec.action_cn + ')';
+  badgeWrap.appendChild(b1);
+  badgeWrap.appendChild(b2);
+  document.getElementById('headerVerdict').textContent = debate.final_verdict_cn;
+
+  function addKv(container, label, value) {{
+    const div = document.createElement('div');
+    div.className = 'kv-item';
+    const sp = document.createElement('span');
+    sp.textContent = label;
+    const st = document.createElement('strong');
+    st.textContent = String(value);
+    div.appendChild(sp);
+    div.appendChild(st);
+    container.appendChild(div);
+  }}
+
+  const regGrid = document.getElementById('regimeGrid');
+  addKv(regGrid, '当前标的 Regime', REPORT.market_regime.label_cn);
+  addKv(regGrid, '大盘相对强弱 (RS)', bench.relative_strength_vs_index);
+  addKv(regGrid, 'ADX(14) / RVOL(20)', (ind.trend.adx14 || '--') + ' / ' + (ind.momentum.rvol20 || '--') + 'x');
+  addKv(regGrid, 'BBW分位 / HV比值', (ind.volatility.bbw_percentile_120 || '--') + '% / ' + (ind.qlib_factors.hv_ratio_20_60 || '--'));
+  addKv(regGrid, '成交分布 POC / VAH / VAL (近似)', REPORT.volume_profile.poc_price + ' / ' + REPORT.volume_profile.vah_price + ' / ' + REPORT.volume_profile.val_price);
+  const cov80 = fp.calibration_audit.nominal_80pct_empirical_coverage;
+  addKv(regGrid, '保形预测80%实测覆盖', (cov80 === null || cov80 === undefined ? '--' : (cov80 * 100).toFixed(1) + '%') +
+    ' (n=' + fp.calibration_audit.evaluation_samples + ', ' + fp.promotion_status + ')');
+
+  const barGrid = document.getElementById('barrierGrid');
+  addKv(barGrid, '计划类型', dec.setup_label_cn);
+  addKv(barGrid, '建议入场区', tb.entry_zone[0] + ' ~ ' + tb.entry_zone[1]);
+  addKv(barGrid, '下屏障 (硬止损 SL)', tb.stop_loss_barrier);
+  addKv(barGrid, '上屏障 (TP1 / TP2)', tb.take_profit_1 + ' / ' + tb.take_profit_2);
+  addKv(barGrid, '时间屏障 / 净盈亏比', tb.time_barrier_bars + ' bars / ' + tb.risk_reward_ratio + ' R');
+  addKv(barGrid, '制度 / 建议股数', tb.market_microstructure.settlement + ' / ' + (tb.position_sizing.recommended_shares !== null ? tb.position_sizing.recommended_shares + '股' : '需账户净值'));
+
+  const debList = document.getElementById('debateList');
+  (debate.bull_case || []).forEach(function(item) {{
+    const li = document.createElement('li');
+    li.textContent = '[看多依据] ' + item;
+    debList.appendChild(li);
+  }});
+  (debate.bear_case || []).forEach(function(item) {{
+    const li = document.createElement('li');
+    li.textContent = '[空头证伪/风险] ' + item;
+    debList.appendChild(li);
+  }});
+
+  const patList = document.getElementById('patternList');
+  const allPats = REPORT.algebraic_patterns_detected || [];
+  if (allPats.length === 0) {{
+    const li = document.createElement('li');
+    li.textContent = '当前窗口未触发极端蜡烛/背离形态；核心结构: ' + ind.structure_levels.wedge_structure.pattern;
+    patList.appendChild(li);
+  }} else {{
+    allPats.forEach(function(p) {{
+      const li = document.createElement('li');
+      const title = document.createElement('strong');
+      title.textContent = '[' + p.direction + '] ' + p.name_cn + ' (' + p.confirmed_at + ')';
+      const code = document.createElement('span');
+      code.className = 'formula-code';
+      code.textContent = p.formula_verified;
+      li.appendChild(title);
+      li.appendChild(code);
+      patList.appendChild(li);
+    }});
+  }}
+  (REPORT.strategy_signals || []).forEach(function(s) {{
+    if (s.direction !== 'NEUTRAL') {{
+      const li = document.createElement('li');
+      const title = document.createElement('strong');
+      title.textContent = '[策略激活] ' + s.name_cn + ' -> ' + s.state;
+      const code = document.createElement('span');
+      code.className = 'formula-code';
+      code.textContent = s.formula_verified;
+      li.appendChild(title);
+      li.appendChild(code);
+      patList.appendChild(li);
+    }}
+  }});
+
+  document.getElementById('footerNote').textContent =
+    '算图分离保证：本页面所有形态、指标、三重屏障与未来15步分位数均由确定性数学公式预先计算并写入 JSON，禁止视觉模型猜数。仅供量化投研验证，不构成投资建议。';
+
+  // Interactive Canvas Rendering
+  const canvas = document.getElementById('klineCanvas');
+  const ctx = canvas.getContext('2d');
+  const layers = {{
+    conformal: true,
+    quantiles: true,
+    barriers: true,
+    structure: true,
+    poc: true,
+    smc: true,
+    ma: true
+  }};
+  let showRsMode = false;
+  let activeReplayIdx = replays.length; // replays.length === live/latest view
+
+  const slider = document.getElementById('replaySlider');
+  const replayLabel = document.getElementById('replayLabel');
+  slider.max = String(replays.length);
+  slider.value = String(replays.length);
+
+  document.querySelectorAll('#layerControls input[type=checkbox]').forEach(function(cb) {{
+    cb.addEventListener('change', function() {{
+      layers[cb.getAttribute('data-layer')] = cb.checked;
+      drawChart();
+    }});
+  }});
+
+  slider.addEventListener('input', function() {{
+    activeReplayIdx = parseInt(slider.value, 10);
+    if (activeReplayIdx === replays.length) {{
+      replayLabel.textContent = '最新截面 (' + meta.as_of + ')';
+    }} else {{
+      const snap = replays[activeReplayIdx];
+      replayLabel.textContent = '历史回放: ' + snap.as_of + ' (80%扇形命中: ' + (snap.terminal_within_80pct_band ? '是' : '否') + ')';
+    }}
+    drawChart();
+  }});
+
+  document.getElementById('viewModeBtn').addEventListener('click', function(ev) {{
+    showRsMode = !showRsMode;
+    ev.target.textContent = showRsMode ? '视图: 相对强弱(RS对比)' : '视图: 标的主图';
+    drawChart();
+  }});
+
+  document.getElementById('exportPngBtn').addEventListener('click', function() {{
+    const link = document.createElement('a');
+    link.download = meta.symbol.replace(/[^A-Za-z0-9_-]/g, '_') + '_forecast_dashboard.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  }});
+
+  let chartGeom = null;
+
+  function drawChart(hoverX, hoverY) {{
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#0b0f17';
+    ctx.fillRect(0, 0, W, H);
+
+    const padL = 68, padR = 190, padT = 32, mainB = 530, volT = 575, volB = 720;
+    const plotW = W - padL - padR;
+
+    if (showRsMode && bench.rs_series && bench.rs_series.length > 5) {{
+      drawRsComparison(W, H, padL, padR, padT, mainB);
+      return;
+    }}
+
+    let activeBars = bars;
+    let activeFp = fp;
+    let realizedCloses = [];
+    if (activeReplayIdx < replays.length) {{
+      const snap = replays[activeReplayIdx];
+      const cutDay = snap.as_of;
+      activeBars = bars.filter(function(b) {{ return b.day <= cutDay; }});
+      if (activeBars.length < 20) activeBars = bars;
+      activeFp = {{
+        horizon_dates: snap.horizon_dates,
+        q10: snap.q10,
+        q25: snap.q25,
+        base_median_q50: snap.q50,
+        optimistic_q75: snap.q75,
+        q90: snap.q90
+      }};
+      realizedCloses = snap.realized_closes || [];
+    }}
+
+    const nBars = activeBars.length;
+    const hBars = activeFp.horizon_dates.length;
+    const histW = plotW * 0.72;
+    const futW = plotW * 0.28;
+    const stepH = histW / Math.max(1, nBars);
+    const stepF = futW / Math.max(1, hBars + 1);
+
+    function xOfBar(i) {{
+      return padL + (i + 0.5) * stepH;
+    }}
+    function xOfFut(stepIdx) {{
+      return padL + histW + (stepIdx + 1) * stepF;
+    }}
+
+    // Compute Y price range
+    const prices = [];
+    activeBars.forEach(function(b) {{
+      prices.push(b.high, b.low);
+      if (layers.ma) {{
+        [b.ma20, b.ma60, b.ma120, b.ma250].forEach(function(m) {{ if (m !== null && m !== undefined) prices.push(m); }});
+      }}
+    }});
+    if (layers.conformal) {{
+      activeFp.q10.forEach(function(p) {{ prices.push(p); }});
+      activeFp.q90.forEach(function(p) {{ prices.push(p); }});
+    }}
+    if (layers.barriers) {{
+      prices.push(tb.stop_loss_barrier, tb.take_profit_1, tb.take_profit_2);
+    }}
+    realizedCloses.forEach(function(p) {{ prices.push(p); }});
+
+    let pMin = Math.min.apply(null, prices);
+    let pMax = Math.max.apply(null, prices);
+    const pSpan = Math.max(1e-4, pMax - pMin);
+    pMin -= pSpan * 0.07;
+    pMax += pSpan * 0.09;
+
+    function yOfPrice(p) {{
+      return mainB - ((p - pMin) / (pMax - pMin)) * (mainB - padT);
+    }}
+
+    chartGeom = {{
+      padL: padL, padR: padR, padT: padT, mainB: mainB, histW: histW, futW: futW,
+      nBars: nBars, hBars: hBars, stepH: stepH, stepF: stepF,
+      activeBars: activeBars, activeFp: activeFp, pMin: pMin, pMax: pMax,
+      xOfBar: xOfBar, xOfFut: xOfFut, yOfPrice: yOfPrice
+    }};
+
+    // Background panels & grid
+    ctx.fillStyle = '#0e1420';
+    ctx.fillRect(padL, padT, histW, mainB - padT);
+    ctx.fillStyle = '#131b2e';
+    ctx.fillRect(padL + histW, padT, futW, mainB - padT);
+
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 1;
+    for (let g = 0; g <= 5; g++) {{
+      const gp = pMin + (pMax - pMin) * (g / 5);
+      const gy = yOfPrice(gp);
+      ctx.beginPath();
+      ctx.moveTo(padL, gy);
+      ctx.lineTo(W - padR, gy);
+      ctx.stroke();
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '12px monospace';
+      ctx.fillText(gp.toFixed(2), 8, gy + 4);
+    }}
+
+    // Future divider line
+    const divX = padL + histW;
+    ctx.strokeStyle = '#38bdf8';
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(divX, padT);
+    ctx.lineTo(divX, mainB);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('右侧: 未来 ' + hBars + ' Bar 预测演进区', divX + 10, padT + 18);
+
+    // Layer: Volume Profile POC / Value Area
+    if (layers.poc && REPORT.volume_profile) {{
+      const vp = REPORT.volume_profile;
+      const yVah = yOfPrice(vp.vah_price);
+      const yVal = yOfPrice(vp.val_price);
+      const yPoc = yOfPrice(vp.poc_price);
+      ctx.fillStyle = 'rgba(148, 163, 184, 0.08)';
+      ctx.fillRect(padL, Math.min(yVah, yVal), histW, Math.abs(yVal - yVah));
+      ctx.strokeStyle = 'rgba(250, 204, 21, 0.65)';
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(padL, yPoc);
+      ctx.lineTo(W - padR, yPoc);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#facc15';
+      ctx.fillText('POC ' + vp.poc_price.toFixed(2), W - padR + 6, yPoc + 4);
+    }}
+
+    // Layer: SMC Order Blocks & FVG
+    if (layers.smc && REPORT.smc_structures) {{
+      (REPORT.smc_structures.order_blocks || []).forEach(function(ob) {{
+        const y1 = yOfPrice(ob.zone[1]);
+        const y2 = yOfPrice(ob.zone[0]);
+        ctx.fillStyle = ob.kind.indexOf('BULL') >= 0 ? 'rgba(16, 188, 132, 0.14)' : 'rgba(242, 68, 68, 0.14)';
+        ctx.fillRect(padL + histW * 0.35, Math.min(y1, y2), histW * 0.65, Math.max(4, Math.abs(y2 - y1)));
+      }});
+      (REPORT.smc_structures.fvgs || []).forEach(function(fvg) {{
+        const y1 = yOfPrice(fvg.zone[1]);
+        const y2 = yOfPrice(fvg.zone[0]);
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.12)';
+        ctx.fillRect(padL + histW * 0.55, Math.min(y1, y2), histW * 0.45, Math.max(3, Math.abs(y2 - y1)));
+      }});
+    }}
+
+    // Layer: Candlesticks
+    const barHalf = Math.max(1.5, Math.min(6, stepH * 0.36));
+    activeBars.forEach(function(b, i) {{
+      const x = xOfBar(i);
+      const yo = yOfPrice(b.open);
+      const yc = yOfPrice(b.close);
+      const yh = yOfPrice(b.high);
+      const yl = yOfPrice(b.low);
+      const col = b.close >= b.open ? UP_COL : DN_COL;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.moveTo(x, yh);
+      ctx.lineTo(x, yl);
+      ctx.stroke();
+      const topY = Math.min(yo, yc);
+      const bodyH = Math.max(2, Math.abs(yc - yo));
+      ctx.fillStyle = col;
+      ctx.fillRect(x - barHalf, topY, barHalf * 2, bodyH);
+    }});
+
+    // Layer: Moving Averages
+    if (layers.ma) {{
+      const maConfigs = [
+        ['ma20', '#facc15', 'MA20'],
+        ['ma60', '#c084fc', 'MA60'],
+        ['ma120', '#94a3b8', 'MA120'],
+        ['ma250', '#e879f9', 'MA250']
+      ];
+      maConfigs.forEach(function(cfg) {{
+        const key = cfg[0], col = cfg[1];
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        let started = false;
+        activeBars.forEach(function(b, i) {{
+          const v = b[key];
+          if (v !== null && v !== undefined) {{
+            const x = xOfBar(i), y = yOfPrice(v);
+            if (!started) {{ ctx.moveTo(x, y); started = true; }}
+            else {{ ctx.lineTo(x, y); }}
+          }}
+        }});
+        ctx.stroke();
+      }});
+    }}
+
+    // Layer: Kernel Smooth & Wedge Rails
+    if (layers.structure) {{
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      activeBars.forEach(function(b, i) {{
+        const x = xOfBar(i), y = yOfPrice(b.kernel_smooth || b.close);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }});
+      ctx.stroke();
+
+      const w = ind.structure_levels.wedge_structure;
+      if (w && w.upper && w.lower && activeReplayIdx === replays.length) {{
+        ctx.strokeStyle = '#ff9f43';
+        ctx.lineWidth = 2.0;
+        ctx.beginPath();
+        ctx.moveTo(xOfBar(Math.max(0, nBars - 60)), yOfPrice(w.upper.start.price));
+        ctx.lineTo(xOfBar(nBars - 1), yOfPrice(w.upper_today));
+        ctx.stroke();
+
+        ctx.strokeStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.moveTo(xOfBar(Math.max(0, nBars - 60)), yOfPrice(w.lower.start.price));
+        ctx.lineTo(xOfBar(nBars - 1), yOfPrice(w.lower_today));
+        ctx.stroke();
+      }}
+    }}
+
+    const lastBar = activeBars[nBars - 1];
+    const startX = xOfBar(nBars - 1);
+    const startY = yOfPrice(lastBar.close);
+
+    // Layer: Triple-Barrier Risk Boxes
+    if (layers.barriers && activeReplayIdx === replays.length) {{
+      const yEntry = yOfPrice((tb.entry_zone[0] + tb.entry_zone[1]) / 2);
+      const yTp1 = yOfPrice(tb.take_profit_1);
+      const yTp2 = yOfPrice(tb.take_profit_2);
+      const ySl = yOfPrice(tb.stop_loss_barrier);
+
+      // Green TP zone
+      ctx.fillStyle = 'rgba(16, 188, 132, 0.13)';
+      ctx.fillRect(divX, Math.min(yTp2, yEntry), futW, Math.abs(yEntry - yTp2));
+      ctx.strokeStyle = '#10bc84';
+      ctx.strokeRect(divX, Math.min(yTp2, yEntry), futW, Math.abs(yEntry - yTp2));
+
+      // Red SL zone
+      ctx.fillStyle = 'rgba(242, 68, 68, 0.13)';
+      ctx.fillRect(divX, Math.min(yEntry, ySl), futW, Math.abs(ySl - yEntry));
+      ctx.strokeStyle = '#f24444';
+      ctx.strokeRect(divX, Math.min(yEntry, ySl), futW, Math.abs(ySl - yEntry));
+
+      ctx.fillStyle = '#10bc84';
+      ctx.font = 'bold 11px monospace';
+      ctx.fillText('TP2 ' + tb.take_profit_2.toFixed(2), W - padR + 6, yTp2 + 4);
+      ctx.fillText('TP1 ' + tb.take_profit_1.toFixed(2), W - padR + 6, yTp1 + 4);
+      ctx.fillStyle = '#f24444';
+      ctx.fillText('SL  ' + tb.stop_loss_barrier.toFixed(2), W - padR + 6, ySl + 4);
+    }}
+
+    // Layer: Conformal Fan (80% outer & 50% inner)
+    if (layers.conformal) {{
+      // 80% band (q10 ~ q90)
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.14)';
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      for (let i = 0; i < hBars; i++) ctx.lineTo(xOfFut(i), yOfPrice(activeFp.q90[i]));
+      for (let i = hBars - 1; i >= 0; i--) ctx.lineTo(xOfFut(i), yOfPrice(activeFp.q10[i]));
+      ctx.closePath();
+      ctx.fill();
+
+      // 50% band (q25 ~ q75)
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.26)';
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      for (let i = 0; i < hBars; i++) ctx.lineTo(xOfFut(i), yOfPrice(activeFp.optimistic_q75[i]));
+      for (let i = hBars - 1; i >= 0; i--) ctx.lineTo(xOfFut(i), yOfPrice(activeFp.q25[i]));
+      ctx.closePath();
+      ctx.fill();
+    }}
+
+    // Layer: 3 Quantile Scenario Paths (q75, q50, q25)
+    if (layers.quantiles) {{
+      function drawFutureCurve(arr, col, labelPrefix) {{
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        for (let i = 0; i < arr.length; i++) {{
+          ctx.lineTo(xOfFut(i), yOfPrice(arr[i]));
+        }}
+        ctx.stroke();
+        const lastP = arr[arr.length - 1];
+        const endY = yOfPrice(lastP);
+        ctx.fillStyle = col;
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText(labelPrefix + ' ' + lastP.toFixed(2), W - padR + 6, endY + 4);
+      }}
+      drawFutureCurve(activeFp.optimistic_q75, UP_COL, '乐观q75');
+      drawFutureCurve(activeFp.base_median_q50, '#facc15', '基准q50');
+      drawFutureCurve(activeFp.q25, DN_COL, '悲观q25');
+    }}
+
+    // Realized path overlay when scrubbing replay slider
+    if (realizedCloses.length > 0) {{
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      realizedCloses.forEach(function(rc, i) {{
+        ctx.lineTo(xOfFut(i), yOfPrice(rc));
+      }});
+      ctx.stroke();
+      const rLast = realizedCloses[realizedCloses.length - 1];
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('真实收盘 ' + rLast.toFixed(2), W - padR + 6, yOfPrice(rLast) - 6);
+    }}
+
+    // Volume subplot
+    ctx.fillStyle = '#0e1420';
+    ctx.fillRect(padL, volT, histW, volB - volT);
+    const maxVol = Math.max.apply(null, activeBars.map(function(b) {{ return b.volume || 1; }}));
+    activeBars.forEach(function(b, i) {{
+      const x = xOfBar(i);
+      const vh = ((b.volume || 0) / maxVol) * (volB - volT - 12);
+      ctx.fillStyle = b.close >= b.open ? UP_COL : DN_COL;
+      ctx.fillRect(x - barHalf, volB - vh, barHalf * 2, vh);
+    }});
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '11px sans-serif';
+    ctx.fillText('成交量 Volume & RVOL20 (当前 ' + (ind.momentum.rvol20 || 1.0) + 'x)', padL + 8, volT + 16);
+
+    drawQualityWatermark(W, H);
+
+    // Hover crosshair
+    if (hoverX !== undefined && hoverY !== undefined) {{
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(hoverX, padT);
+      ctx.lineTo(hoverX, volB);
+      ctx.moveTo(padL, hoverY);
+      ctx.lineTo(W - padR, hoverY);
+      ctx.stroke();
+    }}
+  }}
+
+  // 数据非 OK（合成/来源未知/缺基准）时在画布上叠加水印，导出 PNG 也会带上
+  function drawQualityWatermark(W, H) {{
+    const q = REPORT.quality || {{}};
+    if (q.status === 'OK') return;
+    ctx.save();
+    ctx.translate(W / 2, H / 2);
+    ctx.rotate(-0.25);
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.28)';
+    ctx.font = 'bold 56px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('数据质量 ' + q.status + ' · 非真实行情禁止用于交易判断', 0, 0);
+    ctx.restore();
+  }}
+
+  function drawRsComparison(W, H, padL, padR, padT, mainB) {{
+    const rs = bench.rs_series;
+    const plotW = W - padL - padR;
+    const vals = [];
+    rs.forEach(function(r) {{ vals.push(r.target_norm, r.benchmark_norm, r.rs_line); }});
+    const vMin = Math.min.apply(null, vals) * 0.98;
+    const vMax = Math.max.apply(null, vals) * 1.02;
+    function xOf(i) {{ return padL + (i / Math.max(1, rs.length - 1)) * plotW; }}
+    function yOf(v) {{ return mainB - ((v - vMin) / (vMax - vMin)) * (mainB - padT); }}
+
+    ctx.fillStyle = '#0e1420';
+    ctx.fillRect(padL, padT, plotW, mainB - padT);
+    [['target_norm', '#38bdf8', meta.name + ' (归一化=100)'],
+     ['benchmark_norm', '#94a3b8', bench.index_name + ' (归一化=100)'],
+     ['rs_line', '#facc15', '相对强弱 RS Line']].forEach(function(cfg) {{
+      ctx.strokeStyle = cfg[1];
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      rs.forEach(function(r, i) {{
+        const x = xOf(i), y = yOf(r[cfg[0]]);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }});
+      ctx.stroke();
+    }});
+    ctx.fillStyle = '#eef2f8';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('标的 vs 基准指数 归一化相对强弱对比 (起点=100)', padL + 16, padT + 28);
+    drawQualityWatermark(W, H);
+  }}
+
+  canvas.addEventListener('mousemove', function(ev) {{
+    if (!chartGeom || showRsMode) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (ev.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (ev.clientY - rect.top) * (canvas.height / rect.height);
+    const insp = document.getElementById('hoverInspector');
+
+    if (x >= chartGeom.padL && x <= chartGeom.padL + chartGeom.histW) {{
+      const idx = Math.max(0, Math.min(chartGeom.nBars - 1, Math.floor((x - chartGeom.padL) / chartGeom.stepH)));
+      const b = chartGeom.activeBars[idx];
+      insp.textContent =
+        '[历史K线 ' + b.day + '] O:' + b.open.toFixed(2) + ' H:' + b.high.toFixed(2) +
+        ' L:' + b.low.toFixed(2) + ' C:' + b.close.toFixed(2) +
+        ' | MA20:' + (b.ma20 || '--') + ' | RSI14:' + (b.rsi14 || '--') + ' | RVOL:' + (b.rvol20 || '--') + 'x';
+    }} else if (x > chartGeom.padL + chartGeom.histW && x <= canvas.width - chartGeom.padR) {{
+      const fIdx = Math.max(0, Math.min(chartGeom.hBars - 1, Math.floor((x - chartGeom.padL - chartGeom.histW) / chartGeom.stepF)));
+      const fd = chartGeom.activeFp.horizon_dates[fIdx];
+      insp.textContent =
+        '[未来预测 Step +' + (fIdx + 1) + ' (' + fd + ')] ' +
+        'q10:' + chartGeom.activeFp.q10[fIdx].toFixed(2) +
+        ' | 悲观q25:' + chartGeom.activeFp.q25[fIdx].toFixed(2) +
+        ' | 基准q50:' + chartGeom.activeFp.base_median_q50[fIdx].toFixed(2) +
+        ' | 乐观q75:' + chartGeom.activeFp.optimistic_q75[fIdx].toFixed(2) +
+        ' | q90:' + chartGeom.activeFp.q90[fIdx].toFixed(2);
+    }}
+    drawChart(x, y);
+  }});
+
+  drawChart();
+}})();
+</script>
+</body>
+</html>
+"""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(html_doc, encoding="utf-8")
+    return output_path

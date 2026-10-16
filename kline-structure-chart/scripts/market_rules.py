@@ -1,0 +1,431 @@
+from __future__ import annotations
+
+from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Any
+from zoneinfo import ZoneInfo
+
+# 各市场交易所休市日（仅工作日）。来源：CN 国务院办公厅放假通知/上交所休市安排；HK 政府宪报公众假期；
+# US NYSE 2026-2028 假期日历（含 2025-01-09 卡特国葬日休市）。新一年安排公布后须补录并同步 CALENDAR_COVERAGE_END。
+MARKET_HOLIDAYS: dict[str, set[str]] = {
+    "CN": {
+        "2024-01-01", "2024-02-09", "2024-02-12", "2024-02-13", "2024-02-14", "2024-02-15", "2024-02-16",
+        "2024-04-04", "2024-04-05", "2024-05-01", "2024-05-02", "2024-05-03", "2024-06-10",
+        "2024-09-16", "2024-09-17", "2024-10-01", "2024-10-02", "2024-10-03", "2024-10-04", "2024-10-07",
+        "2025-01-01", "2025-01-28", "2025-01-29", "2025-01-30", "2025-01-31", "2025-02-03", "2025-02-04",
+        "2025-04-04", "2025-05-01", "2025-05-02", "2025-05-05", "2025-06-02", "2025-10-01", "2025-10-02", "2025-10-03",
+        "2025-10-06", "2025-10-07", "2025-10-08",
+        "2026-01-01", "2026-01-02", "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-23",
+        "2026-04-06", "2026-05-01", "2026-05-04", "2026-05-05", "2026-06-19", "2026-09-25",
+        "2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07",
+    },
+    "HK": {
+        "2024-01-01", "2024-02-12", "2024-02-13", "2024-03-29", "2024-04-01", "2024-04-04", "2024-05-01",
+        "2024-05-15", "2024-06-10", "2024-07-01", "2024-09-18", "2024-10-01", "2024-10-11", "2024-12-25", "2024-12-26",
+        "2025-01-01", "2025-01-29", "2025-01-30", "2025-01-31", "2025-04-04", "2025-04-18", "2025-04-21",
+        "2025-05-01", "2025-05-05", "2025-07-01", "2025-10-01", "2025-10-07", "2025-10-29", "2025-12-25", "2025-12-26",
+        "2026-01-01", "2026-02-17", "2026-02-18", "2026-02-19", "2026-04-03", "2026-04-06", "2026-04-07",
+        "2026-05-01", "2026-05-25", "2026-06-19", "2026-07-01", "2026-09-26", "2026-10-01", "2026-10-19",
+        "2026-12-25",
+        "2027-01-01", "2027-02-08", "2027-02-09", "2027-03-26", "2027-03-29", "2027-04-05", "2027-05-13",
+        "2027-06-09", "2027-07-01", "2027-09-16", "2027-10-01", "2027-10-08", "2027-12-27",
+    },
+    "US": {
+        "2024-01-01", "2024-01-15", "2024-02-19", "2024-03-29", "2024-05-27", "2024-06-19", "2024-07-04",
+        "2024-09-02", "2024-11-28", "2024-12-25",
+        "2025-01-01", "2025-01-09", "2025-01-20", "2025-02-17", "2025-04-18", "2025-05-26", "2025-06-19", "2025-07-04",
+        "2025-09-01", "2025-11-27", "2025-12-25",
+        "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25", "2026-06-19", "2026-07-03",
+        "2026-09-07", "2026-11-26", "2026-12-25",
+        "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18", "2027-07-05",
+        "2027-09-06", "2027-11-25", "2027-12-24",
+    },
+}
+
+# 休市表已核实覆盖到的最后一天（CN 2027 年放假安排截至 2026-10 尚未发布）
+CALENDAR_COVERAGE_END: dict[str, str] = {"CN": "2026-12-31", "HK": "2027-12-31", "US": "2027-12-31"}
+
+
+def calendar_covers(day_str: str, market: str) -> bool:
+    """该日期是否落在已核实的休市表覆盖范围内；超出范围时只能按"周一至周五"估算交易日。"""
+    return day_str[:10] <= CALENDAR_COVERAGE_END.get(market, "0000-00-00")
+
+
+DEFAULT_BENCHMARKS: dict[str, dict[str, str]] = {
+    "CN": {"symbol": "000300.SH", "sina_symbol": "sh000300", "name": "沪深300"},
+    "HK": {"symbol": "HSI.HK", "sina_symbol": "hkHSI", "name": "恒生指数"},
+    "US": {"symbol": "SPY.US", "sina_symbol": "gb_spy", "name": "标普500 ETF(SPY)"},
+}
+
+KNOWN_INSTRUMENTS: dict[str, dict[str, Any]] = {
+    "000001.SH": {"market": "CN", "asset_type": "index", "name": "上证指数", "sina": "sh000001", "currency": "CNY"},
+    "399001.SZ": {"market": "CN", "asset_type": "index", "name": "深证成指", "sina": "sz399001", "currency": "CNY"},
+    "399006.SZ": {"market": "CN", "asset_type": "index", "name": "创业板指", "sina": "sz399006", "currency": "CNY"},
+    "000688.SH": {"market": "CN", "asset_type": "index", "name": "科创50", "sina": "sh000688", "currency": "CNY"},
+    "000300.SH": {"market": "CN", "asset_type": "index", "name": "沪深300", "sina": "sh000300", "currency": "CNY"},
+    "000016.SH": {"market": "CN", "asset_type": "index", "name": "上证50", "sina": "sh000016", "currency": "CNY"},
+    "000905.SH": {"market": "CN", "asset_type": "index", "name": "中证500", "sina": "sh000905", "currency": "CNY"},
+    "000852.SH": {"market": "CN", "asset_type": "index", "name": "中证1000", "sina": "sh000852", "currency": "CNY"},
+    "600519.SH": {"market": "CN", "asset_type": "equity", "name": "贵州茅台", "sina": "sh600519", "currency": "CNY", "board": "MAIN"},
+    "300750.SZ": {"market": "CN", "asset_type": "equity", "name": "宁德时代", "sina": "sz300750", "currency": "CNY", "board": "CHINEXT"},
+    "688981.SH": {"market": "CN", "asset_type": "equity", "name": "中芯国际", "sina": "sh688981", "currency": "CNY", "board": "STAR"},
+    "000001.SZ": {"market": "CN", "asset_type": "equity", "name": "平安银行", "sina": "sz000001", "currency": "CNY", "board": "MAIN"},
+    "HSI.HK": {"market": "HK", "asset_type": "index", "name": "恒生指数", "sina": "hkHSI", "currency": "HKD"},
+    "HSTECH.HK": {"market": "HK", "asset_type": "index", "name": "恒生科技指数", "sina": "hkHSTECH", "currency": "HKD"},
+    "00700.HK": {"market": "HK", "asset_type": "equity", "name": "腾讯控股", "sina": "hk00700", "currency": "HKD", "lot_size": 100},
+    "09988.HK": {"market": "HK", "asset_type": "equity", "name": "阿里巴巴-W", "sina": "hk09988", "currency": "HKD", "lot_size": 100},
+    "SPY.US": {"market": "US", "asset_type": "etf", "name": "标普500 ETF (SPY)", "sina": "gb_spy", "currency": "USD"},
+    "QQQ.US": {"market": "US", "asset_type": "etf", "name": "纳斯达克100 ETF (QQQ)", "sina": "gb_qqq", "currency": "USD"},
+    "NVDA.US": {"market": "US", "asset_type": "equity", "name": "英伟达 (NVDA)", "sina": "gb_nvda", "currency": "USD", "lot_size": 1},
+    "AAPL.US": {"market": "US", "asset_type": "equity", "name": "苹果 (AAPL)", "sina": "gb_aapl", "currency": "USD", "lot_size": 1},
+}
+
+
+# Yahoo 代码与本地代码不一致的标的（指数/ETF 代理）
+YAHOO_ALIASES: dict[str, str] = {
+    "HSI.HK": "^HSI",
+}
+
+# Yahoo 没有历史日线的指数改用腾讯指数日线（不再用 3033.HK ETF 冒充恒生科技指数）
+TENCENT_INDEX_SOURCES: dict[str, str] = {
+    "HSTECH.HK": "hkHSTECH",
+}
+
+# 各市场交易所时区与日线收盘时间（港股含收市竞价）
+MARKET_SESSIONS: dict[str, tuple[str, time]] = {
+    "CN": ("Asia/Shanghai", time(15, 0)),
+    "HK": ("Asia/Hong_Kong", time(16, 10)),
+    "US": ("America/New_York", time(16, 0)),
+}
+
+
+def sina_symbol_for(symbol: str) -> str:
+    """由交易所后缀推导新浪代码：600519.SH -> sh600519，000001.SZ -> sz000001，830799.BJ -> bj830799。"""
+    code, _, suffix = symbol.strip().upper().partition(".")
+    prefix = {"SH": "sh", "SZ": "sz", "BJ": "bj"}.get(suffix)
+    if not prefix or not code.isdigit():
+        raise ValueError(f"Cannot derive Sina symbol for {symbol!r}")
+    return f"{prefix}{code}"
+
+
+def yahoo_symbol_for(symbol: str) -> str:
+    """由本地代码推导 Yahoo 代码：01810.HK -> 1810.HK，00700.HK -> 0700.HK，NVDA.US -> NVDA。"""
+    upper = symbol.strip().upper()
+    if upper in YAHOO_ALIASES:
+        return YAHOO_ALIASES[upper]
+    code, _, suffix = upper.partition(".")
+    if suffix == "HK":
+        if not code.isdigit():
+            raise ValueError(f"Cannot derive Yahoo symbol for {symbol!r}")
+        return f"{int(code):04d}.HK"
+    if suffix == "US" and code:
+        return code
+    raise ValueError(f"Cannot derive Yahoo symbol for {symbol!r}")
+
+
+def yahoo_events_symbol_for(symbol: str) -> str:
+    """除权除息事件查询用的 Yahoo 代码：A股 .SH -> .SS、.SZ 不变；港美股同行情代码。北交所 Yahoo 无数据。"""
+    upper = symbol.strip().upper()
+    code, _, suffix = upper.partition(".")
+    if suffix == "SH":
+        return f"{code}.SS"
+    if suffix == "SZ":
+        return f"{code}.SZ"
+    if suffix == "BJ":
+        raise ValueError(f"Yahoo has no corporate-action data for {symbol!r}")
+    return yahoo_symbol_for(upper)
+
+
+def is_daily_bar_complete(day_str: str, market: str, now: datetime | None = None) -> bool:
+    """按交易所时区判断某日日线是否已收盘：早于交易所本地今日为已收盘，今日需过收盘时间。"""
+    tz_name, close_time = MARKET_SESSIONS[market]
+    now_local = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo(tz_name))
+    today = now_local.date().isoformat()
+    day = day_str[:10]
+    if day < today:
+        return True
+    if day > today:
+        return False
+    return now_local.time() >= close_time
+
+
+def resolve_instrument(symbol: str, market: str | None = None, asset_type: str | None = None) -> dict[str, Any]:
+    raw = symbol.strip()
+    upper = raw.upper()
+
+    # Check ambiguous bare 6-digit code like 000001 without exchange or asset_type
+    if raw == "000001" and not asset_type:
+        raise ValueError("Ambiguous symbol '000001': specify '000001.SH' (上证指数) or '000001.SZ' (平安银行)")
+
+    # Direct match
+    if upper in KNOWN_INSTRUMENTS:
+        info = dict(KNOWN_INSTRUMENTS[upper], symbol=upper)
+        if market and info["market"] != market:
+            raise ValueError(f"Symbol {upper} belongs to market {info['market']}, not {market}")
+        return info
+
+    # Sina shorthand mapping (e.g. sh000001, sz399006)
+    for canonical, meta in KNOWN_INSTRUMENTS.items():
+        if meta.get("sina", "").lower() == raw.lower():
+            return dict(meta, symbol=canonical)
+
+    # Infer suffix
+    inferred_market = market
+    if upper.endswith((".SH", ".SZ", ".BJ")):
+        inferred_market = "CN"
+    elif upper.endswith(".HK") or upper in ("^HSI", "HSI", "HSTECH"):
+        inferred_market = "HK"
+        if not upper.endswith(".HK"):
+            upper = f"{upper.lstrip('^')}.HK"
+            if upper in KNOWN_INSTRUMENTS:
+                return dict(KNOWN_INSTRUMENTS[upper], symbol=upper)
+    elif upper.endswith(".US") or (inferred_market == "US"):
+        inferred_market = "US"
+        if not upper.endswith(".US"):
+            cand = f"{upper}.US"
+            if cand in KNOWN_INSTRUMENTS:
+                return dict(KNOWN_INSTRUMENTS[cand], symbol=cand)
+            upper = cand
+
+    if not inferred_market:
+        raise ValueError(f"Cannot resolve market for symbol {symbol!r}; provide explicit --market CN|HK|US")
+
+    currency = {"CN": "CNY", "HK": "HKD", "US": "USD"}[inferred_market]
+    resolved_type = asset_type or _infer_asset_type(upper)
+    code_num = upper.split(".")[0]
+    board = "MAIN"
+    if inferred_market == "CN" and resolved_type == "equity":
+        if code_num.startswith(("300", "301")):
+            board = "CHINEXT"
+        elif code_num.startswith("688"):
+            board = "STAR"
+        elif upper.endswith(".BJ") or code_num.startswith(("8", "4", "92")):
+            board = "BSE"
+
+    return {
+        "symbol": upper,
+        "market": inferred_market,
+        "asset_type": resolved_type,
+        "name": upper,
+        "sina": sina_symbol_for(upper) if inferred_market == "CN" else raw.lower(),
+        "currency": currency,
+        "board": board,
+        "lot_size": 100 if (inferred_market in ("CN", "HK") and resolved_type == "equity") or (inferred_market == "CN" and resolved_type == "etf") else 1,
+    }
+
+
+def _infer_asset_type(upper: str) -> str:
+    """按"交易所 + 代码段"推断资产类型：000xxx.SH / 399xxx.SZ 为指数（000xxx.SZ 是深市主板股票），
+    沪市 51/56/58、深市 15 开头为 ETF，恒指系列为指数，其余为个股。"""
+    code, _, suffix = upper.partition(".")
+    if (suffix == "SH" and code.startswith("000")) or (suffix == "SZ" and code.startswith("399")):
+        return "index"
+    if (suffix == "SH" and code.startswith(("51", "56", "58"))) or (suffix == "SZ" and code.startswith("15")):
+        return "etf"
+    if suffix == "HK" and code.startswith(("HSI", "HSTECH", "HSCEI")):
+        return "index"
+    return "equity"
+
+
+def is_trading_day(day_obj: date, market: str = "CN") -> bool:
+    if day_obj.weekday() >= 5:
+        return False
+    ds = day_obj.strftime("%Y-%m-%d")
+    return ds not in MARKET_HOLIDAYS.get(market, set())
+
+
+def next_trading_dates(base_day_str: str, horizon_bars: int, market: str = "CN") -> list[str]:
+    dt = datetime.strptime(base_day_str[:10], "%Y-%m-%d").date()
+    out: list[str] = []
+    while len(out) < horizon_bars:
+        dt += timedelta(days=1)
+        if is_trading_day(dt, market=market):
+            out.append(dt.strftime("%Y-%m-%d"))
+    return out
+
+
+CHINEXT_REGISTRATION_DAY = "2020-08-24"  # 创业板注册制改革：涨跌幅 ±10% -> ±20%（含 ST）
+MAIN_BOARD_ST_10PCT_DAY = "2026-07-06"  # 沪深修订交易规则：主板风险警示股票 ±5% -> ±10%（2026-04-24 发布）
+
+
+def get_daily_price_limit_pct(
+    market: str,
+    asset_type: str,
+    symbol: str,
+    is_st: bool = False,
+    is_ipo_no_limit: bool = False,
+    day_str: str | None = None,
+) -> float | None:
+    """返回单日涨跌停限制比例（例如 0.10 代表 ±10%）。指数、港股、美股及新股无涨跌停期返回 None。
+
+    ST 不再单独一刀切：主板 ST 2026-07-06 前 ±5%、之后 ±10%；创业板 ST 注册制后与普通股同为 ±20%；
+    科创板 ST ±20%；北交所 ±30%。ST 状态只能由调用方通过 is_st 显式提供（股票代码里不含 ST 字样）。
+    """
+    if market != "CN" or asset_type == "index" or is_ipo_no_limit:
+        return None
+    day = (day_str or date.today().isoformat())[:10]
+    code = symbol.upper().split(".")[0]
+    if symbol.upper().endswith(".BJ") or code.startswith(("8", "4", "92")):
+        return 0.30
+    if code.startswith(("688", "689")):
+        return 0.20
+    if code.startswith(("300", "301")):
+        if day < CHINEXT_REGISTRATION_DAY:
+            return 0.05 if is_st else 0.10
+        return 0.20
+    if is_st:
+        return 0.05 if day < MAIN_BOARD_ST_10PCT_DAY else 0.10
+    return 0.10
+
+
+# 港交所价位表（Part A，股本证券）：(价格上限(含), 最小价位)
+_HK_SPREAD_BASE: tuple[tuple[float, str], ...] = (
+    (0.25, "0.001"),
+    (0.50, "0.005"),
+    (10.0, "0.010"),
+    (20.0, "0.020"),
+    (50.0, "0.050"),
+    (100.0, "0.050"),
+    (200.0, "0.100"),
+    (500.0, "0.200"),
+    (1000.0, "0.500"),
+    (2000.0, "1.000"),
+    (5000.0, "2.000"),
+    (9995.0, "5.000"),
+)
+# 最小价位下调（仅股票/REIT/股本权证，ETP 等除外）：(生效日, {价格上限: 新价位})
+_HK_SPREAD_REDUCTIONS: tuple[tuple[str, dict[float, str]], ...] = (
+    ("2025-08-04", {20.0: "0.010", 50.0: "0.020"}),  # Phase 1：10-20 档、20-50 档
+    ("2026-08-03", {10.0: "0.005"}),  # Phase 2：0.5-10 档（SFC 批准的规则修订生效日）
+)
+
+
+def hk_tick_size(price: float, asset_type: str = "equity", day_str: str | None = None) -> Decimal:
+    """按价格与日期返回港股最小价位；ETF 等交易所买卖产品不适用下调，沿用原价位表。"""
+    day = (day_str or date.today().isoformat())[:10]
+    overrides: dict[float, str] = {}
+    if asset_type == "equity":
+        for effective_day, changes in _HK_SPREAD_REDUCTIONS:
+            if day >= effective_day:
+                overrides.update(changes)
+    for upper, tick in _HK_SPREAD_BASE:
+        if price <= upper:
+            return Decimal(overrides.get(upper, tick))
+    return Decimal(_HK_SPREAD_BASE[-1][1])
+
+
+def round_to_tick(price: float, market: str = "CN", asset_type: str = "equity", day_str: str | None = None) -> float:
+    if price <= 0:
+        return 0.01
+    if market == "HK" and asset_type in ("equity", "etf"):
+        tick = hk_tick_size(price, asset_type, day_str)
+    else:
+        tick = Decimal("0.01")
+    d = Decimal(str(price))
+    steps = (d / tick).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    return float((steps * tick).quantize(tick))
+
+
+def get_market_microstructure_rules(
+    market: str,
+    asset_type: str,
+    symbol: str,
+    is_st: bool = False,
+    day_str: str | None = None,
+) -> dict[str, Any]:
+    limit_pct = get_daily_price_limit_pct(market, asset_type, symbol, is_st=is_st, day_str=day_str)
+    tradable = asset_type != "index"
+    if market == "CN":
+        return {
+            "market": "CN",
+            "settlement": "T+1" if tradable else "INDEX_NON_TRADABLE",
+            "settlement_note": "跨境/债券/黄金/货币类 ETF 为 T+0，需按品种核对" if asset_type == "etf" else None,
+            "can_intraday_roundtrip": False,
+            "daily_price_limit_pct": limit_pct,
+            "lot_size": 100 if tradable else 1,
+            "color_scheme": "cn_red_up",
+            "session_hours_local": "09:30-11:30, 13:00-15:00 Asia/Shanghai",
+            "commission_bps": 2.5,
+            "stamp_duty_buy_bps": 0.0,
+            "stamp_duty_sell_bps": 5.0 if asset_type == "equity" else 0.0,
+        }
+    if market == "HK":
+        # 港股印花税自 2023-11-17 起买卖双方各 0.1%；ETF 豁免
+        hk_stamp = 10.0 if asset_type == "equity" else 0.0
+        return {
+            "market": "HK",
+            "settlement": "T+0_TRADING_T+2_CLEARING" if tradable else "INDEX_NON_TRADABLE",
+            "can_intraday_roundtrip": tradable,
+            "daily_price_limit_pct": None,
+            "lot_size": 100 if asset_type == "equity" else 1,
+            "color_scheme": "cn_red_up",
+            "session_hours_local": "09:30-12:00, 13:00-16:00 Asia/Hong_Kong",
+            "commission_bps": 3.0,
+            "stamp_duty_buy_bps": hk_stamp,
+            "stamp_duty_sell_bps": hk_stamp,
+        }
+    return {
+        "market": "US",
+        "settlement": "T+1_SEC_SETTLEMENT" if tradable else "INDEX_NON_TRADABLE",
+        "day_trading_rule": (
+            "FINRA 4210 修订：PDT 认定与 2.5 万美元门槛自 2026-06-04 起取消（券商最晚 2027-10-20 完成过渡），"
+            "改由券商日内保证金规则约束"
+        ),
+        "can_intraday_roundtrip": tradable,
+        "daily_price_limit_pct": None,
+        "lot_size": 1,
+        "color_scheme": "us_green_up",
+        "session_hours_local": "09:30-16:00 America/New_York",
+        "commission_bps": 1.0,
+        "stamp_duty_buy_bps": 0.0,
+        "stamp_duty_sell_bps": 0.0,
+    }
+
+
+def round_trip_cost_rate(rules: dict[str, Any]) -> float:
+    """一次买入加一次卖出的费率合计（佣金双边 + 买卖两侧印花税）。"""
+    bps = rules["commission_bps"] * 2.0 + rules.get("stamp_duty_buy_bps", 0.0) + rules["stamp_duty_sell_bps"]
+    return bps / 10000.0
+
+
+def apply_point_in_time_adjustment(
+    bars: list[dict[str, Any]],
+    corporate_actions: list[dict[str, Any]] | None = None,
+    mode: str = "split",
+    as_of_day: str | None = None,
+) -> list[dict[str, Any]]:
+    """根据截至 as_of_day 已知的拆并股/分红事件计算前复权分析序列，同时保留 raw_close 供真实成交回测使用。"""
+    if not bars:
+        return []
+    cutoff = as_of_day or bars[-1]["day"]
+    actions = [
+        act
+        for act in (corporate_actions or [])
+        if act["ex_date"] <= cutoff
+    ]
+    out: list[dict[str, Any]] = []
+    for bar in bars:
+        b_day = bar["day"]
+        factor = 1.0
+        if mode in ("split", "total_return"):
+            for act in actions:
+                if b_day < act["ex_date"]:
+                    split_ratio = float(act.get("split_ratio", 1.0))
+                    if split_ratio > 0:
+                        factor /= split_ratio
+                    if mode == "total_return":
+                        div_factor = float(act.get("dividend_factor", 1.0))
+                        if div_factor > 0:
+                            factor *= div_factor
+        adj_bar = dict(bar)
+        adj_bar["raw_open"] = float(bar["open"])
+        adj_bar["raw_high"] = float(bar["high"])
+        adj_bar["raw_low"] = float(bar["low"])
+        adj_bar["raw_close"] = float(bar["close"])
+        adj_bar["adj_factor"] = round(factor, 8)
+        adj_bar["open"] = round(float(bar["open"]) * factor, 4)
+        adj_bar["high"] = round(float(bar["high"]) * factor, 4)
+        adj_bar["low"] = round(float(bar["low"]) * factor, 4)
+        adj_bar["close"] = round(float(bar["close"]) * factor, 4)
+        out.append(adj_bar)
+    return out

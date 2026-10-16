@@ -1,0 +1,96 @@
+{
+  "recorded_at_utc": "2026-10-16T04:35:57+00:00",
+  "files": {
+    "sina_daily/sh000001.json": {
+      "source": "SINA getKLineData symbol=sh000001 scale=240 (不复权)",
+      "rows": 1023,
+      "first_day": "2022-07-25",
+      "last_day": "2026-10-15",
+      "sha256": "1b417b29d2ba518b4d9496b4e1520f58e44f00a9bb07a838afc4fd1920e41684"
+    },
+    "sina_daily/sz399001.json": {
+      "source": "SINA getKLineData symbol=sz399001 scale=240 (不复权)",
+      "rows": 1023,
+      "first_day": "2022-07-25",
+      "last_day": "2026-10-15",
+      "sha256": "7c7bd8a2f0180217aa5aedf7481bd601ce602037f8b64918cb7ee95e9c325a57"
+    },
+    "sina_daily/sz399006.json": {
+      "source": "SINA getKLineData symbol=sz399006 scale=240 (不复权)",
+      "rows": 1023,
+      "first_day": "2022-07-25",
+      "last_day": "2026-10-15",
+      "sha256": "909a05cd8c660bf339237c8ccd01ad8badd0035815ccbd5393ca53d55a3ba249"
+    },
+    "sina_daily/sh000688.json": {
+      "source": "SINA getKLineData symbol=sh000688 scale=240 (不复权)",
+      "rows": 1023,
+      "first_day": "2022-07-25",
+      "last_day": "2026-10-15",
+      "sha256": "bdfc772319bb04e2baeed3f5923da3e07da582bccff77bde558dbc26ead0ea1a"
+    },
+    "sina_daily/sh000300.json": {
+      "source": "SINA getKLineData symbol=sh000300 scale=240 (不复权)",
+      "rows": 1023,
+      "first_day": "2022-07-25",
+      "last_day": "2026-10-15",
+      "sha256": "8a279569419641961535bb13a9b56baf9b1c272e0d1950d1ad794eff564c3c56"
+    },
+    "sina_daily/sh600519.json": {
+      "source": "SINA getKLineData symbol=sh600519 scale=240 (不复权)",
+      "rows": 1023,
+      "first_day": "2022-07-25",
+      "last_day": "2026-10-15",
+      "sha256": "1eabc9f8f12607d12228d9fe25387bfa456825ee239738e122db571cda6f2cd5"
+    },
+    "yahoo_daily/NVDA.json": {
+      "source": "YAHOO chart NVDA 1d range=5y",
+      "rows": 1254,
+      "first_day": "2021-10-18",
+      "last_day": "2026-10-15",
+      "sha256": "0c2a53a33a06aea8fce600075ad9091eae184746a509e0053b4686f7c62806c6"
+    },
+    "yahoo_daily/SPY.json": {
+      "source": "YAHOO chart SPY 1d range=5y",
+      "rows": 1254,
+      "first_day": "2021-10-18",
+      "last_day": "2026-10-15",
+      "sha256": "f6fbda72d505d354c95930d89635ce3fc39d5583335d99890aa5b07f5cbcc869"
+    },
+    "yahoo_daily/0700.HK.json": {
+      "source": "YAHOO chart 0700.HK 1d range=5y",
+      "rows": 1229,
+      "first_day": "2021-10-18",
+      "last_day": "2026-10-15",
+      "sha256": "23e10d563a82d5c9e94ed13260c3aa7b356f23a80cb03e238f444ffbd6004ab1"
+    },
+    "yahoo_daily/HSI.json": {
+      "source": "YAHOO chart ^HSI 1d range=5y",
+      "rows": 1229,
+      "first_day": "2021-10-18",
+      "last_day": "2026-10-15",
+      "sha256": "6bfc12cd6667a4b9a69cddf6ec639909fd1b77abd55bf4fd9e34b6705d92395f"
+    },
+    "yahoo_events/600519.SS.json": {
+      "source": "YAHOO chart 600519.SS events=div,splits",
+      "rows": 9,
+      "first_day": "2022-06-30",
+      "last_day": "2026-06-26",
+      "sha256": "f8af4290c307a09f29d829c056f407301e508d2f5aea389f1b1e6cff91f64115"
+    },
+    "yahoo_events/NVDA.json": {
+      "source": "YAHOO chart NVDA events=div,splits",
+      "rows": 21,
+      "first_day": "2021-12-01",
+      "last_day": "2026-09-10",
+      "sha256": "2ba757f7b5105660535e6d907fd666dcfdd7d08b1a1d8911392b5bb79476acab"
+    },
+    "yahoo_events/0700.HK.json": {
+      "source": "YAHOO chart 0700.HK events=div,splits",
+      "rows": 5,
+      "first_day": "2022-05-20",
+      "last_day": "2026-05-15",
+      "sha256": "4e927645ee6f5ac850b1ac5b69729d255bbdb2c4a5a29eaaee23d1c4c8c1d65f"
+    }
+  }
+}

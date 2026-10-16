@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AnalysisReport",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "meta",
+    "request",
+    "market_benchmark",
+    "mathematical_indicators",
+    "algebraic_patterns_detected",
+    "smc_structures",
+    "volume_profile",
+    "market_regime",
+    "strategy_signals",
+    "multi_timeframe_score",
+    "meta_labeling_decision",
+    "triple_barrier_plan",
+    "rule_scenarios",
+    "future_projection_15d",
+    "debate_and_veto",
+    "quality",
+    "reproducibility"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["5.0.0"] },
+    "meta": {
+      "type": "object",
+      "required": ["symbol", "name", "market", "asset_type", "currency", "timeframe", "as_of", "color_scheme"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "market": { "type": "string", "enum": ["CN", "HK", "US"] },
+        "asset_type": { "type": "string", "enum": ["index", "equity", "etf"] },
+        "currency": { "type": "string", "enum": ["CNY", "HKD", "USD"] },
+        "timeframe": { "type": "string", "enum": ["1D", "1W", "60m", "15m"] },
+        "as_of": { "type": "string" },
+        "adjustment": { "type": "string", "enum": ["raw", "split", "total_return"] },
+        "color_scheme": { "type": "string", "enum": ["cn_red_up", "us_green_up"] }
+      }
+    }
+  }
+}
