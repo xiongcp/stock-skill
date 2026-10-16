@@ -280,6 +280,8 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 1. **结构层使用盘中价**：`structure._abc_one` 用盘中价判断 ABC 结构是否失效，C 浪进度也包含盘中高低点（已标注“盘中”）。这与铁律 0“未收盘 K 线不得参与形态计算”的字面要求有张力，建议盘中价只用于标注、不参与情景筛选。
 2. **PNG 标签精度与报告不一致**：`structure.fmt_price` 对 ≥100 的价格取整、<10 的价格保留 3 位，例如 `BRK.B.US` 图上“突破 534”而报告为 533.55，`600289.SH` 图上“突破 5.123”而报告为 5.12。`test_g03_*` 把取整固定为设计，如需按价位表精度显示，需要同时改测试。
 3. **区间校准“已达标”的样本量**：`600519.SH` 评估样本 107 个，约等于 7 个独立样本时状态即为“已达标”。建议晋级条件增加有效独立样本下限。
+   - **已处理（2026-10-16）**：用户拍板下限取 20。`forecast.py` 晋级条件加入 `effective_independent_samples >= MIN_EFFECTIVE_INDEPENDENT_SAMPLES (20)`，并在 `calibration_audit.min_effective_independent_samples` 输出；条件与理由写入 `references/math-patterns.md` 第 5 节；`render_report_md.py`、`SKILL.md`、`README.md` 同步说明（`render_html.py` 只显示原始状态枚举，未改）。由于审计窗口使评估样本约为 122 − H，只有 H ≤ 5 可能晋级，默认 15 日区间恒为“校准观察期”（录制数据中原 7 个 PROMOTED 标的全部降级）。扩大审计窗口另开任务。测试：`test_c02_c03_*`、`test_c11_promotion_requires_effective_independent_samples_floor`、`test_report_md_numbers_match_json`（真实录制 600519）。
+   - **审计窗口扩展（2026-10-16）**：`compute_conformal_forecast` 的审计期与展示校准窗口解耦——分数覆盖全部已收盘历史，每个审计截面 e 仍只用 `[max(60, e−H−160), e−h]` 的已成熟分数（与展示区间同一窗口规则，零前视），评估样本变为 n − 2H − 99（760 根时 H=15 为 631 个、约 42 个独立样本）。展示区间宽度不变（`test_c12_*` 守护）。数学定义见 `references/math-patterns.md` 第 5 节。
 4. **ST 历史状态**：ST 按当前简称识别并沿用到全部历史，可接入 ST 变更历史。
 5. **港股 ETF 识别**：仍需手动传 `--asset-type etf`（影响印花税豁免）。
 6. **外部数据缺口**：财报日无数据源；北交所无除权除息事件；A 股 2027 年休市表待公布后补录。

@@ -73,6 +73,7 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 5. **未来 15 日区间**：
    - `future_projection_15d` 以最新收盘价为中心（`q50_method = MARTINGALE_LAST_CLOSE`），只描述波动幅度，不包含方向判断，不得把 q75/q25 说成看涨/看跌概率。
    - 必须同时给出 `calibration_audit` 的实测覆盖率与 `effective_independent_samples`。
+   - `promotion_status` 为 `RESEARCH_CALIBRATION_WARMUP` 时称"校准观察期"，不得把覆盖率说成区间已验证可靠；有效独立样本低于 `min_effective_independent_samples`（20）时不会晋级（判定见 `references/math-patterns.md` 第 5 节）。
 6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。
 7. **文件**：给出 `result.json` 与 `dashboard.html` 的路径；客户端能显示图片时再内嵌 `preview.png`，否则只给路径。
 8. **免责声明**：结尾注明"以上为规则化技术分析，仅供研究参考，不构成投资建议"。

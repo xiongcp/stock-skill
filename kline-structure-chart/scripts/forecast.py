@@ -118,9 +118,10 @@ def match_historical_analogues(
 SIGMA_LOOKBACK = 60
 SIGMA_FLOOR = 0.004
 SIGMA_CAP = 0.08
-CALIBRATION_WINDOW = 160  # 参与校准的最近成熟截面数
+CALIBRATION_WINDOW = 160  # 展示区间与每个审计截面参与校准的最近截面数（审计期本身覆盖全部历史）
 MIN_CALIBRATION_SCORES = 20
-AUDIT_WARMUP = 40  # 样本外审计前至少积累的截面数
+AUDIT_WARMUP = 40  # 审计截面的校准窗口内至少需要的已成熟分数
+MIN_EFFECTIVE_INDEPENDENT_SAMPLES = 20  # 晋级 PROMOTED 所需的有效独立样本下限（evaluation_samples // H）
 
 
 def _local_sigma(log_rets: list[float], end: int) -> float:
@@ -257,49 +258,60 @@ def compute_conformal_forecast(
     if market == "US" and vix_val is not None and float(vix_val) > 20.0:
         vix_scale = min(1.60, 1.0 + (float(vix_val) - 20.0) * 0.02)
 
-    # 1. 各期限非一致性分数：scores[h][i] 对应截面 i（i + h <= n - 1 才算成熟）
-    calib_start = max(SIGMA_LOOKBACK, n - 1 - horizon_bars - CALIBRATION_WINDOW)
-    sigmas = {i: _local_sigma(log_rets, i) for i in range(calib_start, n)}
+    # 1. 各期限非一致性分数：scores[h][i] 对应截面 i（i + h <= n - 1 才算成熟）。
+    #    分数覆盖全部可用历史（审计用），展示区间只取最近 CALIBRATION_WINDOW 个截面（calib_start 起）。
+    score_start = SIGMA_LOOKBACK
+    calib_start = max(score_start, n - 1 - horizon_bars - CALIBRATION_WINDOW)
+    sigmas = {i: _local_sigma(log_rets, i) for i in range(score_start, n)}
     scores: dict[int, list[tuple[int, float]]] = {}
     for h in range(1, horizon_bars + 1):
         rows: list[tuple[int, float]] = []
-        for i in range(calib_start, n - h):
+        for i in range(score_start, n - h):
             r = closes[i + h] / closes[i] - 1.0
             rows.append((i, abs(r) / (sigmas[i] * math.sqrt(h))))
         scores[h] = rows
 
-    calibrated = len(scores[horizon_bars]) >= MIN_CALIBRATION_SCORES
+    calibrated = sum(1 for i, _ in scores[horizon_bars] if i >= calib_start) >= MIN_CALIBRATION_SCORES
     mult: dict[int, tuple[float, float]] = {}
     for h in range(1, horizon_bars + 1):
-        vals = sorted(s for _, s in scores[h])
+        vals = sorted(s for i, s in scores[h] if i >= calib_start)
         if calibrated and len(vals) >= MIN_CALIBRATION_SCORES:
             mult[h] = (_conformal_quantile(vals, 0.50), _conformal_quantile(vals, 0.80))
         else:
             mult[h] = (0.6745, 1.2816)  # 正态近似兜底
 
-    # 2. 滚动样本外审计：在每个评估截面 e 只用 j + h <= e 的已成熟分数估计乘数，
+    # 2. 滚动样本外审计：覆盖全部可用历史。每个评估截面 e 与展示区间使用同一校准窗口规则——
+    #    只取 i ∈ [max(SIGMA_LOOKBACK, e - H - CALIBRATION_WINDOW), e - h] 的已成熟分数（e = n - 1 时即展示所用的分数集合），
     #    并通过 _build_bands_from_multipliers 施加涨跌停截断与价位取整后，直接检验实际收盘价是否落在输出区间内
     per_h_hits: dict[int, list[tuple[int, int]]] = {h: [] for h in range(1, horizon_bars + 1)}
     q50_abs_errs: list[float] = []
     rw_abs_errs: list[float] = []
     if calibrated:
-        matured_by_h: dict[int, list[float]] = {h: [] for h in range(1, horizon_bars + 1)}
-        ptrs: dict[int, int] = {h: 0 for h in range(1, horizon_bars + 1)}
-        for e in range(calib_start, n - 1):
+        window_by_h: dict[int, list[float]] = {h: [] for h in range(1, horizon_bars + 1)}
+        add_ptr: dict[int, int] = {h: 0 for h in range(1, horizon_bars + 1)}
+        drop_ptr: dict[int, int] = {h: 0 for h in range(1, horizon_bars + 1)}
+        for e in range(score_start, n - 1):
+            lo_e = max(score_start, e - horizon_bars - CALIBRATION_WINDOW)
             for h in range(1, horizon_bars + 1):
                 rows_h = scores[h]
-                k = ptrs[h]
+                win = window_by_h[h]
+                k = add_ptr[h]
                 while k < len(rows_h) and rows_h[k][0] + h <= e:
-                    bisect.insort(matured_by_h[h], rows_h[k][1])
+                    bisect.insort(win, rows_h[k][1])
                     k += 1
-                ptrs[h] = k
+                add_ptr[h] = k
+                d = drop_ptr[h]
+                while d < k and rows_h[d][0] < lo_e:
+                    del win[bisect.bisect_left(win, rows_h[d][1])]
+                    d += 1
+                drop_ptr[h] = d
             max_mature_h = min(horizon_bars, n - 1 - e)
-            ready_horizons = [h for h in range(1, max_mature_h + 1) if len(matured_by_h[h]) >= AUDIT_WARMUP]
+            ready_horizons = [h for h in range(1, max_mature_h + 1) if len(window_by_h[h]) >= AUDIT_WARMUP]
             if not ready_horizons:
                 continue
             mult_e: dict[int, tuple[float, float]] = {}
             for h in range(1, max_mature_h + 1):
-                mh = matured_by_h[h]
+                mh = window_by_h[h]
                 if len(mh) >= AUDIT_WARMUP:
                     mult_e[h] = (_conformal_quantile(mh, 0.50), _conformal_quantile(mh, 0.80))
                 else:
@@ -329,6 +341,7 @@ def compute_conformal_forecast(
 
     terminal = per_h_hits[horizon_bars]
     eval_n = len(terminal)
+    eff_n = eval_n // horizon_bars
     cov_50 = round(sum(a for a, _ in terminal) / eval_n, 3) if eval_n else None
     cov_80 = round(sum(b for _, b in terminal) / eval_n, 3) if eval_n else None
     q50_mae_pct = round(sum(q50_abs_errs) / len(q50_abs_errs) * 100.0, 2) if q50_abs_errs else None
@@ -368,6 +381,7 @@ def compute_conformal_forecast(
         if (
             calibrated
             and eval_n >= 30
+            and eff_n >= MIN_EFFECTIVE_INDEPENDENT_SAMPLES
             and cov_50 is not None
             and abs(cov_50 - 0.50) <= 0.10
             and cov_80 is not None
@@ -412,7 +426,8 @@ def compute_conformal_forecast(
         "calibration_audit": {
             "calibrated": calibrated,
             "evaluation_samples": eval_n,
-            "effective_independent_samples": eval_n // horizon_bars,
+            "effective_independent_samples": eff_n,
+            "min_effective_independent_samples": MIN_EFFECTIVE_INDEPENDENT_SAMPLES,
             "nominal_50pct_empirical_coverage": cov_50,
             "nominal_80pct_empirical_coverage": cov_80,
             "q50_mae_pct": q50_mae_pct,

@@ -230,6 +230,10 @@ def render_report_markdown(report: dict[str, Any], backtest: dict[str, Any] | No
             f"80% 区间 {_pct(audit['nominal_80pct_empirical_coverage'])}（评估样本 {audit['evaluation_samples']} 个，"
             f"相邻样本结果期重叠，约等于 {audit['effective_independent_samples']} 个独立样本；状态：{promoted}）。"
         ),
+        (
+            f"- 「已达标」要求约 {audit['min_effective_independent_samples']} 个以上独立样本，且两档覆盖率与名义值相差都不超过 10 个百分点；"
+            "否则为「校准观察期」，覆盖率仅供参考。"
+        ),
     ]
     if audit.get("uncalibrated_overlays"):
         lines += [f"- 未经历史校准的放大项：{'；'.join(audit['uncalibrated_overlays'])}。"]
