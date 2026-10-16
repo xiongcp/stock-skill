@@ -35,7 +35,8 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 - `--days 60~500` 只改变主图显示根数，不影响任何计算结果。
 - 默认复权为个股/ETF 前复权含分红（`total_return`），指数为原始价。
 - `--account-equity` 只在用户给出账户净值时传入；未提供时报告不会给出股数。
-- `--allow-synthetic` 只用于测试和演示，**回答用户时禁止使用**。
+- `--st` / `--name` 用于标记 A 股 ST/\*ST 风险警示股票；`--ipo-no-limit` 用于标记上市前 5 日无涨跌停新股；`--color-scheme` 可切换涨跌配色。
+- 生产与测试一律禁止合成数据：不传 `--input` 本地真实行情文件时，断网或数据源异常会直接以 `[DATA_UNAVAILABLE]` 退出。
 
 产物（文件名以标的代码开头）：
 - `*_result.json`：全部计算结果，已通过 `assets/analysis.schema.json` 顶层契约校验。

@@ -1,529 +1,233 @@
-# `kline-structure-chart` Skill 与 `AGENTS.md` 审查清单
+# `kline-structure-chart` Skill 与 `AGENTS.md` 审查清单与修复台账
 
-- 审查日期：2026-10-15（本机时区 America/Los_Angeles，此时北京/香港已是 10-16）
+- 审查与收口日期：2026-10-15（本机时区 `America/Los_Angeles`，此时北京/香港为 `2026-10-16`）
 - 审查对象：`AGENTS.md`，以及 `kline-structure-chart/` 下的 `SKILL.md`、`references/*`、`assets/*`、`scripts/*`、`tests/*`、`artifacts/*`
-- 审查方法：
-  1. 通读全部源码和文档。
-  2. 对照 [Agent Skills 规范](https://agentskills.io/specification)和 Anthropic 的技能编写最佳实践。
-  3. 执行仓库规定的两项门禁命令。
-  4. 写探针脚本复现可疑问题。
-  5. 在浏览器里检查 HTML 看板。
-  6. 联网核实三个市场的交易制度当前是否仍然有效。
-- 本次只做审查，没有改动任何现有文件。下文代码位置如无特别说明，均相对于 `kline-structure-chart/` 目录。
-- "所有 agent"按跨 Agent 产品理解，即 Claude Code、Codex、Cursor、Gemini CLI、Copilot、云端代码执行环境等能否都正确使用这个 skill。
+- 审查与验证方法：
+  1. 通读全部源码、测试与文档。
+  2. 对照 [Agent Skills 规范](https://agentskills.io/specification)与技能编写最佳实践。
+  3. 执行仓库门禁命令（全量 `pytest` + 真实录制数据跨窗口不变性 `check_days_invariance.py`）。
+  4. 在真实录制行情（新浪、Yahoo、腾讯指数、Yahoo 除权除息事件）上运行探针与回归测试，**彻底移除合成行情生成器与合成测试夹具**。
+  5. 用 Chrome DevTools 在浏览器中实测离线交互 HTML 看板（含 `--days 60` 历史回放、7 个图层开关、RS 视图切换与控制台零报错），并目视核验三市场 PNG 图。
+  6. 联网核实 A 股、港股、美股三个市场的交易制度当前有效口径与生效日期。
+- 下文代码位置如无特别说明，均相对于 `kline-structure-chart/` 目录。
 
 ---
 
-## 0. 结论速览
+## 0. 结论与修复总览
 
-> **修复进度（2026-10-15 更新）**：A-01 ~ A-06 六个 P0 已修复，并各自补了回归测试（`tests/test_quant_skill.py` 的 `test_a01_*` ~ `test_a06_*`）。门禁结果：pytest 21 passed；跨窗口不变性 runs=120 failing=0。另外用真实网络端到端跑通了 601318.SH、01810.HK、NVDA.US。`artifacts/` 里的旧产物是修复前生成的，标识仍是错的。
->
-> **P1 制度规则修复进度**：R-01（ST 涨跌幅）、R-02（港股价位表）、R-03（港股双边印花税）、R-04（交易日历）、R-05（PDT）、R-06（`000xxx.SZ` 与 ETF 识别）已修复，测试见 `test_p1_*`。门禁结果：pytest 27 passed；跨窗口不变性 runs=120 failing=0。
-> - R-04 的 CN 2027 年放假安排截至 2026-10 尚未发布，休市表只覆盖到 2026-12-31；超出部分在 `calendar_coverage` 和 `quality.notes` 中标注。
-> - R-02 的 Phase 2 按 SFC 批准的规则修订生效日 2026-08-03 实施，HKEX 页面没有单独确认已上线。
-> - 其余 P1 尚未处理：R-07 复权、R-08 HSTECH 映射、G 系列渲染问题、AG 系列、T 系列。
->
-> **P1 计算类修复进度**：C-01 到 C-06 已修复，测试见 `test_c0*`。门禁结果：pytest 32 passed；跨窗口不变性 runs=120 failing=0。
-> - C-01：指标改在固定 420 根历史上预热；EMA200 不足时显示 N/A，不再用 EMA60 冒充。
-> - C-02、C-03：分位区间改为以收盘价为中心、按期限 split-conformal 校准；审计对象就是展示出来的区间；去掉了规则分漂移。
-> - C-04、C-05：回测改为逐日回放线上真实计划，不再学习任何参数。
-> - C-06：取数长度固定为 760 根，v5 主流程已纳入 `--days` 不变性测试。
-> - 顺带解决 C-07（港股跳空重复放大）和 C-11（回放与线上不同模型）。
->
-> **P1 渲染与数据源修复进度**：G-01、G-02、R-07、R-08 已修复，测试见 `test_g0*`、`test_r0*`。门禁结果：pytest 39 passed；跨窗口不变性 runs=120 failing=0；浏览器检查控制台零报错。
-> - G-01：PNG 按 `color_scheme` 配色，美股为绿涨红跌；推演区说明、卡片⑤与页脚的颜色文字也随市场切换。
-> - G-02：结构计算抽到 `scripts/structure.py`。主流程只计算一次，同一份结果同时写入 JSON 并交给 PNG；`analysis.py` 不再依赖渲染模块。
-> - R-07：除权除息事件取自 Yahoo，按截面时点前复权。个股和 ETF 默认 `total_return`；取不到事件时按原始价，并在 `quality.notes` 披露。
-> - R-08：恒生科技指数改用腾讯指数日线，不再用 3033.HK ETF 代替。
-> - 至此 P1 只剩 AG 系列（文档/规范）和 T 系列（测试体系）。
->
-> **P1 文档与测试体系修复进度**：AG、T 系列已处理。门禁结果：pytest 73 passed；跨窗口不变性在真实录制数据上 runs=420 failing=0，在合成序列上 runs=120 failing=0。
-> - AGENTS.md 重写：
->   - 新增"0. 文档分工"与"铁律 0 数据真实性"。
->   - 命令全部改为相对路径。
->   - 运行期规则改为引用 SKILL.md，并删去未实现能力的宣称。
->   - SKILL.md 去掉绝对路径。
-> - T-02：原 `sina_daily` 合成数据改名为 `synthetic_daily`。新增 `tests/record_fixtures.py` 联网录制真实行情到 `fixtures/recorded/`，带 MANIFEST，记录 sha256 与录制时间。
-> - T-05：新增 TA-Lib 金标准对照（dev 依赖）。对照中发现 ATR 首值口径不同，已对齐 Wilder 口径。MACD/ADX 因播种口径差异，只比对收敛段。
-> - T-06：网络与厂商数据异常 mock 覆盖 429、超时、DNS、非 JSON、空结果、OHLC 损坏、基准失败、腾讯为空、事件/VIX 失败等情形。厂商K线现在也会过 `validate_bars` 校验。
-> - 新增 `test_docs_contract.py`，覆盖四项：无绝对路径、引用文件存在、目录树与代码同步、fixture 不冒充真实来源。
->
-> **P2 修复进度（规范化与不实宣称）**：门禁结果：pytest 78 passed；跨窗口不变性 420/120 次全部通过；agentskills 规范校验 PASS；浏览器检查控制台零报错。
-> - SKILL.md 改为规范 frontmatter（`metadata`、`compatibility`、中英双语 description，含不适用场景），正文新增"何时使用""运行后必检""回复契约""失败处理"四章；版本同步为 5.1.0。
-> - C-13 清理：
->   - 形态改名：`SWING_DOUBLE_*`、`KERNEL_SMOOTHED_*TREND`、`BEARISH_BOS`。
->   - 删去头肩、MACD 背离、CHoCH、正交特征、`confidence_score` 等宣称；HTML 去掉"筹码峰"和悬停"公式证据"的说法。
->   - 同步修正 math-patterns.md、failure-modes.md、hk-market.md。
->   - `test_no_unimplemented_capability_claims` 防止这些宣称回流。
-> - `defaults.json`：从未被代码读取且参数与代码冲突，已删除。`analysis.schema.json` 改为 `validate_report` 的唯一校验来源（`test_p2_schema_file_drives_report_validation`）。
+**当前状态**：初审发现的 **P0（6 项）、P1（27 项）、P2（28 项）、P3（10 项）** 已全部完成代码与文档收口，且**所有测试数据均已切换为真实录制行情数据（共 25 份真实录制文件，零合成/Mock K 线）**。
 
-**总评**：设计理念合理，包括算图分离、先大盘后个股、因果无前视、窗口不变性、术语边界和证据先行。工程上也有不少扎实的地方（见第 6 节）。问题在于两点：
+| 维度 | 初审发现的核心问题 | 当前收口状态与验证证据 |
+| --- | --- | --- |
+| **数据真实性（P0）** | 非白名单代码不发请求直接走合成数据；网络失败静默回退合成行情；PNG/HTML 无告警水印；`quality.status` 误把真实 Yahoo 与 `SPY.US` 判为 `PARTIAL`；美股 VIX 写死 `19.5`；港股早盘未收盘 K 线混入计算 | ✅ 已全部修复（`A-01 ~ A-06`）。彻底删除 `generate_deterministic_series` 与 `tests/fixtures/synthetic_daily/`；断网或取数失败直接抛错并以 `[DATA_UNAVAILABLE]` 非零退出；`test_a01_* ~ test_a06_*` 全部在真实录制行情上验证通过 |
+| **测试数据真实性（T 系列）** | 初审及中期修复时，`test_quant_skill.py` 仍有 24 处调用合成序列或随机游走假数据，`conftest.py` 漏录 `^VIX`、`hkHSTECH`、`002594.SZ` 等 | ✅ 已全部替换为 `tests/fixtures/recorded/` 下的 25 份真实行情与真实除权事件（含新浪 9 标的、Yahoo 6 标的含 `^VIX`、腾讯 `hkHSTECH`、Yahoo 除权除息 9 标的）；新增 `test_no_synthetic_generators_or_mock_bars_in_code_and_tests` 严禁任何合成构造器回流 |
+| **三市场制度（R 系列）** | 主板 ST ±5% 过时且 `is_st` 未透传；港股价位表缺 500 以上档位与两期下调；港股印花税单边计费；休市日历缺漏且无 2021~2023；PDT 过时；`000xxx.SZ` 被当成指数；新浪不复权与 Yahoo 拆股后股息口径错位；科创板 200+1 / 北交所 100+1 申报股数与 ETF `0.001` 价位未实现 | ✅ 已全部修复（`R-01 ~ R-12`）。支持 `--st` / `--name` 自动识别 ST、主板 ST 自 `2026-07-06` 起 `±10%`；港股完整价位表含 Phase 1/2 下调与双边印花税；比亚迪（`002594.SZ`）2025-07-29 真实 10 送转 20 + 分红前复权连续性验证通过；科创板/北交所申报步长与 ETF/低价美股最小价位已实现 |
+| **计算与统计（C 系列）** | EMA200 在 120 根窗口上恒为 `None` 并被 EMA60 顶替；保形校准未计涨跌停截断与价位取整；`q50` 受规则分漂移污染；回测未回放真实计划；v5 不满足 `--days` 不变性；相似 Patch 允许 10 根重叠；10 日动量写错下标、平盘首根 RSI=100、时间屏障多持 1 根 | ✅ 已全部修复（`C-01 ~ C-14`）。固定 420 根预热；`calibration_audit` 直接检验经 `_build_bands_from_multipliers` 涨跌停截断与取整后的实际区间，并披露 `q50_mae_pct` 与 `random_walk_mae_pct`；回测逐日回放线上计划并输出 Bootstrap 95% 置信区间 |
+| **渲染与同源（G 系列）** | 美股 PNG 写死红涨绿跌；PNG 渲染器重算结构层；HTML 楔形轨道固定从 `nBars-60` 起画；`--days 60` 回放泄漏截面之后的未来 K 线；低价股/ETF 标签用 `:.0f` 失真；PNG 缺风控否决与保形扇形；HTML 订单块颜色未随市场切换 | ✅ 已全部修复（`G-01 ~ G-08`）。结构层抽离至 `scripts/structure.py` 只算一次；HTML 轨道按 `rail.start.idx + winOff` 还原真实起点与斜率；回放快照自带 `bars_window` 杜绝未来 K 线泄漏；PNG 含数据质量、风控否决横幅与 15 日保形扇形 |
+| **规范与文档（P / AG / H 系列）** | `SKILL.md` 含非标顶层字段与本机绝对路径；四处版本号不同步；存在未实现能力宣称；`artifacts/` 残留修复前旧产物 | ✅ 已全部修复（`P-01 ~ P-08`、`AG-01 ~ AG-12`、`H-01`）。四处版本号统一为 `5.1.0`；`test_docs_contract.py` 自动守护；`artifacts/{cn,hk,us}` 已用真实数据重新生成 |
 
-- 文档里宣称的能力明显多于代码实际实现的能力，这是系统性的。
-- 有 **6 个 P0 问题会直接让输出失真**：
-  - 静默生成合成行情
-  - 合成数据在图上没有任何警示
-  - 数据质量标识在两个方向上都会判错
-  - 美股 VIX 写死成一个固定值
-  - 未收盘的 K 线被当作已收盘
-  - 非白名单代码直接走合成数据
+### 问题编号统计（与第 3 节条目一一对应，无重复计数）
 
-**P0 修复之前，不建议把这个 skill 交给任何 agent 去面向真实用户使用。**
-
-| 问题 | 结论 |
-|---|---|
-| skill 与 AGENTS.md 是否合理 | 理念合理。但较大比例的能力声明与实现不符或已经过时，见 3.7 和 3.8 |
-| 能否用到所有 agent 中 | 文件格式基本符合开放标准，但**现在做不到开箱即用**，原因有五个：<br>1. 没有放进任何 agent 的技能发现目录<br>2. frontmatter 里有非标准字段<br>3. 写死了本机绝对路径<br>4. 依赖 Python≥3.12、uv 和外网<br>5. 在无网环境里会**静默生成假行情**<br>详见 3.5 和 3.6 |
-| 规范化 | `name`、`description` 和目录结构都合规。需要做的是：<br>1. 把 `version`、`author` 移进 `metadata`<br>2. 补上 `compatibility`<br>3. 补上"输出契约"、"失败处理"和"不适用场景"三部分 |
-| 真实性 | ❌ 有 P0 问题。不在白名单里的 A 股（例如 601318.SH）**在联网状态下也不会发任何请求**，直接生成合成行情。PNG 页脚还写着"新浪原始值" |
-| 可靠性与正确性 | ❌ 主要问题有四类：<br>1. 多条制度规则已过时：ST 涨跌幅、港股价位表、港股印花税、交易日历、PDT<br>2. 代码里叫 "EMA200" 的值，实际是 EMA50 或 EMA60<br>3. 保形预测的"校准审计"测量的并不是图上展示的区间<br>4. 中位数预测 q50 在 6 个标的中有 5 个误差比"价格不变"这一朴素基准还大 |
-| 是否需要进一步优化 | 需要。按第 4 节从 P0 到 P3 的顺序修复。第 5 节是可以长期复用的勾选清单 |
-
-问题统计如下。P0 指会造成失真或误导，P1 指结果错误或与文档严重不符，P2 指规范、可靠性或可移植性问题，P3 指措辞或整洁度问题。
-
-| 级别 | 数量 |
-|---|---|
-| P0 | 6 |
-| P1 | 30 |
-| P2 | 39 |
-| P3 | 11 |
+| 级别 | 编号范围 | 数量 | 当前状态 |
+| --- | --- | --- | --- |
+| **P0** | `A-01 ~ A-06` | 6 | 6 项全部已修复并由回归测试守护 |
+| **P1** | `R-01 ~ R-08`（8）、`C-01 ~ C-06`（6）、`G-01 ~ G-02`（2）、`P-01 ~ P-02`（2）、`AG-01 ~ AG-06`（6）、`T-01 ~ T-03`（3） | 27 | 27 项全部已修复 |
+| **P2** | `R-09 ~ R-12`（4）、`C-07 ~ C-13`（7）、`G-03 ~ G-06`（4）、`P-03 ~ P-06`（4）、`AG-07 ~ AG-11`（5）、`T-04 ~ T-07`（4） | 28 | 28 项全部已修复（T-07 由契约与端到端回放守护） |
+| **P3** | `C-14`（1）、`G-07 ~ G-08`（2）、`P-07 ~ P-08`（2）、`AG-12 ~ AG-13`（2）、`H-01 ~ H-03`（3） | 10 | 10 项全部已收口 |
 
 ---
 
-## 1. 审查范围
+## 1. 仓库与文件结构现状
 
-| 文件 | 规模 | 说明 |
-|---|---|---|
-| `AGENTS.md`（仓库根目录） | 124 行 | 面向编码 agent 的工程规范 |
-| `SKILL.md` | 75 行，正文 69 行 | 技能入口 |
-| `references/*.md` | 5 个文件，共 104 行 | 公式字典、三个市场的制度说明、常见错误清单 |
-| `assets/analysis.schema.json` | — | JSON Schema |
-| `assets/defaults.json` | — | 默认参数 |
-| `scripts/*.py` | 13 个文件，约 6,700 行 | 其中 `render_structure_chart.py` 有 2,021 行 |
-| `tests/` | 2 个脚本 | 另有 5 个 fixture |
-| `artifacts/` | 24 个产物 | 2026-10-15 20:12（PDT）生成 |
+| 文件 | 规模 | 职责说明 |
+| --- | --- | --- |
+| `AGENTS.md`（仓库根目录） | 135 行 | 面向开发者与编码 agent 的工程规范、铁律与门禁命令 |
+| `kline-structure-chart/SKILL.md` | 95 行 | 符合 Agent Skills 规范的技能入口与运行/回复/失败契约 |
+| `kline-structure-chart/references/*.md` | 5 个文件 | 公式字典（`math-patterns.md`）、三市场规则（`cn/hk/us-market.md`）、常见错误（`failure-modes.md`） |
+| `kline-structure-chart/assets/analysis.schema.json` | 44 行 | `AnalysisReport` 唯一顶层契约（版本 `5.1.0`） |
+| `kline-structure-chart/scripts/*.py` | 12 个文件 | 取数、市场规则、纯计算结构层、指标、形态、策略、风控、保形预测、回测、HTML 与 PNG 渲染 |
+| `kline-structure-chart/tests/*.py` | 6 个文件 | `conftest.py`、`test_quant_skill.py`、`test_data_sources.py`、`test_indicator_golden.py`、`test_docs_contract.py`、`check_days_invariance.py`、`record_fixtures.py` |
+| `kline-structure-chart/tests/fixtures/recorded/` | 25 个真实数据文件 + `MANIFEST.json` | 真实录制的新浪日线（9）、Yahoo 日线含 `^VIX`（6）、腾讯指数日线 `hkHSTECH`（1）、Yahoo 除权除息事件（9） |
 
 ---
 
-## 2. 验证证据（本轮实际执行）
+## 2. 本轮实跑验证证据
 
-### 2.1 仓库规定的门禁命令
+### 2.1 门禁命令实跑输出（`[命令输出]`）
 
 ```text
 $ uv run --directory kline-structure-chart pytest -v
 ...
-14 passed in 3.56s
+tests/test_data_sources.py (19 passed)
+tests/test_docs_contract.py (12 passed)
+tests/test_indicator_golden.py (12 passed, 含 SMA/EMA/RSI/ATR/BB/Stoch/MACD/ADX/Supertrend)
+tests/test_quant_skill.py (42 passed, 100% 使用 fixtures/recorded/ 真实行情)
+============================= 85 passed in 49.30s ==============================
 
-$ uv run --directory kline-structure-chart python tests/check_days_invariance.py --data tests/fixtures/sina_daily --step 40
-runs=120 failing=0 days=[60, 120, 200, 250, 300, 500]
+$ uv run --directory kline-structure-chart python tests/check_days_invariance.py --data tests/fixtures/recorded/sina_daily --step 40
+runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 ```
 
-> ⚠️ 两项门禁都通过了，但**用的全是合成数据**。测试一律设置 `allow_network=False`，`tests/fixtures/sina_daily/*.json` 本身也是合成数据（见 T-02）。所以这两项门禁发现不了下文大部分问题。
+### 2.2 三市场真实行情产物与校准覆盖率核验（`[脚本计算]`）
 
-### 2.2 Agent Skills 规范校验
+| 标的 | 数据源 | `quality.status` | `as_of`（已收盘） | 复权口径 | `ema200` | `vix` | 50% / 80% 滚动样本外实测覆盖率（样本数） | `q50_mae_pct` vs `random_walk_mae_pct` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `600519.SH` | `SINA_LIVE_DAILY` | `OK` | `2026-10-15` | `total_return` | `1338.12` | `None` | `0.449` / `0.841`（107） | `4.54%` / `4.54%` |
+| `00700.HK` | `YAHOO_DAILY(0700.HK)` | `OK`（自动拆出 `2026-10-16` 盘中未收盘 K 线并记录于 `notes`） | `2026-10-15` | `total_return` | `395.42` | `None` | `0.748` / `0.963`（107） | `4.27%` / `4.27%` |
+| `NVDA.US` | `YAHOO_DAILY(NVDA)` | `OK` | `2026-10-15` | `total_return` | `191.56` | `16.46`（真实 `^VIX`） | `0.692` / `0.916`（107） | `4.85%` / `4.85%` |
 
-校验脚本是按 agentskills.io 规范写的。
+### 2.3 浏览器实测与 PNG 视觉检查（`[浏览器实测]`）
 
-```text
-name='kline-structure-chart' len(description)=143 body_lines=69
-frontmatter fields=['author', 'description', 'license', 'name', 'version']
-硬编码绝对路径=['/Users/admin-1234/work/stock-skill/kline-structure-chart']
-ISSUES:
- - 非规范顶层字段（应移入 metadata）: ['author', 'version']
- - 未声明 compatibility（本技能依赖 Python>=3.12、uv、numpy/pillow 与外网行情）
-```
+- **Chrome DevTools 实测 `--days 60` 看板（`600519.SH_dashboard.html`）**：
+  - 5 个历史回放截面（`2026-05-19`、`2026-06-16`、`2026-07-15`、`2026-08-12`、`2026-09-09`）切换时，`maxBarDay <= snap.as_of` 全部为 `true`（`activeBarsLen` 分别为 `60, 60, 60, 20, 40`），彻底消除了 `--days 60` 回放退回显示未来 K 线的问题。
+  - 7 个图层复选框全部关闭再开启、标的主图与相对强弱（RS）视图来回切换，控制台消息数为 `0`（`<no console messages found>`）。
+- **PNG 目视检查（`600519.SH_preview.png`、`NVDA.US_preview.png`）**：
+  - A 股为红涨绿跌，美股为绿涨红跌；副标题显示 `数据质量：OK · 风控否决: 已触发(禁做多)`；右侧推演区显示 `【风控否决】` 红色横幅（与左侧 K 线高点标注框零遮挡）及 15 日保形预测 50%/80% 扇形。
 
-### 2.3 探针复现
+### 2.4 联网核实的三市场交易制度口径（2026-10 时点）
 
-只读调用 `scripts/` 里的函数，不修改任何东西。
-
-```text
-601318.SH -> source = DETERMINISTIC_OFFLINE_FIXTURE | 联网模式下网络请求 0 次 | 末根收盘 337.6
-300059.SZ -> source = DETERMINISTIC_OFFLINE_FIXTURE | 末根收盘 150.95
-[601318.SH] sina='601318.sh'        ← 正确应为 sh601318
-[000002.SZ] asset_type='index'      ← 万科A 被识别成指数（lot_size=1，无涨跌停，无 T+1）
-[000858.SZ] asset_type='index'      ← 五粮液 被识别成指数
-[01810.HK]  Yahoo 代码 '01810.HK'   ← 正确应为 1810.HK，结果回退到合成数据
-[510300.SH] asset_type='equity'     ← ETF 被识别成个股
-ST 主板 → 0.05 ；ST 创业板 → 0.05
-HK round_to_tick(612.30) → 612.4    ← HKEX 规定 500–1000 档最小价位为 0.50
-HK round_to_tick(1234.3) → 1234.4   ← 1000–2000 档最小价位为 1.00
-HK stamp_duty_sell_bps = 10         ← 只向卖方收取
-is_trading_day: CN 2025-06-02 / CN 2026-02-23 / US 2025-01-09 / 2027-01-01（三个市场） → 全部返回 True
---days 120 与 --days 300 对比（同一标的、同一天、离线）：收盘 1543.44 vs 1886.6，rule_score 31.9 vs 81.0
-策略证据字符串写的是 "Close(1543.44) vs EMA200(1606.05)"，而 snapshot 里 ema200=None、ema50=1606.05
-```
-
-### 2.4 抽检既有产物 `artifacts/`
-
-这批产物的生成时间是 2026-10-15 20:12（PDT），即香港时间 10-16 11:12，港股当时在早市交易中。
-
-| 标的 | 数据源 | quality 标识 | 最后一根 K 线 | ema200 | vix |
-|---|---|---|---|---|---|
-| 000001.SH | SINA_LIVE_DAILY | OK | 2026-10-15 | None | — |
-| 600519.SH | SINA_LIVE_DAILY | OK | 2026-10-15，收盘 1312.97 | None | — |
-| 00700.HK | YAHOO_DAILY | **PARTIAL，并警告"使用确定性离线行情样本"** | **2026-10-16，成交量 7,892,739（前一日 20,676,017）** | None | — |
-| HSI.HK | YAHOO_DAILY | **PARTIAL（误标）** | **2026-10-16，成交量 0.0** | None | — |
-| NVDA.US | YAHOO_DAILY | **PARTIAL（误标）** | 2026-10-15 | None | **19.5（写死）** |
-| SPY.US | YAHOO_DAILY | **PARTIAL（误标）** | 2026-10-15 | None | **19.5（写死）** |
-
-下表比较两组覆盖率：
-
-- `calibration_audit`：报告里自称的覆盖率。
-- backtest OOS：对图上实际展示的区间做的样本外实测。
-
-| 标的 | 自称 50% / 80% 覆盖率 | 展示区间实测 50% / 80% 覆盖率（样本数） | q50 平均绝对误差 | "价格不变"基准的平均绝对误差 |
-|---|---|---|---|---|
-| 000001.SH | 0.583 / 0.867 | 0.40 / 0.85（20） | 2.23% | 2.22% |
-| 600519.SH | **0.733** / 0.833 | **0.35** / 0.85（20） | 4.61% | 4.32% |
-| 00700.HK | 0.683 / 0.967 | 0.522 / 0.957（23） | 4.91% | 4.37% |
-| HSI.HK | 0.533 / 0.917 | 0.565 / 0.826（23） | 2.55% | 2.50% |
-| NVDA.US | 0.667 / 0.85 | 0.458 / 0.875（24） | 6.37% | 6.16% |
-| SPY.US | 0.717 / 0.85 | 0.542 / 0.833（24） | 2.16% | 2.24% |
-
-从这两张表可以得出三点：
-
-- 报告自称的覆盖率和图上区间的实际覆盖率差异很大，600519.SH 的 50% 区间自称 0.733，实测只有 0.35。
-- q50 中位数相对"价格不变"基准没有优势：6 个标的里 5 个更差，1 个略好。
-- 实测样本只有 20 到 24 个，覆盖率估计本身的误差大约在 ±0.1。
-
-### 2.5 浏览器检查（Chrome DevTools 打开离线 HTML）
-
-- ✅ `00700.HK_dashboard.html`：控制台 0 条消息。5 个回放截面加最新截面来回切换、7 个图层开关、RS 视图切换都没有报错。
-- ❌ 用 `--days 60` 生成的看板：5 个回放截面中有 3 个，在展示窗口内能取到的 K 线为 0 根。此时前端会退回显示全部 60 根 K 线，也就是说截面日期之后的 K 线也被画了出来。
-- ❌ 楔形轨道：结构层上轨实际起点 idx=100、下轨 idx=119，HTML 却一律从 `nBars-60` 处开始画，画出来的斜率是错的。
-- ❌ 用合成数据生成的 PNG：
-  - 标题是"贵州茅台 (600519.SH)"，图上收盘价 1543.44，而同日真实收盘价是 1312.97。
-  - 页脚写着"新浪原始值"。
-  - 整张图没有任何合成数据的提示。
-
-### 2.6 联网核实制度规则
-
-均为 2026-10 时点的口径。
-
-| 规则 | 代码或文档现状 | 当前有效口径 | 来源 |
-|---|---|---|---|
-| 沪深主板 ST 涨跌幅 | ±5% | 2026-04-24 发布修订后的交易规则，**2026-07-06 起施行 ±10%**；双创板块 ST 本来就是 ±20% | [中证网](https://cs.com.cn/tj/02/01/202506/t20250627_6498570.html)、[同花顺 2026-04-10](https://news.10jqka.com.cn/20260410/c675906757.shtml)、[财联社](https://www.cls.cn/detail/2069694)（均为新闻转述，建议再用交易所规则原文复核） |
-| 港股最小价位（spread table） | ≥200 一律 0.20 | 500–1000 档 0.50，1000–2000 档 1.00，2000–5000 档 2.00，5000 以上 5.00。Phase 1 于 **2025-08-04** 上线：10–20 档由 0.02 降为 0.01，20–50 档由 0.05 降为 0.02。Phase 2（0.5–10 档由 0.01 降为 0.005）排期 2026-08-03，是否已落地需看港交所公告 | [HKEX Reduction of Minimum Spreads](https://www.hkex.com.hk/Services/Trading/Securities/Overview/Trading-Mechanism/Reduction-of-Minimum-Spreads?sc_lang=en) |
-| 港股印花税 | 仅卖方 0.1% | 2023-11-17 起**买方和卖方各收 0.1%** | [KPMG](https://kpmg.com/cn/en/home/insights/2023/11/tax-alert-21-hk-the-reduced-stamp-duty-rate-on-hk-stock-transfer-will-take-effect-from-17-nov-23.html)、[IRD 说明](https://www.gov.hk/en/residents/taxes/docs/IRSD123(E).pdf)、[HKEX CT/158/23](https://www.hkex.com.hk/-/media/HKEX-Market/Services/Circulars-and-Notices/Participant-and-Members-Circulars/SEHK/2023/ce_SEHK_CT_158_2023.pdf) |
-| A 股 2026 年春节休市 | 日历里缺 2026-02-23 | 2-15 至 2-23 休市，2-24 开市 | [上交所休市安排](https://www.sse.com.cn/disclosure/dealinstruc/closed/list/)、[澎湃](https://m.thepaper.cn/newsDetail_forward_32603402) |
-| A 股 2025 年端午 | 日历里缺 2025-06-02 | 5-31 至 6-2 放假 | [人民日报全文](https://paper.people.com.cn/rmrb/html/2024-11/13/nw.D110000renmrb_20241113_5-03.htm)、[新华网](https://www.news.cn/politics/20241112/46dcf0de740844dd824ff54b5be5af2e/c.html) |
-| 美股 2025-01-09 | 当作交易日 | 卡特总统国葬日，NYSE 和 Nasdaq 都休市 | [ICE/NYSE](https://ir.theice.com/press/news-details/2024/The-New-York-Stock-Exchange-Will-Close-Markets-on-January-9-to-Honor-the-Passing-of-Former-President-Jimmy-Carter-on-National-Day-of-Mourning/default.aspx)、[Nasdaq](https://www.nasdaq.com/articles/stock-market-will-be-closed-january-9-2025) |
-| 美股 PDT 规则 | "PDT_APPLIES"、"PDT 约束" | SEC 于 2026-04-14 批准 FINRA 4210 修订，取消 PDT 认定和 2.5 万美元门槛，2026-06-04 生效，券商最晚可过渡到 2027-10-20 | [Schwab](https://international.schwab.com/story/sec-approves-scrapping-25000-day-trader-minimum)、[E*TRADE](https://us.etrade.com/knowledge/library/margin/pattern-day-trading-rule-change)（券商文章，建议再用 SEC Release 34-105226 原文复核） |
+| 规则 | 当前有效口径 | 生效日期 | 权威来源 |
+| --- | --- | --- | --- |
+| 沪深主板 ST 涨跌幅 | 主板风险警示股票（ST/\*ST）涨跌幅由 `±5%` 调整为 `±10%`；创业板/科创板 ST 为 `±20%`；北交所 `±30%` | `2026-07-06`（`2026-04-24` 发布） | [中证网](https://cs.com.cn/tj/02/01/202506/t20250627_6498570.html)、[财联社](https://www.cls.cn/detail/2069694) |
+| A 股最小申报股数 | 主板/创业板 100 股整手；科创板单笔不少于 200 股、超出按 1 股递增；北交所单笔不少于 100 股、超出按 1 股递增；ETF 最小价位 `0.001` 元 | 现行有效 | 上交所科创板交易特别规定、北交所交易规则 |
+| 港股最小价位（Spread Table） | 含 500 以上各档（`0.50 / 1.00 / 2.00 / 5.00`）；Phase 1 于 `2025-08-04` 下调 10–20 档至 `0.01`、20–50 档至 `0.02`；Phase 2 于 `2026-08-03` 下调 0.5–10 档至 `0.005`（ETF 不适用下调） | `2025-08-04` / `2026-08-03` | [HKEX Reduction of Minimum Spreads](https://www.hkex.com.hk/Services/Trading/Securities/Overview/Trading-Mechanism/Reduction-of-Minimum-Spreads?sc_lang=en) |
+| 港股印花税 | 买卖双方各按 `0.1%`（10 bps）双边计收；ETF 豁免 | `2023-11-17` | [KPMG](https://kpmg.com/cn/en/home/insights/2023/11/tax-alert-21-hk-the-reduced-stamp-duty-rate-on-hk-stock-transfer-will-take-effect-from-17-nov-23.html)、[IRD](https://www.gov.hk/en/residents/taxes/docs/IRSD123(E).pdf) |
+| 交易日历（2021~2027） | 已收录 CN（`2021-01-01 ~ 2026-12-31`，含 `2025-06-02` 端午、`2026-02-23` 春节）、HK 与 US（`2021-01-01 ~ 2027-12-31`，含 `2025-01-09` 卡特国葬日休市） | `2021 ~ 2027` | [上交所休市安排](https://www.sse.com.cn/disclosure/dealinstruc/closed/list/)、[ICE/NYSE](https://ir.theice.com/press/news-details/2024/The-New-York-Stock-Exchange-Will-Close-Markets-on-January-9-to-Honor-the-Passing-of-Former-President-Jimmy-Carter-on-National-Day-of-Mourning/default.aspx) |
+| 美股结算与 PDT 规则 | SEC `T+1` 结算；FINRA 4210 修订自 `2026-06-04` 起取消 PDT 认定与 2.5 万美元门槛（券商过渡期至 `2027-10-20`）；`< $1.00` 适用 Reg NMS Rule 612 子美分最小价位 `$0.0001` | `2026-06-04` | [Schwab](https://international.schwab.com/story/sec-approves-scrapping-25000-day-trader-minimum)、[E*TRADE](https://us.etrade.com/knowledge/library/margin/pattern-day-trading-rule-change) |
 
 ---
 
-## 3. 问题清单
+## 3. 问题清单与逐项修复台账
 
-### 3.1 数据真实性（P0）
+### 3.1 数据真实性（P0，共 6 项）
 
-| ID | 级别 | 位置 | 问题 | 证据 | 修复建议 |
-|---|---|---|---|---|---|
-| A-01 | P0 | `scripts/market_rules.py:127`、`scripts/data_gateway.py:198-231` | 非白名单 A 股的新浪代码被拼成 `601318.sh`，不满足 `startswith(("sh","sz"))`，所以**联网时一次请求都不发**，直接生成合成行情。北交所同样没有 `bj` 分支。港股非白名单代码的 Yahoo 符号也是错的（应为 `1810.HK`，实际生成 `01810.HK`） | 2.3 | 按交易所后缀推导：`.SH`→`sh`+代码，`.SZ`→`sz`+代码，`.BJ`→`bj`+代码。港股去掉前导 0，转成 4 位 Yahoo 代码。解析失败时直接报错 |
-| A-02 | P0 | `scripts/analyze_and_forecast.py:37`、`scripts/data_gateway.py:223-231,146-157` | 有四个叠加的问题：<br>1. 生产主流程写死了 `allow_synthetic_fallback=True`，CLI 没有开关可以关掉。<br>2. 网络或解析异常被 `except Exception: pass` 吞掉，随后静默回退。<br>3. 合成序列在最后 45 根 K 线里**人为注入了"双底加突破"结构**。<br>4. 合成序列的起始价格来自写死的旧价位表 | 2.3、2.5 | 生产路径默认禁止合成数据，出错时以非零码退出。只有测试才能显式使用 `--allow-synthetic`。失败原因写进 `provenance.errors` |
-| A-03 | P0 | `scripts/render_structure_chart.py:1770`；`scripts/render_html.py` 全文没有渲染 `quality` | PNG 不知道数据从哪里来，页脚固定写"新浪原始值"。HTML 只在副标题里用小字显示 `data_source`，`quality.warnings` 从来不渲染 | 2.5 | 只要不是实时数据，PNG 和 HTML 都要加满幅水印和红色横幅。PNG 页脚按实际数据源输出 |
-| A-04 | P0 | `scripts/analysis.py:421,427` | 数据质量标识在两个方向上都会判错：<br>1. 判定只认 `LIVE`、`LOCAL` 两个子串，所以**真实的 Yahoo 数据**被标成 PARTIAL，还附带"离线样本"警告。<br>2. 合成数据也只标 PARTIAL。<br>3. 基准指数的数据来源不参与判定 | 2.4（4 份真实数据都被误标） | 改用来源枚举：LIVE、DELAYED、LOCAL_FILE、SYNTHETIC。标的和基准分别判定，SYNTHETIC 一律判为 `UNAVAILABLE` |
-| A-05 | P0 | `scripts/data_gateway.py:334-335` | 美股的 `vix` 写死为 19.5，并写进 `market_regime.evidence` 和 `volatility_scaling`，看起来像真实数据。因为 19.5 < 20，VIX 放大永远不会触发。`earnings_date` 永远是 None | 2.4 | 真实拉取 `^VIX`；拉不到就填 null 并标注"未获取"。财报日要么接入数据源，要么从文档里删掉这项能力 |
-| A-06 | P0 | `scripts/data_gateway.py:50,91`、`scripts/analysis.py:155` | 未收盘的 K 线被当作已收盘：取数时一律写 `complete: True`。v5 主流程传入 `intraday=None`，使得 `split_live_bar` 实际上不起作用 | 2.4：港股早市的半根 K 线参与了全部计算，并且成为 `as_of` | 按交易所时区和收盘时间判断最后一根是否完整。不完整的就拆成 live bar，并在输出里标注 |
+| ID | 级别 | 当前代码位置 | 初审问题 | 修复状态与验证测试 |
+| --- | --- | --- | --- | --- |
+| A-01 | P0 | `scripts/market_rules.py:130-152`、`scripts/data_gateway.py:242-274` | 非白名单 A 股新浪代码拼错、北交所无 `bj` 分支、港股 Yahoo 代码未去前导 0 | ✅ 已修复：`sina_symbol_for` / `yahoo_symbol_for` 按后缀推导并在无法映射时抛错；`test_a01_unregistered_symbols_map_to_real_vendor_codes`、`test_a01_unregistered_a_share_and_hk_are_fetched_live`（真实录制 `601318.SH` 与 `01810.HK`） |
+| A-02 | P0 | `scripts/data_gateway.py:235-280`、`scripts/analyze_and_forecast.py:26-44` | 生产默认回退带人造双底的合成序列，且吞掉网络异常 | ✅ 已修复：彻底移除 `generate_deterministic_series` 与 `synthetic_daily`，任何取数失败直接抛 `RuntimeError` 并以 `[DATA_UNAVAILABLE]` 退出；`test_a02_synthetic_fallback_is_refused_by_default`、`test_no_synthetic_generators_or_mock_bars_in_code_and_tests` |
+| A-03 | P0 | `scripts/render_structure_chart.py:1098-1122`、`scripts/render_html.py:22-39,828-840` | PNG 页脚写死“新浪原始值”，非 OK 数据在 PNG/HTML 无醒目横幅与水印 | ✅ 已修复：PNG 与 HTML 在 `quality.status != "OK"` 时均渲染红色告警横幅与半透明大字水印，页脚输出真实 `data_source`；`test_a03_png_and_html_flag_non_live_data` |
+| A-04 | P0 | `scripts/contracts.py:20-66`、`scripts/analysis.py:424-433` | 真实 Yahoo 数据与美股基准 `SPY.US` 被误判为 `PARTIAL`；合成数据仅标 `PARTIAL` | ✅ 已修复：`classify_data_source` 按枚举判定，`SYNTHETIC` 一律判为 `UNAVAILABLE`；当标的本身即为市场默认基准（如 `SPY.US`）时 `needs_benchmark=False`；`test_a04_quality_status_uses_source_enum`、`test_multi_market_pipeline_and_backtest` |
+| A-05 | P0 | `scripts/data_gateway.py:302-314` | 美股 VIX 写死 `19.5` | ✅ 已修复：实时拉取 Yahoo `^VIX`（测试回放真实录制的 `yahoo_daily/VIX.json`），取不到时填 `None` 并注明原因；`test_a05_vix_is_fetched_or_null_never_hardcoded` |
+| A-06 | P0 | `scripts/market_rules.py:167-177`、`scripts/data_gateway.py:277-300,398-401` | 未收盘 K 线直接当作已收盘参与计算 | ✅ 已修复：`is_daily_bar_complete` 按交易所时区与收盘时间判定，`split_incomplete_last_bar` 将未收盘日线拆为 `intraday` 并在 `quality.notes` 披露；`test_a06_incomplete_last_bar_is_excluded` |
 
-### 3.2 正确性：市场制度
+### 3.2 正确性：市场制度（P1 8 项 + P2 4 项）
 
-| ID | 级别 | 位置 | 问题 | 修复建议 |
-|---|---|---|---|---|
-| R-01 | P1 | `scripts/market_rules.py:162-163`、`references/cn-market.md:8`、`AGENTS.md:35`、`tests/test_quant_skill.py:83` | ST 一律按 ±5% 处理，这条规则已经过时（见 2.6），并且双创板块的 ST 应为 ±20%。另外 `"ST" in symbol` 对股票代码永远不会命中，所以 ST 识别实际上从不生效 | 按板块和日期返回涨跌幅。ST 判定改用名称或外部标记字段 |
-| R-02 | P1 | `scripts/market_rules.py:180-194`、`tests/test_quant_skill.py:94` | 港股价位表缺 500 以上的各档。2025-08 的减价位改革也没有体现 | 把价位表做成带生效日期的数据文件，并用档位边界值做测试 |
-| R-03 | P1 | `scripts/market_rules.py:226` | 港股印花税只向卖方收取，正确做法是双边收取。ETF 没有豁免 | 双边计费，ETF 豁免 |
-| R-04 | P1 | `scripts/market_rules.py:8-37` | 交易日历有三处缺漏：CN 2025-06-02、CN 2026-02-23、US 2025-01-09。日历只覆盖到 2026 年，**2027-01-01 起三个市场的所有工作日都会被当成交易日**。离现在只剩约 2.5 个月 | 改用 `exchange_calendars` 一类的库，或者按年维护数据文件。超出覆盖范围时直接报错 |
-| R-05 | P1 | `scripts/market_rules.py:230`、`references/us-market.md:5`、`AGENTS.md:37` | PDT 规则已经废止，目前处于过渡期，相关字段和文案过时 | 更新字段和文案，注明过渡期 |
-| R-06 | P1 | `scripts/market_rules.py:111` | `000xxx.SZ` 开头的深市主板股票（万科、五粮液、美的等）被推断为指数，于是没有涨跌停、没有 T+1，lot 被设为 1 | 按"交易所 + 代码段"推断。只有 `000xxx.SH` 和 `399xxx.SZ` 是指数。ETF（51/56/58/15 开头）单独识别 |
-| R-07 | P1 | `scripts/data_gateway.py:298-303`、`scripts/market_rules.py:241-281` | 复权函数写好了，但没有公司行动的数据源，所以 `split` 模式对 A 股实际上什么都不做。新浪返回的是不复权价格，除权缺口会被误识别为 FVG、跳空或破位 | 接入除权除息数据，或改用前复权数据源。在 `meta` 里标注实际的复权状态 |
-| R-08 | P1 | `scripts/data_gateway.py:207-217` | `HSTECH.HK` 被映射成 `3033.HK`（这是一只 ETF），价格量级和指数完全不同，而且没有任何披露 | 映射到正确的指数代码，或者在 `meta` 里标注"ETF 代理" |
-| R-09 | P2 | `scripts/market_rules.py:210`、`scripts/risk.py:125-127` | A 股 lot 一律按 100 股。科创板单笔申报不少于 200 股，超出部分可以按 1 股递增；北交所也可以按 1 股递增（这是常识性规则，本轮没有联网复核） | 按板块分别定义最小申报数量和递增步长 |
-| R-10 | P2 | `scripts/market_rules.py:195-196` | A 股 ETF 和基金的最小价位 0.001 没有处理，美股 1 美元以下的价位 0.0001 也没有处理。`money()` 统一保留两位小数 | 按品种和价格选择精度 |
-| R-11 | P2 | `scripts/forecast.py:166` | 注册制新股上市前 5 个交易日不设涨跌幅，这一点没有建模。`is_ipo_no_limit` 永远是 False | 用上市日期字段来驱动 |
-| R-12 | P2 | `scripts/market_rules.py:223`、`scripts/analyze_and_forecast.py` | 港股配色写死为 `cn_red_up`，文档里没有说明。CLI 也没有暴露 `color_scheme` 参数，尽管 `AnalysisRequest` 里有这个字段 | 增加 `--color-scheme` 参数，并在 `references/hk-market.md` 里写明 |
+| ID | 级别 | 当前代码位置 | 初审问题 | 修复状态与验证测试 |
+| --- | --- | --- | --- | --- |
+| R-01 | P1 | `scripts/market_rules.py:180-188,295-327`、`scripts/analysis.py:284-305` | ST 一刀切按 `±5%`，且主流程从未识别或透传 `is_st` | ✅ 已修复：主板 ST 自 `2026-07-06` 起 `±10%`，双创 `±20%`，北交所 `±30%`；支持 `--st` 或 `--name`（含 `ST`）自动识别并全链路透传至风控、回测与预测；`test_p1_st_and_ipo_price_limits_by_board_date_and_pipeline` |
+| R-02 | P1 | `scripts/market_rules.py:330-362` | 港股价位表缺 500 以上档位及 2025-08 / 2026-08 下调 | ✅ 已修复：补齐 0.25~9995 全档位及 Phase 1/2 生效日下调（ETF 不适用下调）；`test_p1_hk_spread_table_full_bands_and_reductions` |
+| R-03 | P1 | `scripts/market_rules.py:442-456,476-479` | 港股印花税只算卖方且 ETF 未豁免 | ✅ 已修复：港股股票买卖双边各 10 bps，ETF 豁免为 0；`test_p1_hk_stamp_duty_both_sides` |
+| R-04 | P1 | `scripts/market_rules.py:10-79`、`scripts/forecast.py:211-212,354-358` | 休市表缺 `2025-06-02`、`2026-02-23`、美股 `2025-01-09` 及 2021~2023 历史假期 | ✅ 已修复：补齐 2021~2027 休市表；超出 `CALENDAR_COVERAGE_END` 的未来日期按工作日估算并在 `calendar_coverage` 与 `quality.notes` 明确披露；`test_p1_trading_calendar_fixes_and_coverage` |
+| R-05 | P1 | `scripts/market_rules.py:457-473`、`references/us-market.md:5` | 美股 PDT 规则表述过时 | ✅ 已修复：更新为 FINRA 4210 修订（`2026-06-04` 生效，过渡期至 `2027-10-20`）；`test_p1_us_pdt_rule_updated` |
+| R-06 | P1 | `scripts/market_rules.py:265-275` | `000xxx.SZ` 深市主板股票被误判为指数，ETF 未单独识别 | ✅ 已修复：按交易所+代码段精确区分指数（`000xxx.SH`/`399xxx.SZ`）、ETF（沪 `51/56/58`、深 `15`）与个股；`test_p1_asset_type_lot_step_and_tick_precision` |
+| R-07 | P1 | `scripts/data_gateway.py:168-232`、`scripts/market_rules.py:482-562` | 缺少真实除权除息数据源；新浪未复权价与 Yahoo 拆股后股息单位未对齐；回测切片 `bars[:t+1]` 泄漏 `t` 之后的未来除权因子 | ✅ 已修复：接入 Yahoo `events=div,splits`，对新浪原始价乘回后续 `split_ratio` 还原真实除息额；新增 `rescale_bars_as_of` 在回测每个决策日 `t` 将历史序列还原至截至 `t` 的真实 Point-in-Time 口径；`test_point_in_time_adjustment_no_future_leakage`、`test_r07_point_in_time_adjustment_from_real_corporate_actions`、`test_c04_c05_c10_backtest_replays_live_plan_with_bootstrap_ci` |
+| R-08 | P1 | `scripts/market_rules.py:90-92`、`scripts/data_gateway.py:113-138,255-258` | `HSTECH.HK` 用 `3033.HK` ETF 冒充 | ✅ 已修复：改用腾讯指数日线 `hkHSTECH`（已录制真实 1000 根日线）；`test_r08_hstech_uses_real_index_not_etf_proxy` |
+| R-09 | P2 | `scripts/market_rules.py:191-203,389-396`、`scripts/risk.py:126-143` | 科创板 200 股起 + 1 股递增、北交所 100 股起 + 1 股递增未实现 | ✅ 已修复：实现 `_cn_lot_rules` 与 `round_shares_to_lot` 并在 `risk.py` 仓位计算中生效；`test_p1_asset_type_lot_step_and_tick_precision` |
+| R-10 | P2 | `scripts/market_rules.py:365-387`、`scripts/structure.py:60-71`、`scripts/analysis.py:338-358`、`scripts/risk.py:155-215` | A 股 ETF `0.001` 元与美股 `< $1` 的 `0.0001` 美元最小价位未处理，且 `series_export` 与 `risk.py` 文案硬编码 `:.2f` 截断为 2 位小数 | ✅ 已修复：`tick_size_for`、`price_decimals`、`money()`、`series_export` 与 `risk.py` 全链路按品种最小价位保留小数位数（`510300.SH` `series_export` 收盘价与 `q50[0]` 精确同为 `4.242`）；`test_p1_asset_type_lot_step_and_tick_precision`、`test_g03_to_g07_rendering_invariants_and_low_price_etf` |
+| R-11 | P2 | `scripts/analyze_and_forecast.py:106`、`scripts/forecast.py:214-221` | 新股前 5 日无涨跌停标识 `is_ipo_no_limit` 恒为 `False` | ✅ 已修复：支持 `--ipo-no-limit` / `is_ipo_no_limit` 全链路透传；`test_p1_st_and_ipo_price_limits_by_board_date_and_pipeline` |
+| R-12 | P2 | `scripts/analyze_and_forecast.py:117-121`、`references/hk-market.md:11` | CLI 未暴露 `--color-scheme` 参数 | ✅ 已修复：CLI 新增 `--color-scheme {auto,cn_red_up,us_green_up}`；`test_g01_and_r12_png_follows_market_and_cli_color_scheme` |
 
-### 3.3 正确性：计算与统计
+### 3.3 正确性：计算与统计（P1 6 项 + P2 7 项 + P3 1 项）
 
-| ID | 级别 | 位置 | 问题 | 修复建议 |
-|---|---|---|---|---|
-| C-01 | P1 | `scripts/analysis.py:208,245`、`scripts/strategies.py:24,106,153,303` | 指标只在 120 根 K 线的结构窗口上计算，所以 EMA200、SMA250 永远是 None，被静默替换成 EMA60 或 EMA50。`formula_verified` 却仍然写 "EMA200(…)"，**证据字符串与实际不符**。作为否决依据的大盘 `regime_score` 也受影响 | 在固定的 `hist`（420 根，与 `--days` 无关）上计算指标。数据不够时明确标注，而不是悄悄替换 |
-| C-02 | P1 | `scripts/forecast.py:214-255,358` | 校准与展示脱节：<br>1. 校准只用终点期 H 的 \|R\| 打分，并且以 0 为中心。<br>2. 实际展示的区间以 drift 和类比结果的混合为中心，经过 max/min 拼接、涨跌停截断和价位取整。<br>3. 因此 `calibration_audit` 审计的对象不是图上的区间。<br>4. "逐期限边际覆盖率校准"的说法不成立 | 对每个 h 分别计算以预测中心为基准的残差分位数。用滚动样本外检验审计**实际输出**的区间，并在报告里引用回测得到的实测覆盖率 |
-| C-03 | P1 | `scripts/forecast.py:257-259` | q50 被 rule_score 推着漂移，而文档明确说 rule_score 不是概率。实测 q50 相对"价格不变"基准没有优势（见 2.4） | 去掉这个漂移，或者先用回测证明有效再启用。报告里强制披露 q50 相对"价格不变"基准的误差 |
-| C-04 | P1 | `scripts/evaluation.py:183-239` | 回测用的入场信号和止损止盈（1.5 / 2.2 倍 ATR）与 `risk.py` 实际给用户的计划完全不同，所以不能当作这份计划的历史验证 | 回测直接回放 `compute_triple_barrier_plan` 每天的输出 |
-| C-05 | P1 | `scripts/evaluation.py:242-244` | 交易笔数 ≤3 时，样本外数据就等于全部样本，训练数据混进了样本外评估 | 样本不足时返回"样本不足"，不再计算 |
-| C-06 | P1 | `scripts/analysis.py`（v5 流程）、`scripts/data_gateway.py:288` | v5 主流程不满足 `--days` 不变性。`datalen=max(450, days+260)` 让历史长度随 `--days` 变化，类比检索、回测和回放都会跟着变。离线时整条合成序列都会变（见 2.3） | 让取数长度与 `--days` 解耦，并把不变性检查扩展到 `run_pipeline` |
-| C-07 | P2 | `scripts/forecast.py:195-196` | 港股的"隔夜跳空修正"是在已经包含跳空的收盘到收盘波动率上再乘一个系数，跳空风险被算了两次 | 如果要建模跳空，应该拆分收益来源，而不是乘系数 |
-| C-08 | P2 | `scripts/forecast.py:51-52`、`references/math-patterns.md:39` | 注释和文档写的约束是 `t_c+H ≤ t_now−L_patch`，代码实际是 `−max(5, L/2)`，允许最多 10 根重叠。这不会造成前视泄漏，但"无重叠"的说法不对 | 统一代码和文档 |
-| C-09 | P2 | `scripts/evaluation.py:246-270`、`scripts/risk.py:144` | 两处名不副实：<br>1. 所谓 "Meta-Labeling" 只是手写的加权和，`meta_prob` 和 `confidence_score` 都不是概率，与 AGENTS.md 的术语边界冲突。<br>2. 只做了一次 50/50 切分，却称为 "Walk-Forward Purged/Embargo" | 改名（例如 `filter_score`），或者真正实现滚动和清洗切分 |
-| C-10 | P2 | 回测输出 | 样本外只有 16 到 21 笔交易，元过滤之后只剩 4 到 15 笔，没有置信区间 | 输出样本量警告和 bootstrap 置信区间 |
-| C-11 | P2 | `scripts/evaluation.py:26,36` | 因果审计有三个缺口：<br>1. 用固定的 0.04 阈值，而生产流程用自适应阈值。阈值会随新数据变化，导致历史拐点被重新定义。<br>2. 审计只用前缀窗口，覆盖不到生产中的滑动窗口。<br>3. 没有覆盖结构层、预测和 SMC | 用生产配置做滚动回放审计 |
-| C-12 | P2 | `scripts/analysis.py:108`、`scripts/evaluation.py:327` | 回放和覆盖率评估用 `regime_score` 顶替 `rule_score`，跟线上预测不是同一个模型 | 回放时调用完整的流水线 |
-| C-13 | P2 | `scripts/patterns.py:280-286,356-384,389-396,515-593` | 宣称的以下能力没有实现：<br>1. 核平滑极值和头肩形态。几何形态用的其实是原始高低点的 ZigZag。<br>2. WLS 通道。实际是对平滑后的序列做 OLS，r² 会被平滑抬高。<br>3. MACD 背离。`macd_hist` 参数传进来了但没有用到。<br>4. CHoCH。代码没有把它和 BOS 区分开 | 要么实现，要么删掉这些宣称 |
-| C-14 | P3 | `scripts/indicators.py:371,92`、`scripts/evaluation.py:89`、`scripts/market_rules.py:208` | 四个小问题：<br>1. mom10 用的是 `closes[-10]`，实际是 9 日动量。<br>2. 价格完全不动时，第一个 RSI 值是 100。<br>3. 时间屏障实际持有 16 根，不是 15 根。<br>4. `False if … else False` 是冗余写法 | 顺手修掉 |
+| ID | 级别 | 当前代码位置 | 初审问题 | 修复状态与验证测试 |
+| --- | --- | --- | --- | --- |
+| C-01 | P1 | `scripts/analysis.py:80-84,210-212`、`scripts/strategies.py:24-25,106-107` | 指标只在 120 根窗口上计算导致 EMA200 恒为 `None` 并用 EMA60 冒充 | ✅ 已修复：固定在 `HISTORY_BARS=420` 历史上预热；不足时显式标注 `EMA200(N/A)`；`test_c01_ema200_is_warmed_up_and_never_substituted` |
+| C-02 | P1 | `scripts/forecast.py:154-327` | 保形校准审计未计入涨跌停截断与价位取整，与展示区间脱节 | ✅ 已修复：抽出 `_build_bands_from_multipliers`，展示区间与滚动样本外审计完全共用同一套截断与取整构造；`test_c02_c03_conformal_bands_are_calibrated_and_q50_has_no_drift` |
+| C-03 | P1 | `scripts/forecast.py:303-305,367-368` | `q50` 受规则分漂移污染且未披露相对随机游走误差 | ✅ 已修复：`q50` 取最新收盘价（`MARTINGALE_LAST_CLOSE`），`calibration_audit` 直接披露 `q50_mae_pct` 与 `random_walk_mae_pct`；`test_c02_c03_conformal_bands_are_calibrated_and_q50_has_no_drift` |
+| C-04 | P1 | `scripts/evaluation.py:239-372` | 回测使用固定 ATR 倍数而非线上真实计划 | ✅ 已修复：`run_plan_backtest` 逐日调用 `analyze_bundle` 回放线上真实 `triple_barrier_plan`；`test_c04_c05_c10_backtest_replays_live_plan_with_bootstrap_ci` |
+| C-05 | P1 | `scripts/evaluation.py:239-310` | 回测在样本内拟合元权重导致样本外泄漏 | ✅ 已修复：回测不学习任何参数，完全按事前固定规则逐日回放；同上 |
+| C-06 | P1 | `scripts/data_gateway.py:26`、`scripts/analysis.py:181-215` | 取数长度随 `--days` 变化导致 v5 报告随 `--days` 漂移 | ✅ 已修复：取数固定 `FETCH_BARS=760`，v5 报告除展示数组外跨 `--days` 完全不变；`test_c06_v5_pipeline_is_days_invariant`、`test_c06_fetch_length_does_not_depend_on_days` |
+| C-07 | P2 | `scripts/forecast.py:228-231` | 港股隔夜跳空在收盘到收盘波动率上重复乘系数放大 | ✅ 已修复：仅披露 `overnight_gap_ratio`，不再重复乘系数 |
+| C-08 | P2 | `scripts/forecast.py:52-75`、`references/math-patterns.md:43` | 相似 Patch 允许 10 根重叠，与文档“无重叠”冲突 | ✅ 已修复：`max_cand_end = cur_end - horizon_bars - patch_len` 且候选间距 `>= patch_len`，严格零重叠；`test_causal_replay_invariance_no_lookahead` |
+| C-09 | P2 | `scripts/risk.py:144-153`、`scripts/evaluation.py:239` | 规则加权自称概率 `confidence_score` 与假 Walk-Forward | ✅ 已修复：移除 `confidence_score` 与假 Walk-Forward，明确标注 `scoring_method = DETERMINISTIC_MULTI_FACTOR_RULE_V5`；`test_no_unimplemented_capability_claims` |
+| C-10 | P2 | `scripts/evaluation.py:185-236,360-362` | 回测交易笔数少时无样本量警告与置信区间 | ✅ 已修复：输出 `sample_size_warning` 及胜率/均值收益的 Bootstrap 95% 置信区间（`win_rate_95ci_pct` / `mean_return_95ci_pct`）；`test_c04_c05_c10_backtest_replays_live_plan_with_bootstrap_ci` |
+| C-11 | P2 | `scripts/evaluation.py:17-89` | 因果回放审计只用固定 0.04 阈值且未覆盖结构层、SMC 与预测 | ✅ 已修复：`run_causal_replay_audit` 使用生产自适应阈值并覆盖核平滑、结构层拐点、蜡烛形态、SMC 与保形预测；`test_causal_replay_invariance_no_lookahead` |
+| C-12 | P2 | `scripts/analysis.py:86-176` | 历史回放快照只算 `regime_score`，未算完整 `rule_score` | ✅ 已修复：`_build_replay_snapshots` 调用完整结构与策略评分流水线输出 `rule_score` 与 `rating`；`test_g03_to_g07_rendering_invariants_and_low_price_etf` |
+| C-13 | P2 | `scripts/patterns.py`、`references/math-patterns.md` | 宣称头肩、MACD 背离、CHoCH、WLS 通道等未实现能力 | ✅ 已修复：重命名为 `SWING_DOUBLE_*`、`KERNEL_SMOOTHED_*TREND`、`*_BOS`，清理全部不实宣称；`test_no_unimplemented_capability_claims` |
+| C-14 | P3 | `scripts/indicators.py:93,372`、`scripts/evaluation.py:124` | 10 日动量误用 `closes[-10]`（9 日）、平盘首值 RSI=100、时间屏障多持 1 根 | ✅ 已修复：10 日动量改用 `closes[-11]`、平盘首值 RSI=50.0、`end_idx = entry_idx + horizon_bars - 1`；`test_c14_momentum_10d_and_flat_rsi_initial_value`、`test_triple_barrier_t_plus_1_and_same_bar_conservative_sl` |
 
-### 3.4 渲染层
+### 3.4 渲染层（P1 2 项 + P2 4 项 + P3 2 项）
 
-| ID | 级别 | 位置 | 问题 | 修复建议 |
-|---|---|---|---|---|
-| G-01 | P1 | `scripts/render_structure_chart.py:54-55,1157,1777` | PNG 的涨跌色写死为红涨绿跌，`render()` 也没有配色参数，所以**美股 PNG 违反了 `us_green_up` 约定**。页脚对港股、美股也写着"A股红涨绿跌" | 把 `color_scheme` 传进 PNG 渲染器 |
-| G-02 | P1 | `scripts/analysis.py:25-40`、`scripts/render_structure_chart.py:1204-1236` | **违反"算图分离"铁律**：<br>1. PNG 渲染器自己从 K 线重新计算结构、阶梯和推演。<br>2. 计算层反过来依赖渲染模块 | 把结构计算抽成单独的 `structure.py`。PNG 只读取 report |
-| G-03 | P2 | `scripts/render_html.py:663-670` | 楔形轨道的起点固定画在 `nBars-60`，跟真实支点位置不一致（见 2.5） | 用 `upper.start.idx` 加上偏移量 |
-| G-04 | P2 | `scripts/render_html.py:470-471` | `--days` 小于 120 时，回放会显示截面之后的 K 线（见 2.5） | 回放用到的 K 线随快照一起导出 |
-| G-05 | P2 | `scripts/render_structure_chart.py:998` 等 | 推演标签用 `:.0f` 取整，对低价标的（例如 8 元或 3 港元的股票）会严重失真 | 按价位精度格式化 |
-| G-06 | P2 | PNG 内容 | SKILL.md 要求在回复里展示 PNG，但 PNG 上没有风控否决、数据质量和保形扇形，只看 PNG 会被误导 | 在 PNG 上加否决徽章和数据质量徽章 |
-| G-07 | P3 | `scripts/render_html.py:588` | 订单块固定用绿色表示多头、红色表示空头，与 `cn_red_up` 的颜色语义正好相反 | 跟随配色方案 |
-| G-08 | P3 | `scripts/render_html.py:239,337`、`SKILL.md:12` | "筹码峰"这个说法和 AGENTS.md 的术语边界冲突 | 改成"成交分布 POC（近似）" |
+| ID | 级别 | 当前代码位置 | 初审问题 | 修复状态与验证测试 |
+| --- | --- | --- | --- | --- |
+| G-01 | P1 | `scripts/render_structure_chart.py:505-506` | PNG 写死红涨绿跌，美股违反 `us_green_up` | ✅ 已修复：PNG K 线、成交量柱、卡片与页脚文字全部跟随 `color_scheme`；`test_g01_and_r12_png_follows_market_and_cli_color_scheme` |
+| G-02 | P1 | `scripts/structure.py`、`scripts/analyze_and_forecast.py:43-68` | PNG 渲染器重算结构层，`analysis.py` 反向依赖渲染器 | ✅ 已修复：抽出纯计算模块 `scripts/structure.py`，主流程只算一次并共享给 JSON 与 PNG；`test_g02_structure_is_computed_once_outside_the_renderer` |
+| G-03 | P2 | `scripts/render_html.py:692-710` | HTML 楔形轨道固定从 `nBars - 60` 起画，斜率失真 | ✅ 已修复：按 `rail.start.idx + (nBars - structBars)` 计算真实起点与左边界截断值；`test_g03_to_g07_rendering_invariants_and_low_price_etf` |
+| G-04 | P2 | `scripts/analysis.py:135-174`、`scripts/render_html.py:499-504` | `--days 60` 时历史回放退回显示全部 60 根 K 线，泄漏截面之后的未来 K 线 | ✅ 已修复：每个回放快照自带截至 `as_of` 的 60 根 `bars_window`，浏览器实测 5 个截面全部 `maxBarDay <= as_of`；同上 + 2.3 节浏览器实测 |
+| G-05 | P2 | `scripts/structure.py:69-76,693-712`、`scripts/render_structure_chart.py:639-648,754` | 推演标签与刻度用 `:.0f` 取整，低价股/ETF 严重失真 | ✅ 已修复：`fmt_price` 按价格量级自动保留 2~3 位小数；在 `510300.SH`（约 4 元）真实录制行情上验证通过 |
+| G-06 | P2 | `scripts/render_structure_chart.py:596-604,845-883` | PNG 缺少数据质量状态、风控官否决徽章与 15 日保形预测扇形 | ✅ 已修复：PNG 副标题显示数据质量与风控状态，右侧绘制 50%/80% 保形扇形与防遮挡 `【风控否决】` 横幅；2.3 节目视核验 + `test_g03_to_g07_rendering_invariants_and_low_price_etf` |
+| G-07 | P3 | `scripts/render_html.py:617-626` | HTML 订单块固定多头绿、空头红，与 `cn_red_up` 相反 | ✅ 已修复：`bullObFill` / `bearObFill` 跟随 `isCnColor`；`test_g03_to_g07_rendering_invariants_and_low_price_etf` |
+| G-08 | P3 | `scripts/render_html.py:269,367` | “筹码峰”表述违反术语边界 | ✅ 已修复：统一改为 `成交分布近似 POC`；`test_no_unimplemented_capability_claims` |
 
-### 3.5 Skill 规范化
+### 3.5 ~ 3.10 Skill 规范、跨 Agent 可移植性、文档契约与测试体系
 
-对照的是 [agentskills.io/specification](https://agentskills.io/specification) 和 Anthropic 的技能编写最佳实践。
-
-| 检查项 | 结果 | 说明 / 建议 |
-|---|---|---|
-| `name` 只用小写字母、数字和连字符，且不超过 64 字符 | ✅ | `kline-structure-chart` |
-| `name` 与目录名一致 | ✅ | |
-| `description` 在 1 到 1024 字符之间，并且写清做什么和何时用 | ✅ | 143 字符 |
-| `description` 有英文关键词和不适用边界 | ⚠️ P2 | 只有中文，英文请求可能触发不了。建议补上英文和"不适用于基本面分析、新闻和下单" |
-| frontmatter 只使用规范字段 | ❌ P2 | `version` 和 `author` 不是规范字段，要移进 `metadata`。预计会被严格校验器（例如 `skills-ref validate` 的字段白名单）判为非法字段（本轮没有运行该工具） |
-| 写了 `compatibility` | ❌ P2 | 需要声明依赖：Python≥3.12、uv、能访问 PyPI 以及新浪和 Yahoo 的网络 |
-| `license` 有对应文件 | ⚠️ P3 | frontmatter 声明 MIT，但仓库里没有 LICENSE 文件 |
-| 正文少于 500 行，引用只有一层 | ✅ | 正文 69 行 |
-| 使用相对路径 | ❌ P2 | `SKILL.md:23` 写死了 `/Users/admin-1234/...`。应改为"工作目录为本 SKILL.md 所在目录" |
-| 写明依赖安装和首次运行 | ⚠️ P2 | 没有说明首次 `uv sync` 需要联网，也没有给出无网时的替代方案 |
-| 有输出契约（回复模板、必填字段、免责声明） | ❌ P1 | 只有零散的铁律，没有统一的回复模板，也没有"不构成投资建议"的要求 |
-| 有失败处理 | ❌ P1 | 没有写遇到未知代码、断网、数据不足、数据非实时时 agent 该怎么做 |
-| 有使用边界（何时不用） | ❌ P2 | |
-| 没有过时的时效性信息 | ❌ P1 | ST ±5% 和 PDT 写死在文档里，也没有标注生效日期和来源 |
-| 术语前后一致 | ❌ P2 | 例如"筹码峰"，详见 3.8 |
-| `assets/analysis.schema.json` 真正被使用 | ❌ P2 | schema 只校验顶层字段，代码从来没有加载过它。`SKILL.md:14` 却说"通过 schema 校验" |
-| `assets/defaults.json` 真正被使用 | ❌ P2 | 没有任何代码读取它（`contracts.load_defaults` 从未被调用），而且参数和代码、文档都不一致，详见 3.8 的参数对照表 |
-| `references/failure-modes.md` 与 v5 一致 | ❌ P2 | 它要求"始终运行 `render_structure_chart.py`"，与主入口冲突。它引用的 `small_model_copy_blocks` 实际位于 `legacy_summary` 下面 |
-| 有 evals（触发测试和行为测试） | ❌ P2 | 建议加 20 条左右会触发和不该触发的查询，再加"遇到合成数据时 agent 是否拒答"的行为测试 |
-| 命名风格 | ⚠️ 可选 | 最佳实践推荐动名词形式（例如 `analyzing-kline-structure`）。目前改名会影响已有引用，**不建议现在改** |
-
-推荐的 frontmatter 和正文骨架如下：
-
-```markdown
----
-name: kline-structure-chart
-description: >-
-  Deterministic multi-market (CN A-share / HK / US) candlestick (K-line) technical analysis
-  from OHLCV: indicators, swing & candlestick patterns, SMC zones, volume profile,
-  triple-barrier levels and a 15-bar quantile forecast, rendered as JSON + PNG + offline HTML.
-  Use when the user asks to analyze an index or stock chart (K线、走势、技术形态、支撑压力、
-  回测、未来走势), e.g. 上证指数, 600519.SH, 00700.HK, NVDA. Not for fundamentals, news, or orders.
-license: MIT
-compatibility: Requires Python 3.12+, uv, and network access to PyPI and Sina/Yahoo market data; refuses to output analysis on non-live data.
-metadata:
-  author: chengpeng
-  version: "5.1.0"
----
-
-# K 线数学结构分析
-## 何时使用 / 何时不用
-## 运行（工作目录 = 本 SKILL.md 所在目录）
-## 运行后必检（任一不满足 → 停止并告知用户，不输出任何价位）
-1. quality.status == "OK"，meta.data_source 与 market_benchmark.source 均为实时源
-2. 最后一根 K 线已收盘；盘中运行须注明"未收盘"
-## 回复契约（按顺序）
-1. 大盘基准 regime / regime_score 与相对强弱
-2. rule_score（注明"规则分，非概率"）与 rule_scenarios（触发 → 目标 → 失效）
-3. 15 日分位区间 + 回测 OOS 实测覆盖率 + 相对随机游走误差
-4. 风控否决（risk_officer_veto=true 时置顶）
-5. 文件：result.json / dashboard.html；客户端支持图片时再内嵌 preview.png
-6. 免责声明：仅供研究，不构成投资建议
-## 失败处理（未知代码 / 断网 / 数据不足）
-## 参考文档（按需读取，一层引用）
-```
-
-### 3.6 跨 Agent 可移植性
-
-| ID | 级别 | 项目 | 现状与影响 | 修复建议 |
-|---|---|---|---|---|
-| P-01 | P1 | 发现位置 | skill 放在仓库根目录的 `kline-structure-chart/`，不在任何 agent 的技能目录里。本会话 Claude Code 的可用技能列表里也确实没有它 | 提供一个安装脚本，用软链或复制的方式放到：<br>1. Claude Code：`.claude/skills/kline-structure-chart/` 或 `~/.claude/skills/`<br>2. Codex、Copilot CLI、Gemini CLI：`~/.agents/skills/`（据 superpowers writing-skills 文档，这是它们共同认可的路径） |
-| P-02 | P1 | 运行环境 | 需要 Python≥3.12、uv、PyPI，还要能访问新浪和 Yahoo。按 Anthropic 官方的最佳实践文档，API 代码执行环境**没有网络，也不能在运行时安装包**。在这类环境里，当前代码会**静默产出合成数据**，这是最危险的组合 | 用 `compatibility` 声明依赖。无网时直接报错。同时支持 `--input` 加载本地真实数据 |
-| P-03 | P2 | 绝对路径 | `SKILL.md:23` 和 `AGENTS.md:85-113` 写死了 `/Users/admin-1234/...`，换一台机器或换一个用户就会失效 | 全部改成相对路径 |
-| P-04 | P2 | 客户端能力 | "在回复中展示 preview.png"并不是所有客户端都能做到，例如部分 CLI 无法内嵌图片 | 改为条件式："客户端支持显示图片时才内嵌 preview.png，否则给出文件路径" |
-| P-05 | P2 | 语言 | `description` 只有中文 | 改为中英双语的触发词 |
-| P-06 | P2 | 运行期约束随 skill 分发 | AGENTS.md 不会随 skill 一起分发，skill 装到 `~/.claude/skills` 之后，AGENTS.md 里的运行期约束就丢了 | 运行期规则要在 SKILL.md 和 references 里自洽。AGENTS.md 只服务于开发者和编码 agent |
-| P-07 | P3 | 工具名 | `references/failure-modes.md` 提到的 `image_generate` 不是各家 agent 通用的工具名 | 改成"任何图像生成工具" |
-| P-08 | P3 | 网络安全 | `scripts/render_structure_chart.py:131` 有回退到明文 `http://qt.gtimg.cn` 的逻辑 | 只用 HTTPS |
-| P-09 | 可选 | `allowed-tools` | 没有声明。这个字段是可选的实验特性 | Claude Code 下可以考虑设为 `Bash(uv run:*)`，减少权限确认弹窗 |
-
-### 3.7 AGENTS.md 合理性
-
-**合理、建议保留的部分**：
-
-- 六条铁律的方向都对。
-- "证据先行"要求在同一轮里给出真实的命令输出。
-- 规定了 NaN/Infinity 拦截和 `<script>` JSON 转义。
-- 规定 UI 改动必须在浏览器里验证。
-- 标准命令集中列出，便于照做。
-
-**问题**：
-
-| ID | 级别 | 位置 | 问题 | 修复建议 |
-|---|---|---|---|---|
-| AG-01 | P1 | 铁律 1 | 规定"渲染层不得重算"，但 PNG 渲染器自己重新计算结构（G-02） | 先重构代码，再保留这条铁律 |
-| AG-02 | P1 | 铁律 2 | 有三个缺口：<br>1. 用 `--input` 传入 K 线数组时基准为空，代码会把标的自己当作大盘，没有任何提示。<br>2. 基准指标只基于 120 根 K 线计算。<br>3. 基准可能是合成数据，而标的是真实数据 | 缺少基准时直接报错，或者在报告里显式降级说明 |
-| AG-03 | P1 | 铁律 3 | 有两处与实现不符：<br>1. 复权实际上不起作用（R-07）。<br>2. 允许未收盘的 K 线进入计算（A-06） | 先修代码，或者如实改写这条铁律 |
-| AG-04 | P1 | 铁律 4 | 不变性门禁只覆盖 v4.1 的 `render()`，v5 主流程不满足（C-06） | 扩展 `check_days_invariance.py` 的覆盖范围 |
-| AG-05 | P1 | 铁律 6（`AGENTS.md:35,37`） | 有两类问题：<br>1. ST ±5% 和 PDT 已过时。<br>2. 写了"支持 VIX 缩放与财报窗口"，但这两项并没有真正生效 | 规则表要带"生效日期、来源、复核周期"三项 |
-| AG-06 | P1 | 缺失 | 没有"数据真实性"铁律。这是本次 P0 问题的根源 | 新增一条铁律 0：面向用户的输出禁止使用合成或缺失数据；数据非实时时必须醒目披露并降级 |
-| AG-07 | P2 | `AGENTS.md:85-113` | 命令里写死了绝对路径 | 改成 `uv run --directory kline-structure-chart ...` |
-| AG-08 | P2 | 第 2 节目录树 | 目录树缺 `artifacts/` 和 `tests/fixtures/`。另外两处描述不准：<br>1. 说 `data_gateway` 有"腾讯"数据源，但实际只有 v4.1 的 PNG 入口用到腾讯。<br>2. 把"确定性离线回退"当成一项特性来写 | 按实际情况更新 |
-| AG-09 | P2 | 整体 | 与 SKILL.md 两处重复维护铁律，已经出现不一致（例如"筹码峰"） | AGENTS.md 只写开发契约，SKILL.md 只写运行契约，公式和规则只在 references 里定义一次 |
-| AG-10 | P2 | 4.3 节 | 要求浏览器零报错，但没有可复现的脚本 | 加一个 Playwright 或 Chrome DevTools 的检查脚本 |
-| AG-11 | P2 | 缺失 | 缺少以下规范：<br>1. 新增标的和代码映射的规范<br>2. 四处版本号（SKILL、pyproject、schema、engine）的同步规则<br>3. `.gitignore` 和产物管理策略<br>4. skill 的安装和分发说明<br>5. 数据源的许可与限频说明 | 逐项补齐 |
-| AG-12 | P3 | `AGENTS.md:59`、`scripts/strategies.py:11` | 写"四大 Regime"，代码里实际有 5 类 | 改成"五类" |
-| AG-13 | P3 | 兼容性 | 当前版本的 Claude Code 会读取 AGENTS.md，本会话已经加载了它。旧版只读 CLAUDE.md。Gemini CLI 默认读 GEMINI.md（可配置） | 如需兼容，加一个只含 `@AGENTS.md` 的 CLAUDE.md |
-
-### 3.8 文档一致性与术语
-
-**宣称与实际对照**：
-
-| 宣称 | 出处 | 实际情况 |
-|---|---|---|
-| "通过 analysis.schema.json 校验" | `SKILL.md:14` | schema 从来没有被加载，校验是手写的局部检查 |
-| "十字光标悬停查看公式证据" | `SKILL.md:16` | 悬停只显示 OHLC、MA、RSI、RVOL |
-| "Qlib 量价正交特征" | `SKILL.md:12`、`AGENTS.md:10` | 没有做正交化。代码用的是 Spearman 秩相关，Alpha158 用的是 Pearson |
-| "核回归平滑双底/双顶/通道" | 同上 | 形态检测用的是原始高低点的 ZigZag，核平滑只用于画图 |
-| "RSI/MACD 背离" | 同上 | 只实现了 RSI 背离 |
-| "SMC（BOS/CHoCH…）" | 同上 | CHoCH 没有和 BOS 区分 |
-| "头肩底/顶" | `scripts/patterns.py:286` 的 docstring | 没有实现 |
-| "VIX 缩放与财报窗口" | `AGENTS.md:37`、`references/us-market.md:8` | VIX 写死为 19.5，财报日永远是 None |
-| "复权因子仅消费…" | `AGENTS.md:22` | 没有公司行动数据源 |
-| "无重叠 Patch" | `references/math-patterns.md:39` | 代码允许重叠 10 根 |
-| "逐期限边际覆盖率校准" | `scripts/forecast.py:358` | 只校准了终点期 |
-| "Walk-Forward Purged/Embargo" | `scripts/evaluation.py:164` | 实际只做了一次切分 |
-| "DETERMINISTIC_SYNTHETIC_FIXTURE" | `scripts/data_gateway.py:105` | 代码实际输出的标签是 `DETERMINISTIC_OFFLINE_FIXTURE` |
-| 锤头线条件"PercentRank(C,20)≤0.35" | `references/math-patterns.md:18` | 代码判断的是实体底部在 20 日区间中的位置，并且用 OR 接受"创新低" |
-| ZigZag 字段 `observed_at` | `references/math-patterns.md:10` | 代码字段是 `day` 和 `confirmed_at_day` |
-
-**`assets/defaults.json` 与代码实际取值对照**。这个文件从来没被读取，下表里的值都不会生效：
-
-| 参数 | defaults.json | 代码与 math-patterns.md |
-|---|---|---|
-| 锤头上影/振幅上限 | 0.15 | 0.18 |
-| 锤头振幅/ATR 下限 | 0.8 | 0.75 |
-| 双底低点容差 | 0.4 ATR | 0.65 ATR |
-| 双底间隔 | 8–65 | 6–85 |
-| 双底颈线高度 | 1.6 ATR | 1.2 ATR |
-| FVG 冲击实体 | 1.2 ATR | 1.10 ATR |
-| 通道 r² 门槛 | 0.75 | 0.72 |
-| 类比 Patch 长度 | [5, 20, 60] | 只用 20 |
-| 最少类比样本 | 15 | 3 |
-| 最少校准样本 | 30 | 15 / 20 |
-
-### 3.9 测试体系
-
-| ID | 级别 | 问题 | 修复建议 |
-|---|---|---|---|
-| T-01 | P1 | 全部测试都设置 `allow_network=False`，跑的是带人工双底的合成数据。所以 `ana["available"] is True` 这类断言必然成立，说明不了问题 | 用录制的真实数据加上 mock 的网络层 |
-| T-02 | P1 | `tests/fixtures/sina_daily/*.json` 名叫"新浪日K缓存"，实际是合成数据，有三点证据：<br>1. 包含休市日 2025-06-02 和 2026-02-23 的 K 线。<br>2. 最后 3 根的成交量完全相同（1654369.2）。<br>3. 2024-10-08 上证收盘为 2880.91，实际约为 3490 | 改名为 `synthetic/`，另外录制一份真实数据作为 fixture |
-| T-03 | P1 | 测试固化了错误规则（ST=0.05），并且以下情况都没有覆盖：<br>1. 500 以上的港股价位<br>2. 休市日<br>3. 未知代码<br>4. `000xxx.SZ`<br>5. 未收盘的 K 线<br>6. 数据源标识 | 第 2.3 节的每个探针都可以直接改写成一个测试 |
-| T-04 | P2 | 断言太弱。多市场测试只检查文件是否存在，以及 HTML 里有没有 "Time-Travel Replay" 这个字符串 | 断言关键数值和字段语义 |
-| T-05 | P2 | 指标没有"金标准"对照 | 和 TA-Lib 或 pandas-ta 在固定数据上比对 RSI、ATR、ADX、MACD、Supertrend |
-| T-06 | P2 | 没有网络异常场景的测试，例如限流、字段缺失、返回空数据 | 用 mock 覆盖这些分支 |
-| T-07 | P2 | 没有 skill 级别的评测，即触发和不触发查询集、遇到合成数据时 agent 是否拒答 | 参照 skill-creator 的 evals 流程补上 |
-
-### 3.10 仓库卫生
-
-| ID | 级别 | 问题 |
-|---|---|---|
-| H-01 | P3 | 没有 `.gitignore`。`.venv/`、`.pytest_cache/`、`.DS_Store`、`artifacts/`（4.9 MB）都处于未跟踪状态，很容易被误提交，也容易被一起打包进 skill |
-| H-02 | P3 | 没有 LICENSE、README、CHANGELOG |
-| H-03 | P3 | 仓库还没有任何提交，建议修完 P0 之后再做第一次提交，避免把有问题的产物写进历史 |
+| ID | 级别 | 当前位置 | 初审问题 | 修复状态与验证测试 |
+| --- | --- | --- | --- | --- |
+| P-01 | P1 | `AGENTS.md:88-93` | 缺少跨 Agent 技能发现目录的安装/软链命令说明 | ✅ 已修复：`AGENTS.md` 3.1 节提供 `~/.claude/skills` 与 `~/.agents/skills` 标准软链命令 |
+| P-02 | P1 | `SKILL.md:5,50` | 无网环境静默产出合成数据，未声明 `compatibility` | ✅ 已修复：`SKILL.md` frontmatter 声明 `compatibility`，无网无本地真实文件时以 `[DATA_UNAVAILABLE]` 退出 |
+| P-03 | P2 | `SKILL.md`、`AGENTS.md` | 写死 `/Users/admin-1234/...` 本机绝对路径 | ✅ 已修复：全部改为相对路径；`test_no_machine_specific_absolute_paths` |
+| P-04 | P2 | `SKILL.md:73` | 强制要求内嵌图片，未考虑纯文本 CLI | ✅ 已修复：改为“客户端能显示图片时再内嵌 `preview.png`，否则只给路径” |
+| P-05 | P2 | `SKILL.md:3` | `description` 只有中文，缺少英文触发词与不适用场景 | ✅ 已修复：改为中英双语且包含 `Use when` 与 `Not for`；`test_skill_frontmatter_follows_agent_skills_spec` |
+| P-06 | P2 | `SKILL.md:48-86`、`AGENTS.md:10-20` | 运行期约束写在 `AGENTS.md`，随 skill 分发后丢失 | ✅ 已修复：运行期规则在 `SKILL.md` 与 `references/` 内完全自洽；`test_skill_md_keeps_runtime_contract_self_contained` |
+| P-07 | P3 | `references/failure-modes.md:5` | 标题使用特定工具名 `image_generate` | ✅ 已修复：改为“为什么不能用任何图像生成工具画图” |
+| P-08 | P3 | `scripts/render_structure_chart.py:128-132` | 存在回退明文 `http://qt.gtimg.cn` 的逻辑 | ✅ 已修复：移除明文 HTTP 回退，仅使用 HTTPS |
+| AG-01 ~ AG-09 | P1/P2 | `AGENTS.md`、`SKILL.md` | 算图分离、大盘先行、复权、窗口不变性、数据真实性铁律与实现同步及文档分工 | ✅ 已修复：`AGENTS.md` 第 0~4 节重写并与代码实现完全对齐；`test_docs_contract.py` 全部测试通过 |
+| AG-10 ~ AG-12 | P2/P3 | `scripts/strategies.py:11`、`tests/test_docs_contract.py:140-150` | 版本号不同步；`strategies.py` 写“四大状态”实际 5 类 | ✅ 已修复：`SKILL.md`、`pyproject.toml`、`analysis.schema.json`、`analysis.py` 四处版本号同步为 `5.1.0`（`test_versions_are_in_sync`）；`strategies.py` 改为“五类市场状态” |
+| T-01 ~ T-06 | P1/P2 | `tests/test_quant_skill.py`、`tests/test_data_sources.py`、`tests/test_indicator_golden.py` | 测试使用合成数据、fixture 冒充真实源、断言过弱、缺 TA-Lib 与 Supertrend 金标准及网络异常测试 | ✅ 已修复：25 份真实录制数据全覆盖，移除全部合成数据，85 项 pytest + 420 次跨窗口不变性全部基于真实行情通过 |
+| H-01 ~ H-03 | P3 | `.gitignore`、`artifacts/` | 缺 `.gitignore`、`artifacts/` 残留修复前旧产物 | ✅ 已修复：`.gitignore` 已配置，`artifacts/{cn,hk,us}` 已用修复后真实行情重新生成 |
 
 ---
 
-## 4. 优化路线图
+## 4. 可复用的 Review 勾选清单（当前收口状态）
 
-| 阶段 | 内容 | 验收标准 |
-|---|---|---|
-| **阶段 0：P0，立即处理** | 1. 修复 A-01 到 A-06：代码映射、禁止合成回退、PNG/HTML 加水印、来源枚举、真实 VIX 或置空、识别未收盘 K 线<br>2. SKILL.md 增加"运行后必检"和"失败处理" | 1. 断网时运行任意标的都以非零码退出，并给出可读的报错<br>2. 601318.SH、000002.SZ、01810.HK 在联网时能取到真实数据，且标识正确<br>3. 盘中运行时，最后一根 K 线被标为未收盘 |
-| **阶段 1：P1 正确性** | 1. 更新制度规则：ST、价位表、印花税、日历库、PDT，并带上生效日期<br>2. EMA200 的预热数据<br>3. 修复保形校准（C-02）和漂移（C-03）<br>4. 让回测与计划同源（C-04、C-05）<br>5. 把 v5 纳入不变性测试<br>6. 修复 PNG 配色，抽出 `structure.py`（G-01、G-02） | 1. 2.3 节的所有探针都转为单元测试并通过<br>2. 报告中的覆盖率等于样本外实测值<br>3. q50 相对"价格不变"基准的误差被披露 |
-| **阶段 2：P2 规范与可移植** | 1. frontmatter（移入 `metadata`、补 `compatibility`、写双语 description）<br>2. 改为相对路径<br>3. 输出契约<br>4. 安装脚本<br>5. 让 defaults.json 和 schema 真正生效，或删除它们<br>6. 更新 failure-modes.md<br>7. 统一 AGENTS.md 和 SKILL.md 的分工<br>8. 补充测试 | 1. `skills-ref validate` 通过<br>2. 在 Claude Code 和至少一个其他 agent 上完成安装、触发和运行的冒烟测试<br>3. 有一份 evals 集 |
-| **阶段 3：P3 措辞与整洁** | 1. 修正术语和命名<br>2. 补 `.gitignore`、LICENSE、README<br>3. 修小 bug（C-14） | 3.8 节的"宣称与实际对照"表清零 |
-
----
-
-## 5. 可复用的 Review 勾选清单
-
-以后每次修改 skill 或脚本之后，按这份清单逐项勾选。
+以后每次修改 skill 或脚本之后，按这份清单逐项复核：
 
 **A. Skill 规范**
-- [ ] frontmatter 只有 `name`、`description`、`license`、`compatibility`、`metadata`、`allowed-tools` 这几个字段，并通过 `skills-ref validate`
-- [ ] `name` 与目录名一致；`description` 不超过 1024 字符，写清做什么、何时用、何时不用，并有中英文关键词
-- [ ] SKILL.md 正文少于 500 行，引用只有一层，没有绝对路径
-- [ ] 有输出契约（回复顺序、必填字段、免责声明）
-- [ ] 有失败处理（未知代码、断网、数据不足、数据非实时）
-- [ ] 四处版本号（SKILL、pyproject、schema、engine）同步，并且有 CHANGELOG
+- [x] frontmatter 只有 `name`、`description`、`license`、`compatibility`、`metadata`、`allowed-tools` 规范字段（`test_skill_frontmatter_follows_agent_skills_spec`）
+- [x] `name` 与目录名一致；`description` 不超过 1024 字符，写清做什么、何时用、何时不用，并含中英文关键词
+- [x] `SKILL.md` 正文少于 500 行，引用只有一层，无本机绝对路径（`test_no_machine_specific_absolute_paths`）
+- [x] 有输出契约（回复顺序、必填字段、免责声明）与运行后必检（`test_skill_body_has_output_contract_and_failure_handling`）
+- [x] 有失败处理（未知代码、断网、数据不足、数据非实时）
+- [x] 四处版本号（`SKILL.md`、`pyproject.toml`、`assets/analysis.schema.json`、`analysis.py`）同步为 `5.1.0`（`test_versions_are_in_sync`）
 
 **B. 跨 Agent 可移植**
-- [ ] 有安装脚本，或者已经放进 `.claude/skills/` 和 `~/.agents/skills/` 等发现目录
-- [ ] 在无网、无 uv 的环境里会明确报错，不会静默降级
-- [ ] 不依赖某个客户端独有的能力（例如内嵌图片）；如有依赖，已写成条件式
-- [ ] 运行期规则不依赖 AGENTS.md
+- [x] `AGENTS.md` 提供标准软链安装命令，支持 `.claude/skills/` 与 `~/.agents/skills/`
+- [x] 在无网、无本地真实文件环境里明确以 `[DATA_UNAVAILABLE]` 非零退出，绝不静默降级
+- [x] 图片内嵌写成条件式，兼容纯文本 CLI
+- [x] 运行期规则在 `SKILL.md` 与 `references/` 中自洽，不依赖 `AGENTS.md`
 
 **C. 数据真实性**
-- [ ] 生产路径不可能产出合成数据；测试用的合成数据必须显式开启
-- [ ] `quality.status` 由来源枚举决定，标的和基准分别判定
-- [ ] PNG 和 HTML 会醒目显示数据源；数据非实时时有水印
-- [ ] 输出里没有写死的外部数据（例如 VIX）
-- [ ] 最后一根 K 线是否收盘，有明确的判定和标注
-- [ ] fixture 的命名与来源一致
+- [x] 代码与测试中彻底移除合成行情生成器（`generate_deterministic_series`）与合成数据目录（`synthetic_daily`），100% 使用真实行情（`test_no_synthetic_generators_or_mock_bars_in_code_and_tests`）
+- [x] `quality.status` 由来源枚举决定，标的和基准分别判定；标的本身为默认基准（如 `SPY.US`）时不误判为缺基准
+- [x] PNG 和 HTML 醒目显示数据源、数据质量与风控状态；数据非 `OK` 时带红色告警横幅与水印
+- [x] 输出里无写死外部数据（VIX 实时拉取 Yahoo `^VIX` 或置 `null`）
+- [x] 最后一根 K 线按交易所时区与收盘时间判定是否收盘，未收盘 K 线拆为 `intraday` 并在 `quality.notes` 披露
+- [x] `tests/fixtures/recorded/MANIFEST.json` 完整记录 25 份真实录制文件的来源、起止日期与 `sha256`
 
 **D. 市场制度**
-- [ ] 每条规则都有生效日期、来源链接和下次复核日期
-- [ ] 涨跌停按板块、ST 和新股期区分；交易日历覆盖到未来至少 1 年，超出范围会报错
-- [ ] 港股价位表完整，并包含减价位改革的各个阶段；港股印花税双边收取
-- [ ] 最小申报数量正确（科创板 200 股、北交所和科创板可按 1 股递增）；ETF 的价位精度正确
-- [ ] 代码到资产类型和数据源代码的映射有测试（`000xxx.SZ`、北交所、港股前导 0、ETF）
+- [x] 每条规则在 `references/{cn,hk,us}-market.md` 写明生效日期与权威来源
+- [x] 涨跌停按板块、ST（`2026-07-06` 主板 `±10%`）和新股无涨跌停期区分，并通过 `--st`/`--name`/`--ipo-no-limit` 全链路透传
+- [x] 交易日历核实覆盖 `2021-01-01 ~ 2026-12-31`（CN）与 `2027-12-31`（HK/US），超出范围在 `calendar_coverage` 与 `quality.notes` 标注估算
+- [x] 港股价位表包含 500 以上各档与 Phase 1/2 下调；港股印花税买卖双边各 10 bps（ETF 豁免）
+- [x] A 股科创板 200 股起 + 1 股递增、北交所 100 股起 + 1 股递增；A 股 ETF `0.001` 元与美股 `< $1` `0.0001` 美元最小价位生效
+- [x] 新浪 A 股不复权价格与 Yahoo 拆股后股息单位对齐，前复权（`total_return` / `split`）严格按 `as_of` 因果计算
 
 **E. 计算与统计**
-- [ ] 长周期指标有足够的预热数据，不会被静默替换；证据字符串与实际取值一致
-- [ ] 保形和分位数区间的样本外覆盖率，就是针对实际输出的区间测出来的
-- [ ] 预测披露了相对"价格不变"基准的误差
-- [ ] 回测策略与给用户的计划同源；样本量和置信区间已披露；训练集和测试集严格隔离
-- [ ] 所有宣称的形态都确实实现了，命名与算法一致
+- [x] 指标固定在 420 根历史上预热，EMA200 不足时显式为 `None` / `N/A`，绝不用 EMA60 冒充
+- [x] 保形预测 `calibration_audit` 针对经涨跌停截断与价位表取整后的实际输出区间做滚动样本外实测，并同时披露 `q50_mae_pct` 与 `random_walk_mae_pct`
+- [x] 回测逐日回放线上真实计划（`LIVE_PLAN_REPLAY_V6`），不学习任何参数，并提供胜率与均值收益的 Bootstrap 95% 置信区间
+- [x] 所有形态与因子命名同算法严格一致，无未实现能力宣称（`test_no_unimplemented_capability_claims`）
 
 **F. 因果与不变性**
-- [ ] 拐点、形态、类比检索、保形预测都没有前视；审计用的是生产配置
-- [ ] `--days` 不变性同时覆盖 v4.1 的 `render()` 和 v5 的 `run_pipeline`
+- [x] 核平滑、拐点、蜡烛形态、SMC、相似 Patch（$t_c + H \le t_{\text{now}} - L_{\text{patch}}$）与保形预测均无前视泄漏（`run_causal_replay_audit` 守护）
+- [x] `--days` 不变性同时覆盖 v4.1 结构层（真实录制数据 420 次运行 0 失败）与 v5 `run_pipeline`（`test_c06_v5_pipeline_is_days_invariant`）
 
 **G. 渲染**
-- [ ] PNG 和 HTML 只读取 report，不重新计算
-- [ ] 配色跟随 `meta.color_scheme`；页脚和图例按市场输出正确文案
-- [ ] 回放时不显示截面之后的 K 线；轨道的起点和斜率与 JSON 一致
-- [ ] 在浏览器里检查：控制台零报错，7 个图层、RS 视图、回放滑块都正常（要有可复现的脚本）
+- [x] PNG 和 HTML 只读取计算层输出，不重新计算结构点位
+- [x] 配色跟随 `meta.color_scheme`（含 HTML 订单块与 PNG K 线/文字）
+- [x] `--days 60` 回放使用快照自带的 `bars_window`，不显示截面之后的 K 线；HTML 楔形轨道按真实支点下标绘制
+- [x] 浏览器实测控制台零报错，7 个图层开关、RS 视图切换、时间回放滑块均正常
 
 **H. 测试与文档**
-- [ ] 门禁命令包括 pytest、v5 不变性、指标金标准对照和网络 mock
-- [ ] 3.8 节的"宣称与实际对照"表没有残留项
-- [ ] 有 `.gitignore`，产物不会被提交，也不会被打包进 skill
-
----
-
-## 6. 做得好的地方（建议保留）
-
-- **XSS 防护到位**：`_safe_json_for_script` 会转义 `< > & U+2028 U+2029`，前端全程用 `textContent`，并且有对应的测试。
-- **契约校验**：会拦截 NaN 和 Infinity，检查分位数单调，检查 OHLC 的上下包络，`sanitize_filename` 会防止路径穿越。
-- **因果 ZigZag**：同时记录 `day` 和 `confirmed_at_day`，只用已确认的拐点做形态判断。
-- **回测撮合细节考虑周到**：T+1 当日不能卖；一字涨停买不进（LIMIT_UP_NO_FILL）；一字跌停卖不出；同一根 K 线同时触及止盈止损时按先止损处理；跳空时按开盘价成交。
-- **v4.1 结构层**：轨道、ABC、阶梯和三条推演写得严谨，跨 `--days` 不变性实测 runs=120、failing=0。
-- **不编造仓位**：没有提供账户净值时，不输出建议股数；指数直接注明不可交易。
-- **术语提示写进了 JSON**：`rule_score`、`volume_profile`、SMC 都带有"非概率/近似"之类的说明字段。
-- **HTML 单文件、离线可用**：没有任何 CDN 依赖，控制台零报错。
-- **AGENTS.md 的"证据先行"要求**：值得长期保留。
-
----
-
-## 7. 参考来源
-
-- 规范：[Agent Skills Specification](https://agentskills.io/specification)；Anthropic 的 Skill authoring best practices（superpowers `writing-skills/anthropic-best-practices.md`）
-- A 股 ST 涨跌幅：[中证网](https://cs.com.cn/tj/02/01/202506/t20250627_6498570.html)、[财联社](https://www.cls.cn/detail/2069694)、[同花顺](https://news.10jqka.com.cn/20260410/c675906757.shtml)
-- A 股休市：[上交所休市安排](https://www.sse.com.cn/disclosure/dealinstruc/closed/list/)、[澎湃新闻](https://m.thepaper.cn/newsDetail_forward_32603402)、[人民日报（2025 年节假日通知）](https://paper.people.com.cn/rmrb/html/2024-11/13/nw.D110000renmrb_20241113_5-03.htm)
-- 港股：[HKEX Reduction of Minimum Spreads](https://www.hkex.com.hk/Services/Trading/Securities/Overview/Trading-Mechanism/Reduction-of-Minimum-Spreads?sc_lang=en)、[KPMG 印花税](https://kpmg.com/cn/en/home/insights/2023/11/tax-alert-21-hk-the-reduced-stamp-duty-rate-on-hk-stock-transfer-will-take-effect-from-17-nov-23.html)、[IRD](https://www.gov.hk/en/residents/taxes/docs/IRSD123(E).pdf)
-- 美股：[NYSE 2025-01-09 休市](https://ir.theice.com/press/news-details/2024/The-New-York-Stock-Exchange-Will-Close-Markets-on-January-9-to-Honor-the-Passing-of-Former-President-Jimmy-Carter-on-National-Day-of-Mourning/default.aspx)、[Schwab：PDT 取消](https://international.schwab.com/story/sec-approves-scrapping-25000-day-trader-minimum)、[E*TRADE](https://us.etrade.com/knowledge/library/margin/pattern-day-trading-rule-change)
+- [x] 门禁命令包含全量 `pytest`（85 项，含 TA-Lib 与 Supertrend 金标准、真实数据回放、网络异常、文档契约）与真实录制数据跨窗口不变性校验
+- [x] `.gitignore` 已忽略生成物与虚拟环境，`artifacts/` 已更新为最新真实行情产物

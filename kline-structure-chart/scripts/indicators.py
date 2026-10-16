@@ -90,7 +90,7 @@ def rsi(closes: list[float], period: int = 14) -> list[float | None]:
             losses -= diff
     avg_gain = gains / period
     avg_loss = losses / period
-    out[period] = 100.0 if avg_loss == 0 else 100.0 - (100.0 / (1.0 + avg_gain / avg_loss))
+    out[period] = (100.0 if avg_gain > 0 else 50.0) if avg_loss == 0 else 100.0 - (100.0 / (1.0 + avg_gain / avg_loss))
     for i in range(period + 1, len(closes)):
         diff = float(closes[i]) - float(closes[i - 1])
         gain = max(0.0, diff)
@@ -236,7 +236,7 @@ def supertrend(
         basic_upper = hl2 + multiplier * a
         basic_lower = hl2 - multiplier * a
         c = float(bars[i]["close"])
-        if i == period - 1 or st_line[i - 1] is None:
+        if i == 0 or st_line[i - 1] is None:
             final_upper = basic_upper
             final_lower = basic_lower
             cur_dir = 1 if c >= hl2 else -1
@@ -369,7 +369,7 @@ def compute_qlib_orthogonal_factors(bars: list[dict[str, Any]], atr_vals: list[f
     pv_corr = pv_corr_series[-1] if pv_corr_series[-1] is not None else 0.0
 
     atr_last = atr_vals[-1] if (atr_vals and atr_vals[-1]) else max(1e-6, h - l)
-    mom10 = (c - closes[-10]) / (atr_last * math.sqrt(10)) if len(closes) >= 10 and atr_last > 0 else 0.0
+    mom10 = (c - closes[-11]) / (atr_last * math.sqrt(10)) if len(closes) >= 11 and atr_last > 0 else 0.0
 
     # HV20 / HV60 ratio
     rets = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes)) if closes[i - 1] > 0 and closes[i] > 0]

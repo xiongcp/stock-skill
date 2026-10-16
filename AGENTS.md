@@ -21,9 +21,9 @@
 ## 1. 核心架构与不可变铁律（Hard Invariants）
 
 0. **数据真实性（Data Authenticity）——优先于其余所有铁律**
-   - 面向用户的产物只能基于真实行情（新浪 / Yahoo / 腾讯实时取数，或用户提供的本地文件）。取不到时 `data_gateway.load_bundle` 抛出 `RuntimeError`，CLI 以 `[DATA_UNAVAILABLE]` 非零退出，**严禁静默回退、估算或补数**。
-   - 合成行情（`DETERMINISTIC_SYNTHETIC_FIXTURE`）只允许在测试或演示中通过 `allow_synthetic_fallback=True` / `--allow-synthetic` 显式开启。开启后 `quality.status = UNAVAILABLE`，PNG 与 HTML 必须带告警横幅和水印。
-   - `quality.status` 只能由 `contracts.assess_data_quality` 按来源枚举判定，标的与基准分别判定。外部数据（VIX、除权除息、财报日）取不到时写 `null` 并注明来源，禁止写死默认值。
+   - 面向用户的产物与全部自动化测试只能基于真实行情（新浪 / Yahoo / 腾讯实时取数，`tests/fixtures/recorded/` 录制的真实行情，或用户提供的本地真实文件）。取不到时 `data_gateway.load_bundle` 抛出 `RuntimeError`，CLI 以 `[DATA_UNAVAILABLE]` 非零退出，**严禁回退、估算、补数或生成任何合成行情**。
+   - `quality.status` 只能由 `contracts.assess_data_quality` 按来源枚举判定，标的与基准分别判定。若任何外部输入被标记为合成或离线假样本（`SYNTHETIC`），`quality.status = UNAVAILABLE`，PNG 与 HTML 必须带红色告警横幅和水印。
+   - 外部数据（VIX、除权除息、财报日）取不到时写 `null` 并注明来源，禁止写死默认值。
    - 未收盘的K线（按交易所时区与收盘时间判定）不得参与指标、形态、风控与预测计算，必须拆出为盘中K线并在 `quality.notes` 中披露。
 
 1. **算图分离（Compute-Render Separation）**
@@ -86,8 +86,7 @@ kline-structure-chart/
     ├── check_days_invariance.py      # 跨展示窗口 (60~500日) 结构层不变性回归校验
     ├── record_fixtures.py            # 联网录制真实行情 fixture（手动执行）
     └── fixtures/
-        ├── recorded/                 # 真实行情录制（含 MANIFEST.json：录制时间、来源、sha256）
-        └── synthetic_daily/          # 确定性合成序列（仅用于不变性等不依赖真实价格的测试）
+        └── recorded/                 # 真实行情录制（含 MANIFEST.json：录制时间、来源、sha256；禁止存放合成序列）
 ```
 
 ---
@@ -96,9 +95,13 @@ kline-structure-chart/
 
 以下命令都在仓库根目录执行，通过 `uv run --directory kline-structure-chart` 进入技能目录，不依赖本机绝对路径。
 
-### 3.1 环境同步
+### 3.1 环境同步与技能安装（跨 Agent 发现目录软链）
 ```bash
 uv sync --python 3.12 --directory kline-structure-chart
+# 按需软链到 Claude Code / Codex / Cursor / Gemini CLI 的技能发现目录：
+mkdir -p ~/.claude/skills ~/.agents/skills && \
+  ln -sfn "$(pwd)/kline-structure-chart" ~/.claude/skills/kline-structure-chart && \
+  ln -sfn "$(pwd)/kline-structure-chart" ~/.agents/skills/kline-structure-chart
 ```
 
 ### 3.2 多市场诊断、15 日区间、同源双出与回测
@@ -113,12 +116,11 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
 
 ### 3.3 测试与回归门禁（修改任何代码后必跑）
 ```bash
-# 1. 全量 pytest（单元、P0/P1 回归、TA-Lib 金标准、录制数据回放、网络异常、文档契约）
+# 1. 全量 pytest（单元、P0~P3 回归、TA-Lib 金标准、真实录制数据回放、网络异常、文档契约）
 uv run --directory kline-structure-chart pytest -v
 
-# 2. v4.1 结构层跨窗口不变性：真实录制行情（必跑）与合成序列（补充）
+# 2. v4.1 结构层跨窗口不变性（真实录制行情，必跑）
 uv run --directory kline-structure-chart python tests/check_days_invariance.py --data tests/fixtures/recorded/sina_daily --step 40
-uv run --directory kline-structure-chart python tests/check_days_invariance.py --data tests/fixtures/synthetic_daily --step 40
 ```
 
 ### 3.4 重新录制真实行情 fixture（需联网，按需手动执行）
@@ -133,8 +135,8 @@ uv run --directory kline-structure-chart python tests/record_fixtures.py
 1. **证据先行**：报告任何任务"通过""修复"或"完成"前，必须在同一轮执行对应的测试或验证命令，并附上真实的命令输出与精确数值。
 2. **数据真实性自查**：
    - 新增取数路径必须同时提供失败时报错的测试（`test_data_sources.py`）。
-   - 测试一律断网（`conftest.py`），需要真实价格时使用 `fixtures/recorded/` 回放。
-   - 合成数据只能放在 `synthetic_daily/` 或由测试显式生成，命名不得冒充真实来源。
+   - 测试一律断网（`conftest.py`），所有行情测试统一使用 `fixtures/recorded/` 真实录制数据回放，严禁在测试中生成或使用合成行情（`generate_deterministic_series` / `synthetic_daily`）。
+   - 四处版本号（`SKILL.md`、`pyproject.toml`、`assets/analysis.schema.json`、`analysis.py`）必须保持同步（当前 `5.1.0`）。
 3. **契约与安全校验**：
    - 任何新增 JSON 字段不得包含 `NaN` 或 `Infinity`（`contracts.validate_report` 拦截）。
    - 写入 `<script>` 的 JSON 必须经过 `_safe_json_for_script` 转义；页面字串一律用 `textContent` 或 `html.escape`。

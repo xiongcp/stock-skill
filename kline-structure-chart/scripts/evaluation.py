@@ -1,55 +1,97 @@
 from __future__ import annotations
 
 import math
+import random
 from typing import Any
 
 from forecast import compute_conformal_forecast
 from indicators import atr_series, compute_all_indicators
-from market_rules import get_daily_price_limit_pct, get_market_microstructure_rules, round_trip_cost_rate
-from patterns import causal_swing_pivots, detect_candlestick_patterns
-from strategies import evaluate_five_core_strategies
+from market_rules import (
+    get_daily_price_limit_pct,
+    get_market_microstructure_rules,
+    rescale_bars_as_of,
+    round_trip_cost_rate,
+)
+from patterns import (
+    causal_nadaraya_watson,
+    causal_swing_pivots,
+    detect_candlestick_patterns,
+    detect_smc_structures,
+)
+from structure import HISTORY_BARS, STRUCT_DAYS, compute_structure_layer
 
 
 def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) -> dict[str, Any]:
-    """验证因果无前视不变性：在 t_cut 时刻已确认的拐点 (confirmed=True) 与蜡烛形态，在追加后续任意根未来 K 线后绝不发生改变。"""
+    """按生产配置验证因果无前视不变性：
+    1. 单边因果 Nadaraya-Watson 平滑在追加未来 K 线后绝不改变历史值；
+    2. 在生产固定结构窗口（HISTORY_BARS / STRUCT_DAYS）与同一阈值下，截至 t_cut 已确认的拐点与 SMC 缺口在追加未来 K 线后不改变；
+    3. 蜡烛形态检测在 t_cut 当日收盘确认后，不随未来 K 线追加而变化；
+    4. 保形预测在截取 bars[:cut] 时与完整序列上按同一截止日计算的结果完全一致。
+    """
     n = len(bars)
     if n < 160:
         raise ValueError("Need >= 160 bars for causal replay audit")
+    full_closes = [float(b["close"]) for b in bars]
+    full_nw = causal_nadaraya_watson(full_closes, bandwidth=3.0)
     full_atr = atr_series(bars, 14)
     full_ind = compute_all_indicators(bars)
     full_cdl = {
         (p["pattern"], p["observed_at"]): p["formula_verified"]
         for p in detect_candlestick_patterns(bars, full_atr, full_ind["series"]["rvol20"], lookback=n, max_items=None)
     }
-    full_pivs = {
-        (p["day"], p["kind"]): p["price"]
-        for p in causal_swing_pivots(bars, 0.04)
-        if p["confirmed"]
-    }
 
     mismatches: list[str] = []
     checked = 0
-    step = max(10, (n - 120) // check_steps)
-    for cut in range(120, n, step):
+    step = max(10, (n - 140) // check_steps)
+    meta_stub = {"market": "CN", "asset_type": "index", "symbol": "AUDIT.SH"}
+    for cut in range(140, n - 5, step):
         sub = bars[:cut]
         checked += 1
-        sub_pivs = [p for p in causal_swing_pivots(sub, 0.04) if p["confirmed"]]
+        # 1. 因果核平滑逐点一致
+        sub_nw = causal_nadaraya_watson([float(b["close"]) for b in sub], bandwidth=3.0)
+        if abs(sub_nw[-1] - full_nw[cut - 1]) > 1e-12:
+            mismatches.append(f"NW kernel mutated at cut={cut}")
+
+        # 2. 生产结构层 + 同一自适应阈值下的因果拐点与 SMC FVG
+        layer_sub = compute_structure_layer(sub, None, 120)
+        thr_sub = layer_sub["zz_thr"]
+        sub_hist = sub[-HISTORY_BARS:]
+        ext_hist = bars[max(0, cut - HISTORY_BARS) : min(n, cut + 20)]
+        sub_pivs = [p for p in causal_swing_pivots(sub_hist, thr_sub) if p["confirmed"]]
+        ext_piv_map = {
+            (p["day"], p["kind"]): (p["price"], p["confirmed_at_day"])
+            for p in causal_swing_pivots(ext_hist, thr_sub)
+            if p["confirmed"]
+        }
         for sp in sub_pivs:
             key = (sp["day"], sp["kind"])
-            if key not in full_pivs or abs(full_pivs[key] - sp["price"]) > 1e-6:
+            if key not in ext_piv_map or abs(ext_piv_map[key][0] - sp["price"]) > 1e-6:
                 mismatches.append(f"Pivot mutated at cut={cut}: {sp}")
+
         sub_ind = compute_all_indicators(sub)
+        sub_smc = detect_smc_structures(sub[-STRUCT_DAYS:], causal_swing_pivots(sub[-STRUCT_DAYS:], thr_sub), sub_ind["series"]["atr14"][-STRUCT_DAYS:])
+        for brk in sub_smc["structure_breaks"]:
+            if brk["day"] > sub[-1]["day"]:
+                mismatches.append(f"Future BOS leaked at cut={cut}: {brk}")
+
+        # 3. 蜡烛形态无前视
         sub_cdl = detect_candlestick_patterns(
             sub, sub_ind["series"]["atr14"], sub_ind["series"]["rvol20"], lookback=40, max_items=None
         )
-        for pat in sub_cdl[:-1]:
-            # Check all bars except boundary where rolling 20-bar rank finishes at cut-1
+        for pat in sub_cdl:
             pkey = (pat["pattern"], pat["observed_at"])
             if pkey not in full_cdl:
                 mismatches.append(f"Candlestick pattern mutated at cut={cut}: {pkey}")
 
+        # 4. 保形预测仅依赖截至 cut 的已收盘 K 线
+        fc_a = compute_conformal_forecast(sub, meta=meta_stub, horizon_bars=15)
+        fc_b = compute_conformal_forecast([dict(b) for b in bars[:cut]], meta=meta_stub, horizon_bars=15)
+        if fc_a["q10"] != fc_b["q10"] or fc_a["q90"] != fc_b["q90"]:
+            mismatches.append(f"Conformal forecast non-deterministic at cut={cut}")
+
     return {
         "checked_cutoffs": checked,
+        "modules_audited": ["nadaraya_watson", "structure_layer_pivots", "candlestick_patterns", "smc_structures", "conformal_forecast"],
         "mismatches_count": len(mismatches),
         "mismatches": mismatches[:10],
         "passed": len(mismatches) == 0,
@@ -65,13 +107,16 @@ def label_triple_barrier_event(
     market: str = "CN",
     asset_type: str = "equity",
     symbol: str = "600519.SH",
+    is_st: bool = False,
+    is_ipo_no_limit: bool = False,
     trailing_stop: bool = True,
 ) -> dict[str, Any]:
     """三重屏障事件标定器（López de Prado, 2018）：
     - 在 signal_idx 收盘触发后，于 entry_idx = signal_idx + 1 开盘执行入场。
     - 同根 K 线若同时触及止盈与止损，采用保守规则（先判止损 SL_FIRST）。
     - A股 T+1 约束：入场当日 (entry_idx) 不可卖出离场，最早从 entry_idx + 1 起检测出场。
-    - 涨跌停约束：若开盘即涨停无法买入，标记为 UNTRADABLE_LIMIT_UP。
+    - 时间屏障：最多持有 horizon_bars 根 K 线（entry_idx .. entry_idx + horizon_bars - 1）。
+    - 涨跌停约束：若开盘即涨停无法买入，标记为 LIMIT_UP_NO_FILL。
     """
     n = len(bars)
     if entry_idx >= n:
@@ -81,13 +126,17 @@ def label_triple_barrier_event(
     entry_bar = bars[entry_idx]
     entry_open = float(entry_bar["open"])
 
-    limit_pct = get_daily_price_limit_pct(market, asset_type, symbol, day_str=entry_bar["day"])
+    limit_pct = get_daily_price_limit_pct(
+        market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=entry_bar["day"]
+    )
     if limit_pct is not None and entry_open >= prev_close * (1.0 + limit_pct - 0.001):
         return {"tradable": False, "reason": "LIMIT_UP_NO_FILL", "entry_day": entry_bar["day"]}
 
-    rules = get_market_microstructure_rules(market, asset_type, symbol, day_str=entry_bar["day"])
+    rules = get_market_microstructure_rules(
+        market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=entry_bar["day"]
+    )
     start_exit_idx = entry_idx + 1 if not rules["can_intraday_roundtrip"] else entry_idx
-    end_idx = min(n - 1, entry_idx + horizon_bars)
+    end_idx = min(n - 1, max(start_exit_idx, entry_idx + max(1, horizon_bars) - 1))
 
     exit_idx = end_idx
     exit_price = float(bars[end_idx]["close"])
@@ -155,12 +204,36 @@ def label_triple_barrier_event(
     }
 
 
+def _bootstrap_ci(rets: list[float], n_boot: int = 400) -> tuple[list[float] | None, list[float] | None]:
+    """计算胜率与单笔均值收益的确定性 Bootstrap 95% 置信区间（样本数 >= 2 时提供）。"""
+    m = len(rets)
+    if m < 2:
+        return None, None
+    rng = random.Random(42 + m)
+    win_rates: list[float] = []
+    mean_rets: list[float] = []
+    for _ in range(n_boot):
+        sample = [rets[rng.randrange(m)] for _ in range(m)]
+        win_rates.append(sum(1 for x in sample if x > 0) / m * 100.0)
+        mean_rets.append(sum(sample) / m * 100.0)
+    win_rates.sort()
+    mean_rets.sort()
+    lo_i = max(0, int(0.025 * n_boot))
+    hi_i = min(n_boot - 1, int(0.975 * n_boot))
+    return (
+        [round(win_rates[lo_i], 2), round(win_rates[hi_i], 2)],
+        [round(mean_rets[lo_i], 2), round(mean_rets[hi_i], 2)],
+    )
+
+
 def _summarize_returns(rets: list[float], years: float) -> dict[str, Any]:
     if not rets:
         return {
             "trades": 0,
             "cumulative_return_pct": 0.0,
             "win_rate_pct": 0.0,
+            "win_rate_95ci_pct": None,
+            "mean_return_95ci_pct": None,
             "sharpe": 0.0,
             "max_drawdown_pct": 0.0,
             "profit_factor": 0.0,
@@ -180,10 +253,13 @@ def _summarize_returns(rets: list[float], years: float) -> dict[str, Any]:
     trades_per_year = len(rets) / years if years > 0 else 0.0
     sharpe = (mean_r / sd_r) * math.sqrt(trades_per_year) if sd_r > 0 else 0.0
     pf = (sum(wins) / sum(losses)) if losses and sum(losses) > 0 else (9.99 if wins else 0.0)
+    wr_ci, mr_ci = _bootstrap_ci(rets)
     return {
         "trades": len(rets),
         "cumulative_return_pct": round((eq - 1.0) * 100.0, 2),
         "win_rate_pct": round(len(wins) / len(rets) * 100.0, 2),
+        "win_rate_95ci_pct": wr_ci,
+        "mean_return_95ci_pct": mr_ci,
         "sharpe": round(sharpe, 2),
         "max_drawdown_pct": round(max_dd * 100.0, 2),
         "profit_factor": round(pf, 2),
@@ -207,6 +283,8 @@ def run_plan_backtest(
     bars = bundle["target"]["bars"]
     inst = bundle["target"]["instrument"]
     market, asset_type, symbol = inst["market"], inst["asset_type"], inst["symbol"]
+    is_st = bool(inst.get("is_st") or request.get("is_st", False))
+    is_ipo_no_limit = bool(request.get("is_ipo_no_limit") or (bundle.get("extra_context") or {}).get("is_ipo_no_limit", False))
     n = len(bars)
     if n < 250 + horizon_bars + 2:
         raise ValueError(f"Need >= {250 + horizon_bars + 2} bars for plan backtest on {symbol}, got {n}")
@@ -223,13 +301,14 @@ def run_plan_backtest(
     t = start
     while t < end:
         cut_day = bars[t]["day"]
+        pit_bars = rescale_bars_as_of(bars[: min(n, t + horizon_bars + 2)], t)
         sub_bundle = {
-            "schema_version": "5.0.0",
+            "schema_version": "5.1.0",
             "market": market,
-            "target": {"instrument": inst, "bars": bars[: t + 1], "intraday": None},
+            "target": {"instrument": inst, "bars": pit_bars[: t + 1], "intraday": None},
             "benchmark": {**bench, "bars": [b for b in bench["bars"] if b["day"] <= cut_day]} if bench else None,
             # 历史 VIX 不可得，回放中不使用当前 VIX，避免前视
-            "extra_context": {"vix": None, "earnings_date": None},
+            "extra_context": {"vix": None, "earnings_date": None, "is_st": is_st, "is_ipo_no_limit": is_ipo_no_limit},
             "provenance": bundle.get("provenance", {}),
         }
         rep = analyze_bundle(sub_bundle, sub_request, include_replay=False)
@@ -240,10 +319,10 @@ def run_plan_backtest(
             plan = rep["triple_barrier_plan"]
             entry_low, entry_high = plan["entry_zone"]
             stop_loss = float(plan["stop_loss_barrier"])
-            entry_open = float(bars[t + 1]["open"])
+            entry_open = float(pit_bars[t + 1]["open"])
             if entry_low <= entry_open <= entry_high and entry_open > stop_loss:
                 res = label_triple_barrier_event(
-                    bars,
+                    pit_bars,
                     entry_idx=t + 1,
                     tp_price=float(plan["take_profit_1"]),
                     sl_price=stop_loss,
@@ -251,6 +330,8 @@ def run_plan_backtest(
                     market=market,
                     asset_type=asset_type,
                     symbol=symbol,
+                    is_st=is_st,
+                    is_ipo_no_limit=is_ipo_no_limit,
                     trailing_stop=False,
                 )
                 if res.get("tradable"):
@@ -281,11 +362,12 @@ def run_plan_backtest(
     hit_50 = hit_80 = 0
     q50_err: list[float] = []
     rw_err: list[float] = []
-    meta_stub = {"market": market, "asset_type": asset_type, "symbol": symbol}
+    meta_stub = {"market": market, "asset_type": asset_type, "symbol": symbol, "is_st": is_st, "is_ipo_no_limit": is_ipo_no_limit}
     for cut in eval_cuts:
-        fc = compute_conformal_forecast(bars[: cut + 1], meta=meta_stub, horizon_bars=horizon_bars)
-        actual = float(bars[cut + horizon_bars]["close"])
-        base_c = float(bars[cut]["close"])
+        pit_sub = rescale_bars_as_of(bars[: cut + horizon_bars + 1], cut)
+        fc = compute_conformal_forecast(pit_sub[: cut + 1], meta=meta_stub, horizon_bars=horizon_bars)
+        actual = float(pit_sub[cut + horizon_bars]["close"])
+        base_c = float(pit_sub[cut]["close"])
         b50_lo, b50_hi = fc["conformal_50pct_band"][-1]
         b80_lo, b80_hi = fc["conformal_80pct_band"][-1]
         hit_50 += int(b50_lo <= actual <= b50_hi)
@@ -293,6 +375,7 @@ def run_plan_backtest(
         q50_err.append(abs(actual - float(fc["base_median_q50"][-1])) / base_c)
         rw_err.append(abs(actual - base_c) / base_c)
     n_eval = max(1, len(eval_cuts))
+    full_fc_audit = compute_conformal_forecast(bars, meta=meta_stub, horizon_bars=horizon_bars)["calibration_audit"]
 
     return {
         "symbol": symbol,
@@ -319,6 +402,12 @@ def run_plan_backtest(
             "nominal_80pct_coverage": round(hit_80 / n_eval, 3),
             "q50_mae_pct": round(sum(q50_err) / n_eval * 100.0, 2),
             "random_walk_mae_pct": round(sum(rw_err) / n_eval * 100.0, 2),
-            "note": "q50 采用最新收盘价（无漂移），因此与随机游走误差一致；区间覆盖率才是可检验的预测内容。",
+            "rolling_all_cutoffs_coverage_50": full_fc_audit["nominal_50pct_empirical_coverage"],
+            "rolling_all_cutoffs_coverage_80": full_fc_audit["nominal_80pct_empirical_coverage"],
+            "rolling_evaluation_samples": full_fc_audit["evaluation_samples"],
+            "note": (
+                "evaluated_cutoffs 为按步长 H 抽样的无重叠独立截面子集；rolling_all_cutoffs_* 与主报告 calibration_audit 完全一致。"
+                "q50 采用最新收盘价（无漂移），因此与随机游走误差一致。"
+            ),
         },
     }

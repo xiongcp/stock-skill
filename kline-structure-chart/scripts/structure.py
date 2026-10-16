@@ -58,12 +58,27 @@ def sma(values: list[float], n: int) -> list[float | None]:
 
 
 def money(value: float) -> Decimal:
-    cleaned = Decimal(str(round(float(value), 4)))
+    v = round(float(value), 4)
+    cleaned = Decimal(str(v))
+    if 0 < abs(v) < 10.0 and round(v, 3) != round(v, 2):
+        return cleaned.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
     return cleaned.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def q2(value: Decimal) -> Decimal:
+    if 0 < abs(float(value)) < 10.0 and value != value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP):
+        return value.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def fmt_price(value: float) -> str:
+    """按价格量级格式化简短标签：>=100 用整数，10~100 保留 2 位小数，<10 保留 2~3 位小数（避免低价股/ETF 失真）。"""
+    v = float(value)
+    if abs(v) >= 100.0:
+        return f"{v:.0f}"
+    if abs(v) < 10.0 and round(v, 3) != round(v, 2):
+        return f"{v:.3f}"
+    return f"{v:.2f}"
 
 
 
@@ -682,7 +697,7 @@ def compute_projections(
             "target_source": bull_src,
             "invalidation": f"突破后收盘跌回 {bull_retest:.2f} 下方视为假突破",
             "waypoints_offset": [(0, start), (s1_slot, r1), (s2_slot, bull_retest), (s3_slot, bull_target)],
-            "step_labels": [(s1_slot, f"突破 {r1:.0f}"), (s2_slot, f"回踩 {bull_retest:.0f}")],
+            "step_labels": [(s1_slot, f"突破 {fmt_price(r1)}"), (s2_slot, f"回踩 {fmt_price(bull_retest)}")],
         },
         "neutral": {
             "name": "区间震荡路径",
@@ -690,7 +705,7 @@ def compute_projections(
             "target_price": neutral_mid,
             "condition": f"收盘既未站上 {r1:.2f} 也未跌破 {s1:.2f}",
             "waypoints_offset": [(0, start), (n1_slot, neutral_high), (n2_slot, neutral_low), (s3_slot, neutral_mid)],
-            "step_labels": [(n1_slot, f"受阻 {neutral_high:.0f}"), (n2_slot, f"企稳 {neutral_low:.0f}")],
+            "step_labels": [(n1_slot, f"受阻 {fmt_price(neutral_high)}"), (n2_slot, f"企稳 {fmt_price(neutral_low)}")],
         },
         "bear": {
             "name": "下探破位路径",
@@ -700,7 +715,7 @@ def compute_projections(
             "target_source": bear_src,
             "invalidation": f"跌破后收盘重新站回 {bear_rebound:.2f} 上方视为假跌破",
             "waypoints_offset": [(0, start), (s1_slot, s1), (s2_slot, bear_rebound), (s3_slot, bear_target)],
-            "step_labels": [(s1_slot, f"破位 {s1:.0f}"), (s2_slot, f"反抽 {bear_rebound:.0f}")],
+            "step_labels": [(s1_slot, f"破位 {fmt_price(s1)}"), (s2_slot, f"反抽 {fmt_price(bear_rebound)}")],
         },
     }
 

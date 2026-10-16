@@ -69,3 +69,37 @@ def test_converged_match_indicators(ohlc) -> None:
     _assert_same(a["adx"], talib.ADX(h, l, c, 14), tail=600, rtol=1e-7)
     _assert_same(a["plus_di"], talib.PLUS_DI(h, l, c, 14), tail=600, rtol=1e-7)
     _assert_same(a["minus_di"], talib.MINUS_DI(h, l, c, 14), tail=600, rtol=1e-7)
+
+
+def test_supertrend_matches_wilder_atr_ratchet_reference(ohlc) -> None:
+    """以 TA-Lib Wilder ATR(14) 为基准独立推导 Supertrend(14, 3.0) 上下轨棘轮与方向翻转，逐点核对。"""
+    bars, h, l, c = ohlc
+    atr_ref = talib.ATR(h, l, c, 14)
+    got = ind.supertrend(bars, period=14, multiplier=3.0)
+    n = len(bars)
+    ref_line = np.full(n, np.nan)
+    ref_dir: list[int | None] = [None] * n
+    final_u = final_l = 0.0
+    cur_d = 1
+    for i in range(n):
+        if np.isnan(atr_ref[i]):
+            continue
+        hl2 = (h[i] + l[i]) / 2.0
+        bu = hl2 + 3.0 * float(atr_ref[i])
+        bl = hl2 - 3.0 * float(atr_ref[i])
+        if i == 0 or np.isnan(ref_line[i - 1]):
+            final_u, final_l = bu, bl
+            cur_d = 1 if c[i] >= hl2 else -1
+        else:
+            if bu < final_u or c[i - 1] > final_u:
+                final_u = bu
+            if bl > final_l or c[i - 1] < final_l:
+                final_l = bl
+            if cur_d == 1 and c[i] < final_l:
+                cur_d = -1
+            elif cur_d == -1 and c[i] > final_u:
+                cur_d = 1
+        ref_dir[i] = cur_d
+        ref_line[i] = final_l if cur_d == 1 else final_u
+    _assert_same(got["line"], ref_line)
+    assert got["direction"] == ref_dir

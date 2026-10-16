@@ -71,6 +71,8 @@ class AnalysisRequest(TypedDict, total=False):
     symbol: str
     name: str
     asset_type: AssetType
+    is_st: bool
+    is_ipo_no_limit: bool
     benchmark_symbol: str
     timeframes: list[str]
     as_of: str

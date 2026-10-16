@@ -8,7 +8,7 @@ def classify_market_regime(
     ind_snapshot: dict[str, Any],
     vix_value: float | None = None,
 ) -> dict[str, Any]:
-    """划分四大市场状态：TRENDING_BULL / TRENDING_BEAR / SQUEEZE_CONSOLIDATION / MEAN_REVERTING_RANGE / HIGH_VOLATILITY_CHAOS。"""
+    """划分五类市场状态：TRENDING_BULL / TRENDING_BEAR / SQUEEZE_CONSOLIDATION / MEAN_REVERTING_RANGE / HIGH_VOLATILITY_CHAOS。"""
     trend = ind_snapshot.get("trend", {})
     vol = ind_snapshot.get("volatility", {})
     qlib = ind_snapshot.get("qlib_factors", {})

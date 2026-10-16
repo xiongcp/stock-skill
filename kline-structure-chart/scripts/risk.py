@@ -3,7 +3,13 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from market_rules import get_market_microstructure_rules, round_to_tick, round_trip_cost_rate
+from market_rules import (
+    get_market_microstructure_rules,
+    price_decimals,
+    round_shares_to_lot,
+    round_to_tick,
+    round_trip_cost_rate,
+)
 
 
 def compute_triple_barrier_plan(
@@ -21,7 +27,7 @@ def compute_triple_barrier_plan(
     max_risk_pct: float = 0.01,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """计算：
-    1. 二阶段过滤决策 (meta_labeling_decision)
+    1. 二阶段规则过滤决策 (meta_labeling_decision)
     2. 左右侧双轨条件与 Triple-Barrier 出场计划 (triple_barrier_plan)
     3. TradingAgents 风格多空双向证伪与独立风控官否决权 (debate_and_veto)
     """
@@ -29,7 +35,11 @@ def compute_triple_barrier_plan(
     asset_type = meta["asset_type"]
     symbol = meta["symbol"]
     as_of_day = meta.get("as_of")
-    rules = get_market_microstructure_rules(market, asset_type, symbol, day_str=as_of_day)
+    is_st = bool(meta.get("is_st", False))
+    is_ipo_no_limit = bool(meta.get("is_ipo_no_limit", False))
+    rules = get_market_microstructure_rules(
+        market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=as_of_day
+    )
 
     last_bar = bars[-1]
     last_c = float(last_bar["close"])
@@ -124,8 +134,8 @@ def compute_triple_barrier_plan(
         raw_unit_risk = net_risk / adj_factor
         raw_shares = int(math.floor(risk_budget / max(1e-6, raw_unit_risk)))
         lot = int(rules["lot_size"])
-        lot_shares = (raw_shares // lot) * lot
-        max_cash_shares = (int(math.floor(float(account_equity) / max(1e-6, raw_c))) // lot) * lot
+        lot_shares = round_shares_to_lot(raw_shares, rules)
+        max_cash_shares = round_shares_to_lot(int(math.floor(float(account_equity) / max(1e-6, raw_c))), rules)
         final_shares = max(0, min(lot_shares, max_cash_shares))
         position_sizing = {
             "tradable": True,
@@ -133,6 +143,8 @@ def compute_triple_barrier_plan(
             "max_risk_pct": round(float(max_risk_pct) * 100.0, 2),
             "risk_budget_amount": round(risk_budget, 2),
             "lot_size": lot,
+            "min_order_shares": int(rules.get("min_order_shares", lot)),
+            "lot_step": int(rules.get("lot_step", lot)),
             "recommended_shares": final_shares,
             "estimated_notional": round(final_shares * raw_c, 2),
             "settlement_rule": rules["settlement"],
@@ -149,6 +161,10 @@ def compute_triple_barrier_plan(
         "veto_reasons": veto_reasons,
     }
 
+    p_dec = price_decimals(last_c, market, asset_type, as_of_day)
+    retest_hold = float(projections["bull"]["retest_hold"])
+    bear_target = float(projections["bear"]["target_price"])
+
     tb_plan = {
         "entry_zone": [entry_low, entry_high],
         "stop_loss_barrier": stop_loss,
@@ -159,20 +175,20 @@ def compute_triple_barrier_plan(
         "left_side_constraints": {
             "required_evidence": "缩量企稳 + RSI 底背离或下轨支撑不破",
             "invalidation_level": stop_loss,
-            "exit_rule": f"日线收盘跌破 {stop_loss:.2f} 无条件离场",
+            "exit_rule": f"日线收盘跌破 {stop_loss:.{p_dec}f} 无条件离场",
         },
         "right_side_constraints": {
-            "required_evidence": f"日线收盘站稳 {r1:.2f} 且 RVOL20 >= 1.35 (当前 {rv:.2f})",
-            "false_breakout_rule": f"突破后收盘跌回 {projections['bull']['retest_hold']:.2f} 下方视为假突破",
+            "required_evidence": f"日线收盘站稳 {r1:.{p_dec}f} 且 RVOL20 >= 1.35 (当前 {rv:.2f})",
+            "false_breakout_rule": f"突破后收盘跌回 {retest_hold:.{p_dec}f} 下方视为假突破",
         },
-        "time_stop_rule": f"持仓满 {horizon_bars} 根K线未触及 TP1({tp1:.2f}) 且偏离成本不足 0.5*ATR 时触发时间屏障离场",
+        "time_stop_rule": f"持仓满 {horizon_bars} 根K线未触及 TP1({tp1:.{p_dec}f}) 且偏离成本不足 0.5*ATR 时触发时间屏障离场",
         "market_microstructure": rules,
         "position_sizing": position_sizing,
     }
 
     # Bull vs Bear structured falsification (TradingAgents style)
     bull_case: list[str] = [
-        f"结构触发：若日线放量收盘站稳 {r1:.2f}（{projections['breakout_level']['source']}），回踩不破 {projections['bull']['retest_hold']:.2f}，上方空间指向 TP1 {tp1:.2f} / TP2 {tp2:.2f}。",
+        f"结构触发：若日线放量收盘站稳 {r1:.{p_dec}f}（{projections['breakout_level']['source']}），回踩不破 {retest_hold:.{p_dec}f}，上方空间指向 TP1 {tp1:.{p_dec}f} / TP2 {tp2:.{p_dec}f}。",
     ]
     for p in algebraic_patterns:
         if p["direction"] == "BULLISH":
@@ -183,7 +199,7 @@ def compute_triple_barrier_plan(
         )
 
     bear_case: list[str] = [
-        f"空头证伪/失效线：若日线收盘跌破 {s1:.2f}（{projections['breakdown_level']['source']}）或跌穿硬止损屏障 {stop_loss:.2f}，多头结构立即失效，下方风险指向 {projections['bear']['target_price']:.2f}。",
+        f"空头证伪/失效线：若日线收盘跌破 {s1:.{p_dec}f}（{projections['breakdown_level']['source']}）或跌穿硬止损屏障 {stop_loss:.{p_dec}f}，多头结构立即失效，下方风险指向 {bear_target:.{p_dec}f}。",
     ]
     for p in algebraic_patterns:
         if p["direction"] == "BEARISH":
@@ -198,7 +214,7 @@ def compute_triple_barrier_plan(
         "veto_reasons": veto_reasons,
         "final_verdict_cn": (
             f"【{action_cn}】综合规则分 {rule_score:.1f}/100，当前属于「{setup_label_cn}」；"
-            f"关键突破位 {r1:.2f}，关键防守/止损位 {stop_loss:.2f}，TP1 {tp1:.2f}（净盈亏比 {rr_ratio:.2f}）。"
+            f"关键突破位 {r1:.{p_dec}f}，关键防守/止损位 {stop_loss:.{p_dec}f}，TP1 {tp1:.{p_dec}f}（净盈亏比 {rr_ratio:.2f}）。"
         ),
     }
 

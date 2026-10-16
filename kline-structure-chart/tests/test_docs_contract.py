@@ -37,14 +37,14 @@ def test_skill_md_references_existing_files() -> None:
 
 def test_skill_md_keeps_runtime_contract_self_contained() -> None:
     text = SKILL.read_text(encoding="utf-8")
-    for must in ("DATA_UNAVAILABLE", "--allow-synthetic", "quality.status", "rule_score", "calibration_audit", "risk_officer_veto"):
+    for must in ("DATA_UNAVAILABLE", "quality.status", "rule_score", "calibration_audit", "risk_officer_veto", "禁止合成数据"):
         assert must in text, f"SKILL.md 缺少运行期规则关键字 {must}"
 
 
 def test_agents_md_has_authenticity_invariant_and_doc_split() -> None:
     text = _agents_text()
     assert "## 0. 文档分工" in text
-    assert "数据真实性" in text and "--allow-synthetic" in text and "DATA_UNAVAILABLE" in text
+    assert "数据真实性" in text and "DATA_UNAVAILABLE" in text
     # 运行期回复规则以 SKILL.md 为准，AGENTS.md 只引用
     assert "以 `SKILL.md`" in text
 
@@ -73,8 +73,22 @@ def test_agents_md_commands_use_relative_existing_paths() -> None:
 def test_fixture_naming_does_not_impersonate_real_sources() -> None:
     fixtures = SKILL_DIR / "tests" / "fixtures"
     assert not (fixtures / "sina_daily").exists(), "合成数据不得命名为 sina_daily"
+    assert not (fixtures / "synthetic_daily").exists(), "禁止保留任何合成数据目录 synthetic_daily"
     assert (fixtures / "recorded" / "MANIFEST.json").exists()
-    assert (fixtures / "synthetic_daily").is_dir()
+
+
+def test_no_synthetic_generators_or_mock_bars_in_code_and_tests() -> None:
+    """所有代码与测试必须使用真实行情，禁止存在合成序列生成器。"""
+    py_files = [*(SKILL_DIR / "scripts").glob("*.py"), *(SKILL_DIR / "tests").glob("*.py")]
+    forbidden = ("def generate_deterministic_series", "def _random_walk_bars", "def _synthetic_bundle", "allow_synthetic_fallback")
+    hits = [
+        f"{p.name}: {token}"
+        for p in py_files
+        if p.name != "test_docs_contract.py"
+        for token in forbidden
+        if token in p.read_text(encoding="utf-8")
+    ]
+    assert not hits, f"检测到禁止的合成数据构造器: {hits}"
 
 
 # ---------------------------------------------------------------------------
@@ -128,10 +142,17 @@ def test_skill_body_has_output_contract_and_failure_handling() -> None:
 
 
 def test_versions_are_in_sync() -> None:
+    import json
+
     fields, _ = _frontmatter()
     pyproject = (SKILL_DIR / "pyproject.toml").read_text(encoding="utf-8")
     version = re.search(r'^version = "([^"]+)"', pyproject, re.M).group(1)
     assert fields["metadata"]["version"] == version  # type: ignore[index]
+    schema = json.loads((SKILL_DIR / "assets" / "analysis.schema.json").read_text(encoding="utf-8"))
+    assert schema["properties"]["schema_version"]["enum"] == [version]
+    analysis_py = (SKILL_DIR / "scripts" / "analysis.py").read_text(encoding="utf-8")
+    assert f'"schema_version": "{version}"' in analysis_py
+    assert f'"engine_version": "{version}"' in analysis_py
 
 
 # 已核实未实现或已移除的能力，任何文档、注释与界面文案都不得再宣称

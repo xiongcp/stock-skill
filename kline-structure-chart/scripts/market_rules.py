@@ -5,10 +5,19 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 from zoneinfo import ZoneInfo
 
-# 各市场交易所休市日（仅工作日）。来源：CN 国务院办公厅放假通知/上交所休市安排；HK 政府宪报公众假期；
-# US NYSE 2026-2028 假期日历（含 2025-01-09 卡特国葬日休市）。新一年安排公布后须补录并同步 CALENDAR_COVERAGE_END。
+# 各市场交易所休市日（仅工作日，2021-2027）。来源：CN 国务院办公厅放假通知/上交所休市安排；HK 政府宪报公众假期；
+# US NYSE 假期日历（含 2025-01-09 卡特国葬日休市）。新一年安排公布后须补录并同步 CALENDAR_COVERAGE_END。
 MARKET_HOLIDAYS: dict[str, set[str]] = {
     "CN": {
+        "2021-01-01", "2021-02-11", "2021-02-12", "2021-02-15", "2021-02-16", "2021-02-17",
+        "2021-04-05", "2021-05-03", "2021-05-04", "2021-05-05", "2021-06-14",
+        "2021-09-20", "2021-09-21", "2021-10-01", "2021-10-04", "2021-10-05", "2021-10-06", "2021-10-07",
+        "2022-01-03", "2022-01-31", "2022-02-01", "2022-02-02", "2022-02-03", "2022-02-04",
+        "2022-04-04", "2022-04-05", "2022-05-02", "2022-05-03", "2022-05-04", "2022-06-03",
+        "2022-09-12", "2022-10-03", "2022-10-04", "2022-10-05", "2022-10-06", "2022-10-07",
+        "2023-01-02", "2023-01-23", "2023-01-24", "2023-01-25", "2023-01-26", "2023-01-27",
+        "2023-04-05", "2023-05-01", "2023-05-02", "2023-05-03", "2023-06-22", "2023-06-23",
+        "2023-09-29", "2023-10-02", "2023-10-03", "2023-10-04", "2023-10-05", "2023-10-06",
         "2024-01-01", "2024-02-09", "2024-02-12", "2024-02-13", "2024-02-14", "2024-02-15", "2024-02-16",
         "2024-04-04", "2024-04-05", "2024-05-01", "2024-05-02", "2024-05-03", "2024-06-10",
         "2024-09-16", "2024-09-17", "2024-10-01", "2024-10-02", "2024-10-03", "2024-10-04", "2024-10-07",
@@ -20,6 +29,12 @@ MARKET_HOLIDAYS: dict[str, set[str]] = {
         "2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07",
     },
     "HK": {
+        "2021-01-01", "2021-02-12", "2021-02-15", "2021-04-02", "2021-04-05", "2021-04-06",
+        "2021-05-19", "2021-06-14", "2021-07-01", "2021-09-22", "2021-10-01", "2021-10-14", "2021-12-27",
+        "2022-01-03", "2022-02-01", "2022-02-02", "2022-02-03", "2022-04-05", "2022-04-15", "2022-04-18",
+        "2022-05-02", "2022-05-09", "2022-06-03", "2022-07-01", "2022-09-12", "2022-10-04", "2022-12-26", "2022-12-27",
+        "2023-01-02", "2023-01-23", "2023-01-24", "2023-01-25", "2023-04-05", "2023-04-07", "2023-04-10",
+        "2023-05-01", "2023-05-26", "2023-06-22", "2023-10-02", "2023-10-23", "2023-12-25", "2023-12-26",
         "2024-01-01", "2024-02-12", "2024-02-13", "2024-03-29", "2024-04-01", "2024-04-04", "2024-05-01",
         "2024-05-15", "2024-06-10", "2024-07-01", "2024-09-18", "2024-10-01", "2024-10-11", "2024-12-25", "2024-12-26",
         "2025-01-01", "2025-01-29", "2025-01-30", "2025-01-31", "2025-04-04", "2025-04-18", "2025-04-21",
@@ -31,6 +46,12 @@ MARKET_HOLIDAYS: dict[str, set[str]] = {
         "2027-06-09", "2027-07-01", "2027-09-16", "2027-10-01", "2027-10-08", "2027-12-27",
     },
     "US": {
+        "2021-01-01", "2021-01-18", "2021-02-15", "2021-04-02", "2021-05-31", "2021-07-05",
+        "2021-09-06", "2021-11-25", "2021-12-24",
+        "2022-01-17", "2022-02-21", "2022-04-15", "2022-05-30", "2022-06-20", "2022-07-04",
+        "2022-09-05", "2022-11-24", "2022-12-26",
+        "2023-01-02", "2023-01-16", "2023-02-20", "2023-04-07", "2023-05-29", "2023-06-19", "2023-07-04",
+        "2023-09-04", "2023-11-23", "2023-12-25",
         "2024-01-01", "2024-01-15", "2024-02-19", "2024-03-29", "2024-05-27", "2024-06-19", "2024-07-04",
         "2024-09-02", "2024-11-28", "2024-12-25",
         "2025-01-01", "2025-01-09", "2025-01-20", "2025-02-17", "2025-04-18", "2025-05-26", "2025-06-19", "2025-07-04",
@@ -42,13 +63,15 @@ MARKET_HOLIDAYS: dict[str, set[str]] = {
     },
 }
 
-# 休市表已核实覆盖到的最后一天（CN 2027 年放假安排截至 2026-10 尚未发布）
+# 休市表已核实覆盖的起止范围（CN 2027 年放假安排截至 2026-10 尚未发布）
+CALENDAR_COVERAGE_START = "2021-01-01"
 CALENDAR_COVERAGE_END: dict[str, str] = {"CN": "2026-12-31", "HK": "2027-12-31", "US": "2027-12-31"}
 
 
 def calendar_covers(day_str: str, market: str) -> bool:
     """该日期是否落在已核实的休市表覆盖范围内；超出范围时只能按"周一至周五"估算交易日。"""
-    return day_str[:10] <= CALENDAR_COVERAGE_END.get(market, "0000-00-00")
+    d = day_str[:10]
+    return CALENDAR_COVERAGE_START <= d <= CALENDAR_COVERAGE_END.get(market, "0000-00-00")
 
 
 DEFAULT_BENCHMARKS: dict[str, dict[str, str]] = {
@@ -149,7 +172,40 @@ def is_daily_bar_complete(day_str: str, market: str, now: datetime | None = None
     return now_local.time() >= close_time
 
 
-def resolve_instrument(symbol: str, market: str | None = None, asset_type: str | None = None) -> dict[str, Any]:
+def is_st_instrument(symbol: str = "", name: str = "", is_st: bool = False) -> bool:
+    """识别风险警示股票（ST / *ST / SST / S*ST）：支持显式 is_st 参数或从证券名称/代码标识识别。"""
+    if is_st:
+        return True
+    for text in (name, symbol):
+        u = (text or "").upper()
+        if "ST" in u and not u.endswith((".US", ".HK")):
+            return True
+    return False
+
+
+def _cn_lot_rules(asset_type: str, board: str) -> tuple[int, int, int]:
+    """返回 A 股 (lot_size, min_order_shares, lot_step)。
+
+    - 主板/创业板及 ETF：最低 100 股，按 100 股整手递增。
+    - 科创板（STAR，上交所科创板交易特别规定）：单笔申报不少于 200 股，超过 200 股的部分可按 1 股递增。
+    - 北交所（BSE，北交所交易规则）：单笔申报不少于 100 股，超过 100 股的部分可按 1 股递增。
+    """
+    if asset_type == "index":
+        return 1, 1, 1
+    if asset_type == "equity" and board == "STAR":
+        return 200, 200, 1
+    if asset_type == "equity" and board == "BSE":
+        return 100, 100, 1
+    return 100, 100, 100
+
+
+def resolve_instrument(
+    symbol: str,
+    market: str | None = None,
+    asset_type: str | None = None,
+    name: str | None = None,
+    is_st: bool = False,
+) -> dict[str, Any]:
     raw = symbol.strip()
     upper = raw.upper()
 
@@ -162,12 +218,24 @@ def resolve_instrument(symbol: str, market: str | None = None, asset_type: str |
         info = dict(KNOWN_INSTRUMENTS[upper], symbol=upper)
         if market and info["market"] != market:
             raise ValueError(f"Symbol {upper} belongs to market {info['market']}, not {market}")
+        if name:
+            info["name"] = name
+        info["is_st"] = is_st_instrument(upper, info.get("name", ""), is_st or bool(info.get("is_st", False)))
+        if info["market"] == "CN":
+            lot, min_sh, step = _cn_lot_rules(info["asset_type"], info.get("board", "MAIN"))
+            info.setdefault("lot_size", lot)
+            info.setdefault("min_order_shares", min_sh)
+            info.setdefault("lot_step", step)
         return info
 
     # Sina shorthand mapping (e.g. sh000001, sz399006)
     for canonical, meta in KNOWN_INSTRUMENTS.items():
         if meta.get("sina", "").lower() == raw.lower():
-            return dict(meta, symbol=canonical)
+            info = dict(meta, symbol=canonical)
+            if name:
+                info["name"] = name
+            info["is_st"] = is_st_instrument(canonical, info.get("name", ""), is_st or bool(info.get("is_st", False)))
+            return info
 
     # Infer suffix
     inferred_market = market
@@ -197,20 +265,31 @@ def resolve_instrument(symbol: str, market: str | None = None, asset_type: str |
     if inferred_market == "CN" and resolved_type == "equity":
         if code_num.startswith(("300", "301")):
             board = "CHINEXT"
-        elif code_num.startswith("688"):
+        elif code_num.startswith(("688", "689")):
             board = "STAR"
         elif upper.endswith(".BJ") or code_num.startswith(("8", "4", "92")):
             board = "BSE"
 
+    if inferred_market == "CN":
+        lot_size, min_order_shares, lot_step = _cn_lot_rules(resolved_type, board)
+    elif inferred_market == "HK" and resolved_type == "equity":
+        lot_size, min_order_shares, lot_step = 100, 100, 100
+    else:
+        lot_size, min_order_shares, lot_step = 1, 1, 1
+
+    inst_name = name or upper
     return {
         "symbol": upper,
         "market": inferred_market,
         "asset_type": resolved_type,
-        "name": upper,
+        "name": inst_name,
+        "is_st": is_st_instrument(upper, inst_name, is_st),
         "sina": sina_symbol_for(upper) if inferred_market == "CN" else raw.lower(),
         "currency": currency,
         "board": board,
-        "lot_size": 100 if (inferred_market in ("CN", "HK") and resolved_type == "equity") or (inferred_market == "CN" and resolved_type == "etf") else 1,
+        "lot_size": lot_size,
+        "min_order_shares": min_order_shares,
+        "lot_step": lot_step,
     }
 
 
@@ -314,16 +393,56 @@ def hk_tick_size(price: float, asset_type: str = "equity", day_str: str | None =
     return Decimal(_HK_SPREAD_BASE[-1][1])
 
 
-def round_to_tick(price: float, market: str = "CN", asset_type: str = "equity", day_str: str | None = None) -> float:
-    if price <= 0:
-        return 0.01
+def tick_size_for(
+    price: float,
+    market: str = "CN",
+    asset_type: str = "equity",
+    day_str: str | None = None,
+) -> Decimal:
+    """按市场、品种、价格档位与日期返回最小报价单位（tick size）。
+
+    - HK 股票/ETF：按港交所价位表与两期下调规则。
+    - CN ETF：上交所/深交所基金最小变动单位 0.001 元。
+    - US 股票/ETF < 1 美元：SEC Reg NMS Rule 612 子美分规则 0.0001 美元。
+    - 其余：0.01。
+    """
     if market == "HK" and asset_type in ("equity", "etf"):
-        tick = hk_tick_size(price, asset_type, day_str)
-    else:
-        tick = Decimal("0.01")
+        return hk_tick_size(price, asset_type, day_str)
+    if market == "CN" and asset_type == "etf":
+        return Decimal("0.001")
+    if market == "US" and asset_type in ("equity", "etf") and 0 < price < 1.0:
+        return Decimal("0.0001")
+    return Decimal("0.01")
+
+
+def price_decimals(
+    price: float,
+    market: str = "CN",
+    asset_type: str = "equity",
+    day_str: str | None = None,
+) -> int:
+    """返回价格展示与取整应保留的小数位数（至少 2 位，ETF/低价港股 3 位，1美元以下美股 4 位）。"""
+    tick = tick_size_for(max(price, 1e-4), market, asset_type, day_str)
+    exp = max(2, -int(tick.as_tuple().exponent))
+    return exp
+
+
+def round_to_tick(price: float, market: str = "CN", asset_type: str = "equity", day_str: str | None = None) -> float:
+    tick = tick_size_for(max(price, 1e-4), market, asset_type, day_str)
+    if price <= 0:
+        return float(tick)
     d = Decimal(str(price))
     steps = (d / tick).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     return float((steps * tick).quantize(tick))
+
+
+def round_shares_to_lot(raw_shares: int, rules: dict[str, Any]) -> int:
+    """按板块最小申报股数与递增步长向下取整（科创板 200+1，北交所 100+1，主板/港股整手）。"""
+    min_order = int(rules.get("min_order_shares") or rules.get("lot_size") or 1)
+    step = int(rules.get("lot_step") or rules.get("lot_size") or 1)
+    if raw_shares < min_order:
+        return 0
+    return min_order + ((raw_shares - min_order) // step) * step
 
 
 def get_market_microstructure_rules(
@@ -331,18 +450,38 @@ def get_market_microstructure_rules(
     asset_type: str,
     symbol: str,
     is_st: bool = False,
+    is_ipo_no_limit: bool = False,
     day_str: str | None = None,
 ) -> dict[str, Any]:
-    limit_pct = get_daily_price_limit_pct(market, asset_type, symbol, is_st=is_st, day_str=day_str)
+    st_flag = is_st_instrument(symbol, is_st=is_st)
+    limit_pct = get_daily_price_limit_pct(
+        market, asset_type, symbol, is_st=st_flag, is_ipo_no_limit=is_ipo_no_limit, day_str=day_str
+    )
     tradable = asset_type != "index"
     if market == "CN":
+        code = symbol.upper().split(".")[0]
+        board = "MAIN"
+        if asset_type == "equity":
+            if code.startswith(("300", "301")):
+                board = "CHINEXT"
+            elif code.startswith(("688", "689")):
+                board = "STAR"
+            elif symbol.upper().endswith(".BJ") or code.startswith(("8", "4", "92")):
+                board = "BSE"
+        lot_size, min_order_shares, lot_step = _cn_lot_rules(asset_type, board)
         return {
             "market": "CN",
+            "board": board,
+            "is_st": st_flag,
+            "is_ipo_no_limit": is_ipo_no_limit,
             "settlement": "T+1" if tradable else "INDEX_NON_TRADABLE",
             "settlement_note": "跨境/债券/黄金/货币类 ETF 为 T+0，需按品种核对" if asset_type == "etf" else None,
             "can_intraday_roundtrip": False,
             "daily_price_limit_pct": limit_pct,
-            "lot_size": 100 if tradable else 1,
+            "lot_size": lot_size,
+            "min_order_shares": min_order_shares,
+            "lot_step": lot_step,
+            "tick_size": 0.001 if asset_type == "etf" else 0.01,
             "color_scheme": "cn_red_up",
             "session_hours_local": "09:30-11:30, 13:00-15:00 Asia/Shanghai",
             "commission_bps": 2.5,
@@ -352,12 +491,15 @@ def get_market_microstructure_rules(
     if market == "HK":
         # 港股印花税自 2023-11-17 起买卖双方各 0.1%；ETF 豁免
         hk_stamp = 10.0 if asset_type == "equity" else 0.0
+        lot = 100 if asset_type == "equity" else 1
         return {
             "market": "HK",
             "settlement": "T+0_TRADING_T+2_CLEARING" if tradable else "INDEX_NON_TRADABLE",
             "can_intraday_roundtrip": tradable,
             "daily_price_limit_pct": None,
-            "lot_size": 100 if asset_type == "equity" else 1,
+            "lot_size": lot,
+            "min_order_shares": lot,
+            "lot_step": lot,
             "color_scheme": "cn_red_up",
             "session_hours_local": "09:30-12:00, 13:00-16:00 Asia/Hong_Kong",
             "commission_bps": 3.0,
@@ -374,6 +516,8 @@ def get_market_microstructure_rules(
         "can_intraday_roundtrip": tradable,
         "daily_price_limit_pct": None,
         "lot_size": 1,
+        "min_order_shares": 1,
+        "lot_step": 1,
         "color_scheme": "us_green_up",
         "session_hours_local": "09:30-16:00 America/New_York",
         "commission_bps": 1.0,
@@ -428,4 +572,36 @@ def apply_point_in_time_adjustment(
         adj_bar["low"] = round(float(bar["low"]) * factor, 4)
         adj_bar["close"] = round(float(bar["close"]) * factor, 4)
         out.append(adj_bar)
+    return out
+
+
+def rescale_bars_as_of(bars: list[dict[str, Any]], cut_idx: int) -> list[dict[str, Any]]:
+    """将已复权序列还原到历史截面 cut_idx 当时的 Point-in-Time 复权口径（消除 cut_idx 之后的未来分红/送转因子泄漏）。
+
+    对于任意 bar[i]，其在 cut_idx 截面时的因果复权因子等于 factor(i) / factor(cut_idx)；
+    当 adj_factor[i] == adj_factor[cut_idx]（即 [bar[i].day, bar[cut_idx].day] 之间无除权事件）时，直接取 raw_open/high/low/close。
+    """
+    if not bars:
+        return []
+    base_factor = float(bars[cut_idx].get("adj_factor") or 1.0)
+    if abs(base_factor - 1.0) <= 1e-9 or base_factor <= 0:
+        return [dict(b) for b in bars]
+    out: list[dict[str, Any]] = []
+    for b in bars:
+        bf = float(b.get("adj_factor") or 1.0)
+        nb = dict(b)
+        if abs(bf - base_factor) <= 1e-9 and "raw_close" in b:
+            nb["open"] = float(b["raw_open"])
+            nb["high"] = float(b["raw_high"])
+            nb["low"] = float(b["raw_low"])
+            nb["close"] = float(b["raw_close"])
+            nb["adj_factor"] = 1.0
+        else:
+            rel = bf / base_factor
+            nb["open"] = round(float(b.get("raw_open", b["open"])) * rel, 4)
+            nb["high"] = round(float(b.get("raw_high", b["high"])) * rel, 4)
+            nb["low"] = round(float(b.get("raw_low", b["low"])) * rel, 4)
+            nb["close"] = round(float(b.get("raw_close", b["close"])) * rel, 4)
+            nb["adj_factor"] = round(rel, 8)
+        out.append(nb)
     return out

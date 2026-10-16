@@ -8,14 +8,13 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from contracts import SYNTHETIC_SOURCE, AnalysisRequest, MarketDataBundle, validate_bars
+from contracts import AnalysisRequest, MarketDataBundle, validate_bars
 from market_rules import (
     DEFAULT_BENCHMARKS,
     MARKET_SESSIONS,
     TENCENT_INDEX_SOURCES,
     apply_point_in_time_adjustment,
     is_daily_bar_complete,
-    is_trading_day,
     resolve_instrument,
     yahoo_events_symbol_for,
     yahoo_symbol_for,
@@ -174,11 +173,14 @@ def build_corporate_actions(
 ) -> list[dict[str, Any]]:
     """把除权除息事件换算成复权参数：dividend_factor = (除息前一日收盘 - 每股股息) / 除息前一日收盘。
 
-    include_splits=False 用于 Yahoo 港美股行情（其 OHLC 已按拆股全历史调整，再拆一次会重复）。
+    - include_splits=False 用于 Yahoo 港美股行情（其 OHLC 与股息均已按拆股全历史调整，处于同一股本口径）。
+    - include_splits=True 用于新浪 A 股不复权行情：Yahoo 返回的 dividend 已被 ex_date 当日及之后的拆送股比例除过，
+      因此须乘回 ex_date 及之后的累计 split_ratio，才能与新浪除权前的原始收盘价 prev_close 口径一致。
     """
     if not raw_bars:
         return []
     first_day = raw_bars[0]["day"]
+    splits = [s for s in events if float(s.get("split_ratio") or 1.0) != 1.0]
     actions: list[dict[str, Any]] = []
     for ev in events:
         ex_date = ev["ex_date"]
@@ -191,7 +193,13 @@ def build_corporate_actions(
         split_ratio = float(ev["split_ratio"]) if include_splits else 1.0
         dividend_factor = 1.0
         if ev["dividend"] > 0 and prev_close > 0:
-            dividend_factor = (prev_close - float(ev["dividend"])) / prev_close
+            subsequent_split = (
+                math.prod(float(s["split_ratio"]) for s in splits if s["ex_date"] >= ex_date)
+                if include_splits
+                else 1.0
+            )
+            raw_div = float(ev["dividend"]) * subsequent_split
+            dividend_factor = (prev_close - raw_div) / prev_close
             if dividend_factor <= 0:
                 continue
         if split_ratio == 1.0 and dividend_factor == 1.0:
@@ -232,108 +240,13 @@ def _load_corporate_actions(
     return actions, status
 
 
-def generate_deterministic_series(
-    symbol: str,
-    market: str = "CN",
-    num_bars: int = 460,
-    end_day: str = "2026-10-15",
-    base_price: float | None = None,
-) -> list[dict[str, Any]]:
-    """仅供测试/演示：生成确定性、可复现的合成行情（末段人为注入双底突破结构），来源标注为 DETERMINISTIC_SYNTHETIC_FIXTURE。
-
-    生产路径默认禁止使用；只有显式 allow_synthetic_fallback=True（CLI --allow-synthetic）时才会被调用。
-    """
-    seed_sum = sum((idx + 1) * ord(ch) for idx, ch in enumerate(symbol))
-    if base_price is None:
-        base_map = {
-            "000001.SH": 3280.0,
-            "000300.SH": 3920.0,
-            "399001.SZ": 10500.0,
-            "399006.SZ": 2180.0,
-            "000688.SH": 980.0,
-            "600519.SH": 1520.0,
-            "300750.SZ": 245.0,
-            "HSI.HK": 20600.0,
-            "HSTECH.HK": 4550.0,
-            "00700.HK": 420.0,
-            "09988.HK": 98.0,
-            "SPY.US": 575.0,
-            "QQQ.US": 492.0,
-            "NVDA.US": 135.0,
-            "AAPL.US": 228.0,
-        }
-        base_price = base_map.get(symbol.upper(), 100.0 + (seed_sum % 400))
-
-    # Build trading dates backward from end_day
-    end_dt = datetime.strptime(end_day[:10], "%Y-%m-%d").date()
-    days_rev: list[str] = []
-    cur_dt = end_dt
-    while len(days_rev) < num_bars:
-        if is_trading_day(cur_dt, market=market):
-            days_rev.append(cur_dt.strftime("%Y-%m-%d"))
-        cur_dt -= timedelta(days=1)
-    days = list(reversed(days_rev))
-
-    bars: list[dict[str, Any]] = []
-    price = float(base_price) * 0.86
-    phase_offset = (seed_sum % 17) * 0.21
-    for i, d_str in enumerate(days):
-        # Multi-frequency deterministic cycle + end-of-window W-bottom breakout structure
-        t = i / 28.0 + phase_offset
-        cyc1 = 0.0042 * math.sin(t)
-        cyc2 = 0.0028 * math.cos(i / 9.5 + phase_offset * 0.5)
-        drift = 0.00045
-        # Create a clean double bottom & breakout in the final 45 bars for pattern/backtest verification
-        rem = num_bars - 1 - i
-        if 28 <= rem <= 42:
-            structural = -0.0045
-        elif 18 <= rem < 28:
-            structural = 0.0055 if rem >= 23 else -0.0052
-        elif 6 <= rem < 18:
-            structural = 0.0052
-        elif rem < 6:
-            structural = 0.0038
-        else:
-            structural = 0.0
-
-        ret = drift + cyc1 + cyc2 + structural
-        prev_c = price
-        close_p = max(1.0, prev_c * (1.0 + ret))
-        intra_gap = 0.0018 * math.sin(i * 1.7 + seed_sum)
-        open_p = max(1.0, prev_c * (1.0 + intra_gap))
-        wick_amp = abs(ret) * 0.65 + 0.0065
-        high_p = max(open_p, close_p) * (1.0 + wick_amp * (0.7 + 0.3 * abs(math.sin(i))))
-        low_p = min(open_p, close_p) * (1.0 - wick_amp * (0.7 + 0.3 * abs(math.cos(i))))
-        vol_mult = 1.65 if rem < 10 and close_p > open_p else (1.0 + 0.35 * math.sin(i * 0.7))
-        vol = round((1_000_000.0 + (seed_sum % 500_000)) * max(0.35, vol_mult), 2)
-
-        bars.append(
-            {
-                "day": d_str,
-                "open": round(open_p, 2),
-                "high": round(high_p, 2),
-                "low": round(low_p, 2),
-                "close": round(close_p, 2),
-                "volume": vol,
-                "complete": True,
-            }
-        )
-        price = close_p
-
-    validate_bars(bars, f"synthetic({symbol})")
-    return bars
-
-
-
-
 def _load_single_series(
     inst: dict[str, Any],
     datalen: int = 450,
     as_of: str | None = None,
     allow_network: bool = True,
-    allow_synthetic_fallback: bool = False,
 ) -> tuple[list[dict[str, Any]], str, list[str]]:
-    """返回 (bars, source, errors)。真实行情不可用且未显式允许合成数据时直接报错，绝不静默回退。"""
+    """返回 (bars, source, errors)。真实行情不可用时直接报错，绝不生成或回退合成数据。"""
     market = inst["market"]
     symbol = inst["symbol"]
     errors: list[str] = []
@@ -365,15 +278,7 @@ def _load_single_series(
         except Exception as exc:  # noqa: BLE001 - 失败原因必须记录并向上抛出
             errors.append(f"{type(exc).__name__}: {exc}")
 
-    if not allow_synthetic_fallback:
-        raise RuntimeError(
-            f"无法获取 {symbol} 的真实行情（{'; '.join(errors)}），已拒绝使用合成数据；"
-            "仅测试/演示可显式传入 --allow-synthetic"
-        )
-
-    end_d = (as_of or "2026-10-15")[:10]
-    bars = generate_deterministic_series(symbol, market=market, num_bars=max(450, datalen), end_day=end_d)
-    return bars, SYNTHETIC_SOURCE, errors
+    raise RuntimeError(f"无法获取 {symbol} 的真实行情（{'; '.join(errors)}），拒绝使用合成数据")
 
 
 def split_incomplete_last_bar(
@@ -421,7 +326,6 @@ def load_bundle(
     request: AnalysisRequest,
     input_path: Path | None = None,
     allow_network: bool = True,
-    allow_synthetic_fallback: bool = False,
     now: datetime | None = None,
 ) -> MarketDataBundle:
     """统一多市场取数入口：先加载或获取标的与对应市场基准指数（先大盘、后个股），执行点位时间对齐与复权处理。"""
@@ -437,6 +341,8 @@ def load_bundle(
                 request.get("symbol", "000001.SH"),
                 market=request.get("market"),
                 asset_type=request.get("asset_type"),
+                name=request.get("name"),
+                is_st=bool(request.get("is_st", False)),
             )
             bars = [
                 {
@@ -453,6 +359,8 @@ def load_bundle(
             if request.get("as_of"):
                 bars = [b for b in bars if b["day"] <= str(request["as_of"])[:10]]
             validate_bars(bars, "input_bars")
+            if len(bars) < MIN_LIVE_BARS:
+                raise RuntimeError(f"历史长度不足 ({len(bars)} < {MIN_LIVE_BARS})")
             intraday = None
             if not bars[-1]["complete"]:
                 last = bars.pop()
@@ -468,11 +376,17 @@ def load_bundle(
                 "error": "本地文件未附带除权除息数据，按原始价格使用",
             }
             return {
-                "schema_version": "5.0.0",
+                "schema_version": "5.1.0",
                 "market": inst["market"],
                 "target": {"instrument": inst, "bars": bars, "intraday": intraday},
                 "benchmark": None,
-                "extra_context": {"vix": None, "vix_source": "NOT_FETCHED(local_file)", "earnings_date": None},
+                "extra_context": {
+                    "vix": None,
+                    "vix_source": "NOT_FETCHED(local_file)",
+                    "earnings_date": None,
+                    "is_st": bool(inst.get("is_st", False)),
+                    "is_ipo_no_limit": bool(request.get("is_ipo_no_limit", False)),
+                },
                 "provenance": {
                     "source": f"LOCAL_FILE({Path(input_path).name})",
                     "as_of": bars[-1]["day"],
@@ -486,6 +400,8 @@ def load_bundle(
         request.get("symbol", "000001.SH"),
         market=request.get("market"),
         asset_type=request.get("asset_type"),
+        name=request.get("name"),
+        is_st=bool(request.get("is_st", False)),
     )
     market = inst["market"]
     as_of = request.get("as_of")
@@ -496,11 +412,10 @@ def load_bundle(
         datalen=datalen,
         as_of=as_of,
         allow_network=allow_network,
-        allow_synthetic_fallback=allow_synthetic_fallback,
     )
     # 未收盘K线不得当作已收盘参与指标/预测计算（指定历史 as_of 时不涉及）
     intraday = None
-    if target_src != SYNTHETIC_SOURCE and not as_of:
+    if not as_of:
         target_bars, intraday = split_incomplete_last_bar(target_bars, market, now)
     adj_mode = request.get("adjustment", "total_return" if inst["asset_type"] != "index" else "raw")
     actions, adjustment_status = _load_corporate_actions(inst, target_bars, target_src, adj_mode, allow_network)
@@ -522,7 +437,6 @@ def load_bundle(
             datalen=datalen,
             as_of=target_bars[-1]["day"],
             allow_network=allow_network,
-            allow_synthetic_fallback=allow_synthetic_fallback,
         )
         benchmark_payload = {
             "instrument": bench_inst,
@@ -536,7 +450,7 @@ def load_bundle(
         vix_value, vix_source = _fetch_vix(as_of or target_bars[-1]["day"], allow_network)
 
     return {
-        "schema_version": "5.0.0",
+        "schema_version": "5.1.0",
         "market": market,
         "target": {
             "instrument": inst,
@@ -549,6 +463,8 @@ def load_bundle(
             "vix_source": vix_source,
             "earnings_date": None,
             "earnings_date_source": "NOT_AVAILABLE",
+            "is_st": bool(inst.get("is_st", False)),
+            "is_ipo_no_limit": bool(request.get("is_ipo_no_limit", False)),
         },
         "provenance": {
             "source": target_src,

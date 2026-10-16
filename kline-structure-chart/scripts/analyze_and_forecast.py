@@ -29,15 +29,19 @@ def run_pipeline(
     input_path: Path | None = None,
     allow_network: bool = True,
     run_backtest: bool = False,
-    allow_synthetic: bool = False,
     backtest_step: int = 1,
 ) -> dict[str, Any]:
+    disp_days = int(request.get("display_bars") or 120)
+    horizon_bars = int(request.get("horizon_bars") or 15)
+    if not 60 <= disp_days <= 500:
+        raise RuntimeError(f"--days must be between 60 and 500, got {disp_days}")
+    if not 1 <= horizon_bars <= 60:
+        raise RuntimeError(f"--horizon-bars must be between 1 and 60, got {horizon_bars}")
     output_dir.mkdir(parents=True, exist_ok=True)
     bundle = load_bundle(
         request,
         input_path=input_path,
         allow_network=allow_network,
-        allow_synthetic_fallback=allow_synthetic,
     )
     # 结构层只算一次：同一份结果写入 JSON 并交给 PNG 渲染器（算图分离）
     layer = compute_structure_layer(
@@ -65,6 +69,9 @@ def run_pipeline(
         data_warning="；".join(quality["warnings"]) if quality["status"] != "OK" else None,
         structure=layer,
         color_scheme=meta["color_scheme"],
+        quality_status=quality["status"],
+        risk_veto=report["debate_and_veto"],
+        conformal_forecast=report["future_projection_15d"],
     )
     report["legacy_summary"] = legacy_summary
     report["rendered_paths"] = {
@@ -101,7 +108,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Multi-market K-line algebraic analyzer & conformal forecaster")
     parser.add_argument("--market", choices=["CN", "HK", "US"], default=None, help="Market code: CN, HK, US")
     parser.add_argument("--symbol", required=True, help="Instrument symbol, e.g. 000001.SH, 600519.SH, 00700.HK, NVDA.US")
+    parser.add_argument("--name", default=None, help="Optional instrument display name (auto-detects ST/*ST when containing ST)")
     parser.add_argument("--asset-type", choices=["index", "equity", "etf"], default=None)
+    parser.add_argument("--st", action="store_true", help="Mark CN A-share stock as ST/*ST risk-warning stock")
+    parser.add_argument("--ipo-no-limit", action="store_true", help="Mark CN stock as within first 5 IPO trading days without price limit")
     parser.add_argument("--benchmark", default=None, help="Optional benchmark symbol override")
     parser.add_argument("--days", type=int, default=120, help="Display bars (60~500)")
     parser.add_argument("--horizon-bars", type=int, default=15, help="Future forecast horizon bars (default 15)")
@@ -112,19 +122,19 @@ def main() -> None:
         default=None,
         help="Price adjustment (default: total_return for equity/ETF = 前复权含分红, raw for index)",
     )
+    parser.add_argument(
+        "--color-scheme",
+        choices=["auto", "cn_red_up", "us_green_up"],
+        default="auto",
+        help="Candlestick color scheme (default: auto = cn_red_up for CN/HK, us_green_up for US)",
+    )
     parser.add_argument("--account-equity", type=float, default=None, help="Optional account equity for lot-size position sizing")
     parser.add_argument("--max-risk-pct", type=float, default=0.01, help="Max risk fraction per trade (default 0.01 = 1%)")
-    parser.add_argument("--input", default=None, help="Optional offline JSON bundle or bar array file")
+    parser.add_argument("--input", default=None, help="Optional local real JSON bundle or bar array file")
     parser.add_argument("--output-dir", required=True, help="Output directory for JSON + PNG + HTML artifacts")
-    parser.add_argument("--offline", action="store_true", help="Disable live network requests and use offline fixture")
-    parser.add_argument("--backtest", action="store_true", help="Run walk-forward triple-barrier backtest & causal replay audit")
+    parser.add_argument("--offline", action="store_true", help="Disable live network requests (requires --input local file)")
+    parser.add_argument("--backtest", action="store_true", help="Run plan-replay backtest & causal replay audit")
     parser.add_argument("--backtest-step", type=int, default=1, help="Decision-day step for plan replay backtest (default 1 = every bar)")
-    parser.add_argument(
-        "--allow-synthetic",
-        action="store_true",
-        help="TEST/DEMO ONLY: fall back to deterministic synthetic bars when live data is unavailable "
-        "(report is marked UNAVAILABLE and charts are watermarked)",
-    )
     args = parser.parse_args()
 
     req: AnalysisRequest = {
@@ -134,8 +144,15 @@ def main() -> None:
         "horizon_bars": args.horizon_bars,
         "account_equity": args.account_equity,
         "max_risk_pct": args.max_risk_pct,
+        "color_scheme": args.color_scheme,  # type: ignore[typeddict-item]
         "timeframes": ["1D"],
     }
+    if args.name:
+        req["name"] = args.name
+    if args.st:
+        req["is_st"] = True
+    if args.ipo_no_limit:
+        req["is_ipo_no_limit"] = True
     if args.market:
         req["market"] = args.market  # type: ignore[typeddict-item]
     if args.asset_type:
@@ -154,7 +171,6 @@ def main() -> None:
             input_path=Path(args.input) if args.input else None,
             allow_network=not args.offline,
             run_backtest=args.backtest,
-            allow_synthetic=args.allow_synthetic,
             backtest_step=max(1, args.backtest_step),
         )
     except RuntimeError as exc:

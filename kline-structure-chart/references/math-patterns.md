@@ -47,4 +47,4 @@
   - 非一致性分数：$s_{i,h} = \frac{|C_{i+h}/C_i - 1|}{\sigma_i \sqrt{h}}$，$\sigma_i$ 为截面 $i$ 当时近 60 日对数收益 RMS（预测与校准用同一估计量）；只用 $i + h \le t_{\text{now}}$ 的成熟截面，取最近 160 个。
   - 乘数：$m_{h,\alpha}$ 取 $\{s_{i,h}\}$ 的有限样本分位（第 $\lceil (n+1)\alpha \rceil$ 个次序统计量），$\alpha \in \{0.5, 0.8\}$。
   - 区间：$C_{\text{now}}(1 \pm m_{h,\alpha}\,\sigma_{\text{now}}\sqrt{h})$，再按涨跌停逐步截断、按价位表取整。
-  - 审计：对每个截面 $e$ 只用 $j + h \le e$ 的已成熟分数估计乘数并检验 $e$ 的实际结果，得到 `calibration_audit` 的滚动样本外覆盖率；相邻截面结果期重叠，有效独立样本约为样本数 / H。VIX、财报放大属于未校准叠加项，启用时列入 `uncalibrated_overlays`。
+  - 审计：对每个截面 $e$ 只用 $j + h \le e$ 的已成熟分数估计乘数，按同一构造施加涨跌停截断与价位表取整后直接检验 $e+h$ 的实际收盘价是否落在区间内，得到 `calibration_audit` 的滚动样本外覆盖率及相对随机游走的平均绝对误差（`q50_mae_pct` / `random_walk_mae_pct`）；相邻截面结果期重叠，有效独立样本约为样本数 / H。VIX、财报放大属于未校准叠加项，启用时列入 `uncalibrated_overlays`。

@@ -18,13 +18,30 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from data_gateway import fetch_sina_daily_bars, fetch_yahoo_corporate_actions, fetch_yahoo_daily_bars  # noqa: E402
+from data_gateway import (  # noqa: E402
+    fetch_sina_daily_bars,
+    fetch_tencent_index_daily_bars,
+    fetch_yahoo_corporate_actions,
+    fetch_yahoo_daily_bars,
+)
 from market_rules import is_daily_bar_complete  # noqa: E402
 
 OUT = Path(__file__).resolve().parent / "fixtures" / "recorded"
-SINA = {"sh000001": "CN", "sz399001": "CN", "sz399006": "CN", "sh000688": "CN", "sh000300": "CN", "sh600519": "CN"}
-YAHOO = {"NVDA": "US", "SPY": "US", "0700.HK": "HK", "^HSI": "HK"}
-EVENTS = ("600519.SS", "NVDA", "0700.HK")
+SINA = {
+    "sh000001": "CN",
+    "sz399001": "CN",
+    "sz399006": "CN",
+    "sh000688": "CN",
+    "sh000300": "CN",
+    "sh600519": "CN",
+    "sh601318": "CN",
+    "sz000002": "CN",
+    "sz002594": "CN",
+    "sh510300": "CN",
+}
+YAHOO = {"NVDA": "US", "SPY": "US", "^VIX": "US", "0700.HK": "HK", "1810.HK": "HK", "^HSI": "HK"}
+TENCENT = {"hkHSTECH": "HK"}
+EVENTS = ("600519.SS", "601318.SS", "000002.SZ", "002594.SZ", "510300.SS", "NVDA", "SPY", "0700.HK", "1810.HK")
 
 
 def _completed(bars: list[dict], market: str, now: datetime) -> list[dict]:
@@ -55,6 +72,9 @@ def main() -> None:
     for sym, market in YAHOO.items():
         bars = _completed(fetch_yahoo_daily_bars(sym, range_str="5y"), market, now)
         _write(f"yahoo_daily/{sym.replace('^', '')}.json", bars, manifest, f"YAHOO chart {sym} 1d range=5y")
+    for code, market in TENCENT.items():
+        bars = _completed(fetch_tencent_index_daily_bars(code, datalen=1000), market, now)
+        _write(f"tencent_daily/{code}.json", bars, manifest, f"TENCENT fqkline {code} day qfq")
     for sym in EVENTS:
         _write(f"yahoo_events/{sym}.json", fetch_yahoo_corporate_actions(sym), manifest, f"YAHOO chart {sym} events=div,splits")
     (OUT / "MANIFEST.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

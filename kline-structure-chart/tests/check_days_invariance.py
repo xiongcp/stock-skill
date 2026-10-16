@@ -6,8 +6,7 @@
 推演折线的未来槽位也在内）和直抄块 3/4/5。只有展示层与背景层（主图根数、0/1 号直抄块、background）允许随 --days 变化。
 
 用法：
-  python3 tests/check_days_invariance.py --data DIR      # DIR 下放日K <symbol>.json（离线）：
-                                                         #   tests/fixtures/recorded/sina_daily = 真实录制，tests/fixtures/synthetic_daily = 合成序列
+  python3 tests/check_days_invariance.py --data DIR      # DIR 下放真实录制的日K <symbol>.json（tests/fixtures/recorded/sina_daily）
   python3 tests/check_days_invariance.py --fetch         # 直接从新浪拉取最近 1023 根
 """
 from __future__ import annotations

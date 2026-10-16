@@ -13,7 +13,7 @@ from contracts import (
 )
 from forecast import compute_conformal_forecast
 from indicators import compute_all_indicators
-from market_rules import get_market_microstructure_rules
+from market_rules import DEFAULT_BENCHMARKS, get_market_microstructure_rules, price_decimals
 from patterns import (
     causal_nadaraya_watson,
     causal_swing_pivots,
@@ -86,10 +86,14 @@ def _indicators_on_window(hist: list[dict[str, Any]], window_len: int) -> dict[s
 def _build_replay_snapshots(
     completed: list[dict[str, Any]],
     meta: dict[str, Any],
+    benchmark_info: dict[str, Any],
     horizon_bars: int = 15,
     num_snapshots: int = 5,
+    snapshot_window: int = 60,
 ) -> list[dict[str, Any]]:
-    """预先计算历史截面的 15-bar 预测与随后真实收盘路径，供 HTML 看板时间推演滑块 (Time-Travel Replay) 零前视回放。"""
+    """预先计算历史截面的 15-bar 预测、完整多周期规则分、截至该截面日的历史K线窗口与随后真实收盘路径，
+    供 HTML 看板时间推演滑块 (Time-Travel Replay) 零前视回放（即使 --days=60 也不会泄漏截面之后的K线）。
+    """
     n = len(completed)
     if n < 180:
         return []
@@ -99,8 +103,28 @@ def _build_replay_snapshots(
 
     for cut_idx in cutoffs:
         sub_bars = completed[: cut_idx + 1]
-        ind_sub = compute_all_indicators(sub_bars)
-        reg_sub = classify_market_regime(sub_bars, ind_sub["snapshot"])
+        layer_sub = compute_structure_layer(sub_bars, None, snapshot_window)
+        sview_sub = layer_sub["sview"]
+        ind_sub_win = _indicators_on_window(layer_sub["hist"], len(sview_sub))
+        ind_sub_full = compute_all_indicators(sub_bars)
+        piv_sub = causal_swing_pivots(sview_sub, layer_sub["zz_thr"])
+        cdl_sub = detect_candlestick_patterns(
+            sview_sub, ind_sub_win["series"]["atr14"], ind_sub_win["series"]["rvol20"], lookback=12
+        )
+        geo_sub = detect_geometric_patterns(
+            sview_sub, piv_sub, ind_sub_win["series"]["atr14"], ind_sub_win["series"]["rvol20"]
+        )
+        div_sub = detect_divergences(
+            sview_sub, piv_sub, ind_sub_win["series"]["rsi14"], ind_sub_win["series"]["atr14"]
+        )
+        all_pats_sub = cdl_sub + geo_sub + div_sub
+        smc_sub = detect_smc_structures(sview_sub, piv_sub, ind_sub_win["series"]["atr14"], lookback=80)
+        reg_sub = classify_market_regime(sview_sub, ind_sub_win["snapshot"])
+        strat_sub = evaluate_five_core_strategies(sview_sub, ind_sub_win, reg_sub)
+        wedge_sub = {k: v for k, v in layer_sub["wedge"].items() if not k.startswith("_")}
+        mtf_sub = compute_multi_timeframe_score(
+            sub_bars, ind_sub_win, wedge_sub, all_pats_sub, smc_sub, strat_sub, benchmark_info
+        )
         fc_sub = compute_conformal_forecast(sub_bars, meta=meta, horizon_bars=horizon_bars)
         realized_bars = completed[cut_idx + 1 : min(n, cut_idx + 1 + horizon_bars)]
         realized_closes = [round(float(b["close"]), 2) for b in realized_bars]
@@ -109,6 +133,37 @@ def _build_replay_snapshots(
         if len(realized_closes) == horizon_bars:
             lo80, hi80 = fc_sub["conformal_80pct_band"][-1]
             hit_80 = lo80 <= realized_closes[-1] <= hi80
+
+        win_bars = layer_sub["view"]
+        win_offset = len(sub_bars) - len(win_bars)
+        ma_sub = layer_sub["ma"]
+        nw_sub = causal_nadaraya_watson([float(b["close"]) for b in win_bars], bandwidth=3.0)
+        bars_win_export: list[dict[str, Any]] = []
+        for i, b in enumerate(win_bars):
+            full_i = win_offset + i
+            bars_win_export.append(
+                {
+                    "idx": i,
+                    "day": b["day"],
+                    "open": round(float(b["open"]), 2),
+                    "high": round(float(b["high"]), 2),
+                    "low": round(float(b["low"]), 2),
+                    "close": round(float(b["close"]), 2),
+                    "volume": round(float(b.get("volume") or 0.0), 2),
+                    "ma20": round(float(ma_sub[20][full_i]), 2) if ma_sub[20][full_i] is not None else None,
+                    "ma60": round(float(ma_sub[60][full_i]), 2) if ma_sub[60][full_i] is not None else None,
+                    "ma120": round(float(ma_sub[120][full_i]), 2) if ma_sub[120][full_i] is not None else None,
+                    "ma250": round(float(ma_sub[250][full_i]), 2) if ma_sub[250][full_i] is not None else None,
+                    "kernel_smooth": round(nw_sub[i], 2),
+                    "rsi14": round(float(ind_sub_full["series"]["rsi14"][full_i]), 2)
+                    if ind_sub_full["series"]["rsi14"][full_i] is not None
+                    else None,
+                    "rvol20": round(float(ind_sub_full["series"]["rvol20"][full_i]), 2)
+                    if ind_sub_full["series"]["rvol20"][full_i] is not None
+                    else None,
+                }
+            )
+
         snapshots.append(
             {
                 "as_of": sub_bars[-1]["day"],
@@ -116,6 +171,8 @@ def _build_replay_snapshots(
                 "base_close": round(float(sub_bars[-1]["close"]), 2),
                 "regime": reg_sub["regime"],
                 "regime_score": reg_sub["regime_score"],
+                "rule_score": mtf_sub["rule_score"],
+                "rating": mtf_sub["rating"],
                 "horizon_dates": fc_sub["horizon_dates"],
                 "q10": fc_sub["q10"],
                 "q25": fc_sub["q25"],
@@ -125,6 +182,7 @@ def _build_replay_snapshots(
                 "realized_days": realized_days,
                 "realized_closes": realized_closes,
                 "terminal_within_80pct_band": hit_80,
+                "bars_window": bars_win_export,
             }
         )
     return snapshots
@@ -235,16 +293,27 @@ def analyze_bundle(
         benchmark_info,
     )
 
-    rules = get_market_microstructure_rules(inst["market"], inst["asset_type"], inst["symbol"], day_str=view[-1]["day"])
+    is_st = bool(inst.get("is_st") or request.get("is_st") or extra_ctx.get("is_st", False))
+    is_ipo_no_limit = bool(request.get("is_ipo_no_limit") or extra_ctx.get("is_ipo_no_limit", False))
+    rules = get_market_microstructure_rules(
+        inst["market"],
+        inst["asset_type"],
+        inst["symbol"],
+        is_st=is_st,
+        is_ipo_no_limit=is_ipo_no_limit,
+        day_str=view[-1]["day"],
+    )
     color_scheme = request.get("color_scheme")
     if not color_scheme or color_scheme == "auto":
         color_scheme = rules["color_scheme"]
 
     meta = {
         "symbol": inst["symbol"],
-        "name": inst.get("name") or inst["symbol"],
+        "name": request.get("name") or inst.get("name") or inst["symbol"],
         "market": inst["market"],
         "asset_type": inst["asset_type"],
+        "is_st": rules.get("is_st", is_st),
+        "is_ipo_no_limit": is_ipo_no_limit,
         "currency": inst["currency"],
         "timeframe": (request.get("timeframes") or ["1D"])[0],
         "as_of": view[-1]["day"],
@@ -279,7 +348,8 @@ def analyze_bundle(
         extra_context=extra_ctx,
     )
 
-    # 8. 导出用于交互式 HTML 看板的完整时间序列
+    # 8. 导出用于交互式 HTML 看板的完整时间序列（按品种最小价位保留小数，避免 ETF 0.001 价位被截成 2 位小数）
+    p_dec = price_decimals(float(last_c), inst["market"], inst["asset_type"], view[-1]["day"])
     nw_smooth = causal_nadaraya_watson([float(b["close"]) for b in view], bandwidth=3.0)
     disp_offset = len(completed) - len(view)
     view_bars_export: list[dict[str, Any]] = []
@@ -289,17 +359,17 @@ def analyze_bundle(
             {
                 "idx": i,
                 "day": b["day"],
-                "open": round(float(b["open"]), 2),
-                "high": round(float(b["high"]), 2),
-                "low": round(float(b["low"]), 2),
-                "close": round(float(b["close"]), 2),
+                "open": round(float(b["open"]), p_dec),
+                "high": round(float(b["high"]), p_dec),
+                "low": round(float(b["low"]), p_dec),
+                "close": round(float(b["close"]), p_dec),
                 "volume": round(float(b.get("volume") or 0.0), 2),
                 "complete": True,
-                "ma20": round(float(ma_series[20][full_i]), 2) if ma_series[20][full_i] is not None else None,
-                "ma60": round(float(ma_series[60][full_i]), 2) if ma_series[60][full_i] is not None else None,
-                "ma120": round(float(ma_series[120][full_i]), 2) if ma_series[120][full_i] is not None else None,
-                "ma250": round(float(ma_series[250][full_i]), 2) if ma_series[250][full_i] is not None else None,
-                "kernel_smooth": round(nw_smooth[i], 2),
+                "ma20": round(float(ma_series[20][full_i]), p_dec) if ma_series[20][full_i] is not None else None,
+                "ma60": round(float(ma_series[60][full_i]), p_dec) if ma_series[60][full_i] is not None else None,
+                "ma120": round(float(ma_series[120][full_i]), p_dec) if ma_series[120][full_i] is not None else None,
+                "ma250": round(float(ma_series[250][full_i]), p_dec) if ma_series[250][full_i] is not None else None,
+                "kernel_smooth": round(nw_smooth[i], p_dec),
                 "rsi14": round(float(ind_full["series"]["rsi14"][full_i]), 2)
                 if ind_full["series"]["rsi14"][full_i] is not None
                 else None,
@@ -313,7 +383,7 @@ def analyze_bundle(
         )
 
     replay_snapshots = (
-        _build_replay_snapshots(completed, meta=meta, horizon_bars=horizon_bars, num_snapshots=5)
+        _build_replay_snapshots(completed, meta=meta, benchmark_info=benchmark_info, horizon_bars=horizon_bars, num_snapshots=5)
         if include_replay
         else []
     )
@@ -349,7 +419,7 @@ def analyze_bundle(
     }
 
     report: AnalysisReport = {
-        "schema_version": "5.0.0",
+        "schema_version": "5.1.0",
         "meta": meta,
         "request": request,
         "market_benchmark": benchmark_info,
@@ -378,7 +448,10 @@ def analyze_bundle(
             **assess_data_quality(
                 meta["data_source"],
                 bench_bundle.get("source", "UNKNOWN") if bench_bundle else None,
-                needs_benchmark=inst["asset_type"] != "index",
+                needs_benchmark=(
+                    inst["asset_type"] != "index"
+                    and inst["symbol"].upper() != DEFAULT_BENCHMARKS.get(inst["market"], {}).get("symbol", "").upper()
+                ),
                 intraday_day=active_intra["day"] if active_intra else None,
             ),
             "provenance_errors": list(bundle.get("provenance", {}).get("errors") or []),
@@ -388,7 +461,7 @@ def analyze_bundle(
             "forecast_promotion_status": future_proj["promotion_status"],
         },
         "reproducibility": {
-            "engine_version": "5.0.0",
+            "engine_version": "5.1.0",
             "bars_hash": compute_canonical_hash([(b["day"], b["close"]) for b in completed[-120:]]),
             "report_hash": "",
         },

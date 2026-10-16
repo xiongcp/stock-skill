@@ -499,8 +499,8 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     if (activeReplayIdx < replays.length) {{
       const snap = replays[activeReplayIdx];
       const cutDay = snap.as_of;
-      activeBars = bars.filter(function(b) {{ return b.day <= cutDay; }});
-      if (activeBars.length < 20) activeBars = bars;
+      const filtered = bars.filter(function(b) {{ return b.day <= cutDay; }});
+      activeBars = (filtered.length >= 20) ? filtered : (snap.bars_window && snap.bars_window.length ? snap.bars_window : filtered);
       activeFp = {{
         horizon_dates: snap.horizon_dates,
         q10: snap.q10,
@@ -612,12 +612,14 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       ctx.fillText('POC ' + vp.poc_price.toFixed(2), W - padR + 6, yPoc + 4);
     }}
 
-    // Layer: SMC Order Blocks & FVG
+    // Layer: SMC Order Blocks & FVG (配色跟随 meta.color_scheme)
     if (layers.smc && REPORT.smc_structures) {{
+      const bullObFill = isCnColor ? 'rgba(242, 68, 68, 0.14)' : 'rgba(16, 188, 132, 0.14)';
+      const bearObFill = isCnColor ? 'rgba(16, 188, 132, 0.14)' : 'rgba(242, 68, 68, 0.14)';
       (REPORT.smc_structures.order_blocks || []).forEach(function(ob) {{
         const y1 = yOfPrice(ob.zone[1]);
         const y2 = yOfPrice(ob.zone[0]);
-        ctx.fillStyle = ob.kind.indexOf('BULL') >= 0 ? 'rgba(16, 188, 132, 0.14)' : 'rgba(242, 68, 68, 0.14)';
+        ctx.fillStyle = ob.kind.indexOf('BULL') >= 0 ? bullObFill : bearObFill;
         ctx.fillRect(padL + histW * 0.35, Math.min(y1, y2), histW * 0.65, Math.max(4, Math.abs(y2 - y1)));
       }});
       (REPORT.smc_structures.fvgs || []).forEach(function(fvg) {{
@@ -689,18 +691,23 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
 
       const w = ind.structure_levels.wedge_structure;
       if (w && w.upper && w.lower && activeReplayIdx === replays.length) {{
-        ctx.strokeStyle = '#ff9f43';
-        ctx.lineWidth = 2.0;
-        ctx.beginPath();
-        ctx.moveTo(xOfBar(Math.max(0, nBars - 60)), yOfPrice(w.upper.start.price));
-        ctx.lineTo(xOfBar(nBars - 1), yOfPrice(w.upper_today));
-        ctx.stroke();
-
-        ctx.strokeStyle = '#38bdf8';
-        ctx.beginPath();
-        ctx.moveTo(xOfBar(Math.max(0, nBars - 60)), yOfPrice(w.lower.start.price));
-        ctx.lineTo(xOfBar(nBars - 1), yOfPrice(w.lower_today));
-        ctx.stroke();
+        const structBars = (REPORT.quality && REPORT.quality.structure_bars) ? REPORT.quality.structure_bars : 120;
+        const winOff = nBars - structBars;
+        function drawRail(rail, todayPrice, slopePerDay, color) {{
+          const rawStartIdx = rail.start.idx + winOff;
+          const startIdx = Math.max(0, rawStartIdx);
+          const startPrice = rawStartIdx >= 0
+            ? rail.start.price
+            : (rail.start.price + (slopePerDay || 0) * (0 - rawStartIdx));
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2.0;
+          ctx.beginPath();
+          ctx.moveTo(xOfBar(startIdx), yOfPrice(startPrice));
+          ctx.lineTo(xOfBar(nBars - 1), yOfPrice(todayPrice));
+          ctx.stroke();
+        }}
+        drawRail(w.upper, w.upper_today, w.slope_upper_per_day, '#ff9f43');
+        drawRail(w.lower, w.lower_today, w.slope_lower_per_day, '#38bdf8');
       }}
     }}
 

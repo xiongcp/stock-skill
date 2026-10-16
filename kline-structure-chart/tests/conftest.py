@@ -31,19 +31,21 @@ def load_recorded(rel: str) -> list[dict]:
 
 @pytest.fixture
 def replay_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
-    """把新浪 / Yahoo 取数函数替换为录制数据回放，模拟真实联网运行但不访问网络。"""
+    """把新浪 / Yahoo / 腾讯取数函数替换为真实录制数据回放，模拟真实联网运行但不访问外网。"""
 
     def sina(code: str, datalen: int = 450) -> list[dict]:
         return [dict(b) for b in load_recorded(f"sina_daily/{code}.json")][-datalen:]
 
     def yahoo(symbol: str, range_str: str = "2y") -> list[dict]:
-        if symbol == "^VIX":
-            raise OSError("VIX not recorded")
         return [dict(b) for b in load_recorded(f"yahoo_daily/{symbol.replace('^', '')}.json")]
 
+    def tencent(code: str, datalen: int = 760) -> list[dict]:
+        return [dict(b) for b in load_recorded(f"tencent_daily/{code}.json")][-datalen:]
+
     def events(symbol: str, range_str: str = "5y") -> list[dict]:
-        return load_recorded(f"yahoo_events/{symbol}.json")
+        return [dict(e) for e in load_recorded(f"yahoo_events/{symbol}.json")]
 
     monkeypatch.setattr(data_gateway, "fetch_sina_daily_bars", sina)
     monkeypatch.setattr(data_gateway, "fetch_yahoo_daily_bars", yahoo)
+    monkeypatch.setattr(data_gateway, "fetch_tencent_index_daily_bars", tencent)
     monkeypatch.setattr(data_gateway, "fetch_yahoo_corporate_actions", events)

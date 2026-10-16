@@ -39,6 +39,7 @@ from structure import (  # noqa: F401  兼容旧接口：tests/check_days_invari
     STRUCT_DAYS,
     _src,
     compute_structure_layer,
+    fmt_price,
     money,
     q2,
     rail_at,
@@ -121,6 +122,9 @@ def load_daily(sina_symbol: str, datalen: int = 320) -> list[dict]:
         )
     if len(bars) < 130:
         raise SystemExit(f"not enough daily bars: {len(bars)}")
+    from contracts import validate_bars
+
+    validate_bars(bars, f"sina:{sina_symbol}")
     return bars
 
 
@@ -128,10 +132,7 @@ def load_intraday(sina_symbol: str) -> dict | None:
     try:
         raw = fetch(f"https://qt.gtimg.cn/q={sina_symbol}", "gbk")
     except Exception:
-        try:
-            raw = fetch(f"http://qt.gtimg.cn/q={sina_symbol}", "gbk")
-        except Exception:
-            return None
+        return None
     parts = raw.split("~")
     if len(parts) < 35 or not parts[3]:
         return None
@@ -500,6 +501,9 @@ def render(
     data_warning: str | None = None,
     structure: dict | None = None,
     color_scheme: str = "cn_red_up",
+    quality_status: str = "OK",
+    risk_veto: dict | None = None,
+    conformal_forecast: dict | None = None,
 ) -> dict:
     # 涨跌与上攻/下探配色跟随市场约定：A股/港股默认红涨绿跌，美股绿涨红跌
     UP, DOWN, PROJ_BULL, PROJ_BEAR = _palette(color_scheme)
@@ -580,6 +584,10 @@ def render(
     for rail_val in (wedge["upper_today"], wedge["lower_today"]):
         if abs(rail_val / float(ref_p) - 1) <= 0.15:
             prices.append(rail_val)
+    if conformal_forecast and conformal_forecast.get("q10") and conformal_forecast.get("q90"):
+        for q_val in (*conformal_forecast["q10"], *conformal_forecast["q90"]):
+            if abs(float(q_val) / float(ref_p) - 1) <= 0.25:
+                prices.append(float(q_val))
 
     pmin, pmax = min(prices), max(prices)
     pad = (pmax - pmin) * 0.08
@@ -588,10 +596,12 @@ def render(
 
     # ---------------- 顶部标题与右对齐胶囊图例 ----------------
     draw.text((left, 16), title, font=f_title, fill=TEXT)
+    veto_flag = bool(risk_veto and risk_veto.get("risk_officer_veto"))
+    veto_tag = "风控否决: 已触发(禁做多)" if veto_flag else "风控状态: 正常"
     subtitle = (
         f"数据区间：{view[0]['day']} → {view[-1]['day']}（已收盘 {len(view)} 根）"
         + (f"  ·  盘中实时快照：{active_intra['stamp']}" if active_intra else "  ·  当前状态：已收盘")
-        + f"  ·  结构拟合：近{len(sview)}日 {wedge['pattern']}  ·  波段阈值 {zz_thr * 100:.1f}%"
+        + f"  ·  数据质量：{quality_status}  ·  {veto_tag}  ·  结构：近{len(sview)}日 {wedge['pattern']}"
     )
     draw.text((left, 50), subtitle, font=f_sub, fill=MUTED)
 
@@ -630,8 +640,8 @@ def render(
 
     # ---------------- 顶部 5 卡片 KPI 仪表盘 (Y: 76 ~ 142) ----------------
     if scenario:
-        scen_title = f"④ {scenario['label']}（B点 {scenario['b_end']['day'][5:]} {scenario['b_end']['price']:.0f}）"
-        scen_line1 = " | ".join(f"{l['ratio']:.3f}位 {l['price']:.0f}" for l in scenario["levels"][:3])
+        scen_title = f"④ {scenario['label']}（B点 {scenario['b_end']['day'][5:]} {fmt_price(scenario['b_end']['price'])}）"
+        scen_line1 = " | ".join(f"{l['ratio']:.3f}位 {fmt_price(l['price'])}" for l in scenario["levels"][:3])
         scen_line2 = (
             f"A {scenario['a_start']['day'][5:]}→{scenario['a_end']['day'][5:]}  |  "
             f"C/A 已走 {scenario['c_progress']['c_over_a']:.2f}"
@@ -639,7 +649,7 @@ def render(
     else:
         scen_title = "④ ABC测算"
         scen_line1 = "暂无合格B浪，不划分ABC"
-        scen_line2 = f"窗口高 {float(hi_p):.0f} ({hi['day'][5:]}) / 低 {float(lo_p):.0f} ({lo['day'][5:]})"
+        scen_line2 = f"窗口高 {fmt_price(float(hi_p))} ({hi['day'][5:]}) / 低 {fmt_price(float(lo_p))} ({lo['day'][5:]})"
 
     cards = [
         (
@@ -652,7 +662,7 @@ def render(
         ),
         (
             "② 均线位置与偏离",
-            f"MA20: {ma20_val:.2f} ({float(ref_p) - ma20_val:+.0f}点)" if ma20_val else "MA20: --",
+            f"MA20: {ma20_val:.2f} ({fmt_price(float(ref_p) - ma20_val)}点)" if ma20_val else "MA20: --",
             f"MA60: {ma60_val:.2f}  |  MA120: {ma120_val:.2f}" if (ma60_val and ma120_val) else "",
             MA[20],
         ),
@@ -744,7 +754,7 @@ def render(
         y = yp(price)
         draw.line((left, y, chart_right, y), fill=GRID, width=1)
         draw.line((left - 4, y, left, y), fill=AXIS_LINE, width=1)
-        label = f"{price:.0f}"
+        label = fmt_price(price)
         tw, th = text_size(draw, label, f_tiny)
         draw.text((left - 8 - tw, y - th // 2 - 1), label, font=f_tiny, fill=MUTED)
     draw.rectangle((left, top, chart_right, main_bottom), outline=AXIS_LINE, width=1.2)
@@ -835,7 +845,48 @@ def render(
             draw.line(pts, fill=(*PANEL_BG, 150), width=3.8, joint="curve")
             draw.line(pts, fill=color, width=2.0, joint="curve")
 
-    # ---------------- 绘制右侧三条预判路径折线 + 转折点微标签 ----------------
+    # ---------------- 绘制右侧 15 日保形预测扇形（80% 外扇 + 50% 内扇）与三条预判路径 ----------------
+    if conformal_forecast and conformal_forecast.get("q10") and conformal_forecast.get("q90"):
+        q10_s = conformal_forecast["q10"]
+        q25_s = conformal_forecast["q25"]
+        q75_s = conformal_forecast["optimistic_q75"]
+        q90_s = conformal_forecast["q90"]
+        h_len = len(q10_s)
+        if h_len > 0:
+            s3_slot = projections["bull"]["waypoints_offset"][-1][0]
+            start_pt = (x_of(last_bar_idx), yp(float(ref_p)))
+            fan80 = [start_pt]
+            fan50 = [start_pt]
+            for idx_h in range(h_len):
+                slot_x = x_of(last_bar_idx + (idx_h + 1) / h_len * s3_slot)
+                fan80.append((slot_x, yp(min(max(float(q90_s[idx_h]), pmin), pmax))))
+                fan50.append((slot_x, yp(min(max(float(q75_s[idx_h]), pmin), pmax))))
+            for idx_h in range(h_len - 1, -1, -1):
+                slot_x = x_of(last_bar_idx + (idx_h + 1) / h_len * s3_slot)
+                fan80.append((slot_x, yp(min(max(float(q10_s[idx_h]), pmin), pmax))))
+                fan50.append((slot_x, yp(min(max(float(q25_s[idx_h]), pmin), pmax))))
+            draw.polygon(fan80, fill=(56, 189, 248, 28))
+            draw.polygon(fan50, fill=(56, 189, 248, 48))
+
+    veto_box: tuple[int, int, int, int] | None = None
+    if veto_flag:
+        reasons_txt = "；".join((risk_veto or {}).get("veto_reasons") or ["风控条件未通过"])
+        v_banner = f"【风控否决】{reasons_txt}"
+        max_vw = chart_right - div_x - 30
+        while len(v_banner) > 10 and text_size(draw, v_banner, f_tiny_sm)[0] > max_vw:
+            v_banner = v_banner[:-2] + "…"
+        vtw, _ = text_size(draw, v_banner, f_tiny_sm)
+        vx2 = min(chart_right - 8, div_x + 22 + vtw)
+        veto_box = (div_x + 8, top + 37, vx2, top + 60)
+        draw.rounded_rectangle(
+            veto_box,
+            radius=5,
+            fill=(127, 29, 29, 230),
+            outline=(239, 68, 68, 200),
+            width=1.2,
+        )
+        draw.text((div_x + 14, top + 41), v_banner, font=f_tiny_sm, fill=(254, 226, 226))
+
     proj_configs = [
         ("bull", PROJ_BULL, False, f"上攻目标  {projections['bull']['target_price']:.2f}"),
         ("neutral", PROJ_NEUTRAL, True, f"震荡中枢  {projections['neutral']['target_price']:.2f}"),
@@ -875,10 +926,11 @@ def render(
             dx_cands = [0, -14, 14, -26, 26]
             best_box = None
             best_sc = float("inf")
+            step_top_bound = (veto_box[3] + 6) if veto_box is not None else (top + 36)
             for r_y, dy_c in enumerate(dy_cands):
                 for r_x, dx_c in enumerate(dx_cands):
                     bx1 = min(max(div_x + 4, sx - bw_s // 2 + dx_c), chart_right - bw_s - 4)
-                    by1 = min(max(top + 36, sy + dy_c), main_bottom - bh_s - 6)
+                    by1 = min(max(step_top_bound, sy + dy_c), main_bottom - bh_s - 6)
                     cand = (bx1, by1, bx1 + bw_s, by1 + bh_s)
                     if any(not (cand[2] + 4 < b[0] or cand[0] - 4 > b[2] or cand[3] + 4 < b[1] or cand[1] - 4 > b[3]) for b in step_boxes):
                         continue
@@ -951,7 +1003,9 @@ def render(
         draw.text((gx1 + 10, ty + (4 if tag_face is f_tiny else 5)), label, font=tag_face, fill=col)
 
     # ---------------- 标注关键拐点：窗口高低点、ABC 三点、轨道支点、最新K线 ----------------
-    occupied_badges: list[tuple[int, int, int, int]] = []
+    occupied_badges: list[tuple[int, int, int, int]] = [(div_x + 4, top + 6, z_right + 4, top + 35)]
+    if veto_box is not None:
+        occupied_badges.append((veto_box[0] - 4, veto_box[1] - 2, veto_box[2] + 4, veto_box[3] + 2))
     marks: list[dict] = []
 
     def mark(idx: int, price: float, tag: str, color: tuple[int, int, int], side: str, extra: str = "") -> None:
@@ -1249,6 +1303,8 @@ def render(
         "file": str(out_path),
         "data_source": data_source,
         "data_warning": data_warning,
+        "quality_status": quality_status,
+        "risk_officer_veto": veto_flag,
         "color_scheme": color_scheme,
         "completed_last": view[-1]["day"],
         "data_note": data_note,
