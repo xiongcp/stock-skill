@@ -328,6 +328,8 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   const isCnColor = meta.color_scheme === 'cn_red_up';
   const UP_COL = isCnColor ? '#f24444' : '#10bc84';
   const DN_COL = isCnColor ? '#10bc84' : '#f24444';
+  const pDec = typeof meta.price_decimals === 'number' ? meta.price_decimals : 2;
+  function fmtPrice(p) {{ return (p === null || p === undefined) ? '--' : Number(p).toFixed(pDec); }}
 
   // Populate Header safely via textContent
   document.getElementById('headerTitle').textContent =
@@ -577,7 +579,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       ctx.stroke();
       ctx.fillStyle = '#94a3b8';
       ctx.font = '12px monospace';
-      ctx.fillText(gp.toFixed(2), 8, gy + 4);
+      ctx.fillText(fmtPrice(gp), 8, gy + 4);
     }}
 
     // Future divider line
@@ -609,7 +611,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = '#facc15';
-      ctx.fillText('POC ' + vp.poc_price.toFixed(2), W - padR + 6, yPoc + 4);
+      ctx.fillText('POC ' + fmtPrice(vp.poc_price), W - padR + 6, yPoc + 4);
     }}
 
     // Layer: SMC Order Blocks & FVG (配色跟随 meta.color_scheme)
@@ -736,10 +738,10 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
 
       ctx.fillStyle = '#10bc84';
       ctx.font = 'bold 11px monospace';
-      ctx.fillText('TP2 ' + tb.take_profit_2.toFixed(2), W - padR + 6, yTp2 + 4);
-      ctx.fillText('TP1 ' + tb.take_profit_1.toFixed(2), W - padR + 6, yTp1 + 4);
+      ctx.fillText('TP2 ' + fmtPrice(tb.take_profit_2), W - padR + 6, yTp2 + 4);
+      ctx.fillText('TP1 ' + fmtPrice(tb.take_profit_1), W - padR + 6, yTp1 + 4);
       ctx.fillStyle = '#f24444';
-      ctx.fillText('SL  ' + tb.stop_loss_barrier.toFixed(2), W - padR + 6, ySl + 4);
+      ctx.fillText('SL  ' + fmtPrice(tb.stop_loss_barrier), W - padR + 6, ySl + 4);
     }}
 
     // Layer: Conformal Fan (80% outer & 50% inner)
@@ -778,7 +780,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
         const endY = yOfPrice(lastP);
         ctx.fillStyle = col;
         ctx.font = 'bold 11px monospace';
-        ctx.fillText(labelPrefix + ' ' + lastP.toFixed(2), W - padR + 6, endY + 4);
+        ctx.fillText(labelPrefix + ' ' + fmtPrice(lastP), W - padR + 6, endY + 4);
       }}
       drawFutureCurve(activeFp.optimistic_q75, UP_COL, '乐观q75');
       drawFutureCurve(activeFp.base_median_q50, '#facc15', '基准q50');
@@ -797,7 +799,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       ctx.stroke();
       const rLast = realizedCloses[realizedCloses.length - 1];
       ctx.fillStyle = '#ffffff';
-      ctx.fillText('真实收盘 ' + rLast.toFixed(2), W - padR + 6, yOfPrice(rLast) - 6);
+      ctx.fillText('真实收盘 ' + fmtPrice(rLast), W - padR + 6, yOfPrice(rLast) - 6);
     }}
 
     // Volume subplot
@@ -884,19 +886,20 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       const idx = Math.max(0, Math.min(chartGeom.nBars - 1, Math.floor((x - chartGeom.padL) / chartGeom.stepH)));
       const b = chartGeom.activeBars[idx];
       insp.textContent =
-        '[历史K线 ' + b.day + '] O:' + b.open.toFixed(2) + ' H:' + b.high.toFixed(2) +
-        ' L:' + b.low.toFixed(2) + ' C:' + b.close.toFixed(2) +
-        ' | MA20:' + (b.ma20 || '--') + ' | RSI14:' + (b.rsi14 || '--') + ' | RVOL:' + (b.rvol20 || '--') + 'x';
+        '[历史K线 ' + b.day + '] O:' + fmtPrice(b.open) + ' H:' + fmtPrice(b.high) +
+        ' L:' + fmtPrice(b.low) + ' C:' + fmtPrice(b.close) +
+        ' | MA20:' + (b.ma20 !== null && b.ma20 !== undefined ? fmtPrice(b.ma20) : '--') +
+        ' | RSI14:' + (b.rsi14 || '--') + ' | RVOL:' + (b.rvol20 || '--') + 'x';
     }} else if (x > chartGeom.padL + chartGeom.histW && x <= canvas.width - chartGeom.padR) {{
       const fIdx = Math.max(0, Math.min(chartGeom.hBars - 1, Math.floor((x - chartGeom.padL - chartGeom.histW) / chartGeom.stepF)));
       const fd = chartGeom.activeFp.horizon_dates[fIdx];
       insp.textContent =
         '[未来预测 Step +' + (fIdx + 1) + ' (' + fd + ')] ' +
-        'q10:' + chartGeom.activeFp.q10[fIdx].toFixed(2) +
-        ' | 悲观q25:' + chartGeom.activeFp.q25[fIdx].toFixed(2) +
-        ' | 基准q50:' + chartGeom.activeFp.base_median_q50[fIdx].toFixed(2) +
-        ' | 乐观q75:' + chartGeom.activeFp.optimistic_q75[fIdx].toFixed(2) +
-        ' | q90:' + chartGeom.activeFp.q90[fIdx].toFixed(2);
+        'q10:' + fmtPrice(chartGeom.activeFp.q10[fIdx]) +
+        ' | 悲观q25:' + fmtPrice(chartGeom.activeFp.q25[fIdx]) +
+        ' | 基准q50:' + fmtPrice(chartGeom.activeFp.base_median_q50[fIdx]) +
+        ' | 乐观q75:' + fmtPrice(chartGeom.activeFp.optimistic_q75[fIdx]) +
+        ' | q90:' + fmtPrice(chartGeom.activeFp.q90[fIdx]);
     }}
     drawChart(x, y);
   }});

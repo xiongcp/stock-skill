@@ -231,7 +231,7 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 - [x] 浏览器实测控制台零报错，7 个图层开关、RS 视图切换、时间回放滑块均正常
 
 **H. 测试与文档**
-- [x] 门禁命令包含全量 `pytest`（110 项，含 TA-Lib 与 Supertrend 金标准、真实数据回放、网络异常、文档契约）与真实录制数据跨窗口不变性校验
+- [x] 门禁命令包含全量 `pytest`（117 项，含 TA-Lib 与 Supertrend 金标准、真实数据回放、网络异常、文档契约）与真实录制数据跨窗口不变性校验
 - [x] `.gitignore` 已忽略生成物与虚拟环境，`artifacts/` 已更新为最新真实行情产物
 
 **I. 输出与使用文档**
@@ -266,7 +266,7 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 
 ### 5.2 本轮验证证据
 
-- 门禁：`pytest` **110 passed in 64.30s**；`check_days_invariance.py --step 40` 输出 `runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]`。
+- 门禁：`pytest` **117 passed in 148.50s**；`check_days_invariance.py --step 40` 输出 `runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]`。
 - 联网实跑（北京时间 2026-10-16 15:19 前后，4 个标的全部退出码 0，单次 4~7 秒）：
   - `600519.SH`（含 `--backtest --backtest-step 5`）：报告注明“数据只到 2026-10-15”；胜率区间显示为 `0.0%（0.0% ~ 56.1%）`。
   - `600289.SH`：简称“ST信通”自动识别为 ST，主板 ST 涨跌幅 `±10%`。
@@ -281,9 +281,8 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
    - [x] **已处理（2026-10-16）**：`_abc_one` 的结构失效判断、测算位 `state`、C 浪进度（`c_progress`）只用已收盘K线；盘中刺破/触及改写入测算位的 `intraday` 字段，盘中越过 A 浪起点/B 浪终点或超出 C 浪最远位置写入情景的 `intraday_note`（均注明“未收盘，不作确认”）。同时 `compute_structure_layer` 改为在最新已收盘日求轨道值并按收盘价分类形态（`compute_structure`），缺口回补只看已收盘K线（`find_unfilled_gaps`），因此三条推演的点位不再随盘中价变化；盘中价只用于 `status_text` 提示、折线起点与“盘中已站上/跌破，待收盘确认”注释。PNG 盘中态把卡片与文字里的“今日上轨”改标为“MM-DD收盘上轨”。回归测试 `test_g08_live_bar_does_not_change_closed_structure`：在 `sh000300`/`sh600519`/`sz399006` 的真实录制行情上逐截面把下一根真实K线标为未收盘传入，情景、C 浪进度、轨道、阶梯与三路径点位与不传入时完全一致。
 2. **PNG 标签精度与报告不一致**：`structure.fmt_price` 对 ≥100 的价格取整、<10 的价格保留 3 位，例如 `BRK.B.US` 图上“突破 534”而报告为 533.55，`600289.SH` 图上“突破 5.123”而报告为 5.12。`test_g03_*` 把取整固定为设计，如需按价位表精度显示，需要同时改测试。
    - ✅ 已处理（2026-10-16）：`fmt_price(value, decimals)` 改为按 `market_rules.price_decimals` 的价位表小数位输出，由 `analyze_and_forecast.py` / `analysis.py` 按市场与品种传入 `compute_structure_layer(price_decimals=...)`，v4.1 CLI 无市场信息时按 A 股股票口径 2 位；`step_labels` 与触发/失效文案、PNG 卡片、ABC 倍位、右侧标签、拐点徽标、坐标轴及摘要文本统一到同一精度。`test_g03_*` 改为断言 1312.97 → `1312.97`、ETF 3 位小数，并核对 `突破` 标签与 `report.md` 同值。同时修复两处由更长标签暴露的版面问题：卡片首行小字号仍放不下时按 ` | ` 分段收起；最新K线徽标避开推演步骤标签。联网实跑 `BRK.B.US` 图上“突破 533.55”、`600289.SH`“突破 5.11”、`510300.SH`“突破 4.244”，均与报告一致。
-3. **区间校准“已达标”的样本量**：`600519.SH` 评估样本 107 个，约等于 7 个独立样本时状态即为“已达标”。建议晋级条件增加有效独立样本下限。
-   - **已处理（2026-10-16）**：用户拍板下限取 20。`forecast.py` 晋级条件加入 `effective_independent_samples >= MIN_EFFECTIVE_INDEPENDENT_SAMPLES (20)`，并在 `calibration_audit.min_effective_independent_samples` 输出；条件与理由写入 `references/math-patterns.md` 第 5 节；`render_report_md.py`、`SKILL.md`、`README.md` 同步说明（`render_html.py` 只显示原始状态枚举，未改）。由于审计窗口使评估样本约为 122 − H，只有 H ≤ 5 可能晋级，默认 15 日区间恒为“校准观察期”（录制数据中原 7 个 PROMOTED 标的全部降级）。扩大审计窗口另开任务。测试：`test_c02_c03_*`、`test_c11_promotion_requires_effective_independent_samples_floor`、`test_report_md_numbers_match_json`（真实录制 600519）。
-   - **审计窗口扩展（2026-10-16）**：`compute_conformal_forecast` 的审计期与展示校准窗口解耦——分数覆盖全部已收盘历史，每个审计截面 e 仍只用 `[max(60, e−H−160), e−h]` 的已成熟分数（与展示区间同一窗口规则，零前视），评估样本变为 n − 2H − 99（760 根时 H=15 为 631 个、约 42 个独立样本）。展示区间宽度不变（`test_c12_*` 守护）。数学定义见 `references/math-patterns.md` 第 5 节。
+3. **区间校准“已达标”的样本量**：原评估样本 107 个、约等于 7 个独立样本即达标，抗扰度弱。
+   - [x] **已处理（2026-10-16）**：下限取 20 个有效独立样本。`forecast.py` 增加 `effective_independent_samples >= MIN_EFFECTIVE_INDEPENDENT_SAMPLES (20)` 并在 `calibration_audit` 输出；审计期与展示校准窗口解耦（审计分数覆盖全历史，展示保持最近 160 根不变），评估样本由 n-2H-99 确定（760 根历史在 H=15 时达到 631 个样本、约 42 个独立样本，零前视，展示区间宽度不受影响）；Yahoo 取数对齐 `FETCH_BARS=760`。数学定义见 `references/math-patterns.md` 第 5 节。测试：`test_c02_c03_*`、`test_c11_*`、`test_c12_*`。
 4. **ST 历史状态**：ST 按当前简称识别并沿用到全部历史，可接入 ST 变更历史。
 5. **港股 ETF 识别**：仍需手动传 `--asset-type etf`（影响印花税豁免）。
 6. **外部数据缺口**：财报日无数据源；北交所无除权除息事件；A 股 2027 年休市表待公布后补录。

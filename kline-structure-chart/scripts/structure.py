@@ -350,7 +350,7 @@ def compute_structure(view: list[dict], pivots: list[dict], cur_idx: int, ref: f
 # ---------------------------------------------------------------------------
 
 
-def _abc_one(window: list[dict], live: dict | None, direction: str) -> dict | None:
+def _abc_one(window: list[dict], live: dict | None, direction: str, decimals: int = 2) -> dict | None:
     """单方向 ABC。down：A 浪自窗口最高点下跌；up：A 浪自窗口最低点上涨。"""
     s = -1 if direction == "down" else 1
     a_key = "low" if direction == "down" else "high"  # A 浪终点、C 浪推进方向用的价格
@@ -439,11 +439,11 @@ def _abc_one(window: list[dict], live: dict | None, direction: str) -> dict | No
     intraday_notes = []
     if live:
         if (money(live["close"]) - start_p) * s < 0:
-            intraday_notes.append(f"盘中价已越过A浪起点 {float(start_p):.2f}")
+            intraday_notes.append(f"盘中价已越过A浪起点 {fmt_price(float(start_p), decimals)}")
         elif (money(live["close"]) - b_p) * s < 0:
-            intraday_notes.append(f"盘中价已反向越过B浪终点 {float(b_p):.2f}")
+            intraday_notes.append(f"盘中价已反向越过B浪终点 {fmt_price(float(b_p), decimals)}")
         if (money(live[a_key]) - c_ext) * s > 0:
-            intraday_notes.append(f"盘中{'最低' if down else '最高'} {float(money(live[a_key])):.2f} 超出C浪已收盘最远位置")
+            intraday_notes.append(f"盘中{'最低' if down else '最高'} {fmt_price(float(money(live[a_key])), decimals)} 超出C浪已收盘最远位置")
     return {
         "direction": direction,
         "label": "下跌ABC" if down else "上涨ABC",
@@ -468,9 +468,9 @@ def _abc_one(window: list[dict], live: dict | None, direction: str) -> dict | No
     }
 
 
-def abc_scenario(window: list[dict], live: dict | None) -> dict | None:
+def abc_scenario(window: list[dict], live: dict | None, decimals: int = 2) -> dict | None:
     """同时尝试下跌 ABC 与上涨 ABC，取 A 浪起点更近的一个（代表当前正在演绎的结构）。"""
-    found = [s for s in (_abc_one(window, live, "down"), _abc_one(window, live, "up")) if s]
+    found = [s for s in (_abc_one(window, live, "down", decimals=decimals), _abc_one(window, live, "up", decimals=decimals)) if s]
     if not found:
         return None
     return max(found, key=lambda s: s["a_start"]["idx"])
@@ -765,13 +765,13 @@ def compute_structure_layer(
     s_hi_idx, s_hi = max(enumerate(sview), key=lambda item: (money(item[1]["high"]), -item[0]))
     s_lo_idx, s_lo = min(enumerate(sview), key=lambda item: (money(item[1]["low"]), item[0]))
     pivots, all_pivots, zz_thr, atr = swing_pivots(hist, len(hist) - len(sview))
-    # 轨道、ABC、缺口只用已收盘K线（铁律 0）：轨道取最新收盘日的位置，盘中K线只进 status_text / intraday_note 标注
+    # 轨道、ABC、缺口、黄金分割与背景层只用已收盘K线（铁律 0）：盘中K线只进 status_text / intraday_note 标注及折线起点
     wedge = compute_structure(sview, pivots, len(sview) - 1, float(last_c), atr, active_intra)
-    scenario = abc_scenario(sview, active_intra)
-    fibs = fib_levels(s_hi_idx, s_hi, s_lo_idx, s_lo, ref_p)
+    scenario = abc_scenario(sview, active_intra, decimals=decimals)
+    fibs = fib_levels(s_hi_idx, s_hi, s_lo_idx, s_lo, last_c)
     gaps = find_unfilled_gaps(sview)
     ma_last = {n: None if ma[n][-1] is None else float(money(ma[n][-1])) for n in (20, 60, 120)}
-    background = background_context(completed[-max(show, BACKGROUND_MIN_DAYS) :], ma, ref_p)
+    background = background_context(completed[-max(show, BACKGROUND_MIN_DAYS) :], ma, last_c)
     ladder = build_ladder(
         float(last_c),  # 支撑压力以最新收盘价为基准（路径都以日线收盘确认）
         all_pivots,

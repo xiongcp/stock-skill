@@ -36,8 +36,11 @@ def replay_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
     def sina(code: str, datalen: int = 450) -> list[dict]:
         return [dict(b) for b in load_recorded(f"sina_daily/{code}.json")][-datalen:]
 
-    def yahoo(symbol: str, range_str: str = "2y") -> list[dict]:
-        return [dict(b) for b in load_recorded(f"yahoo_daily/{symbol.replace('^', '')}.json")]
+    def yahoo(symbol: str, range_str: str = "5y", datalen: int | None = data_gateway.FETCH_BARS) -> list[dict]:
+        bars = [dict(b) for b in load_recorded(f"yahoo_daily/{symbol.replace('^', '')}.json")]
+        if datalen is not None:
+            bars = bars[-datalen:]
+        return bars
 
     def tencent(code: str, datalen: int = 760) -> list[dict]:
         return [dict(b) for b in load_recorded(f"tencent_daily/{code}.json")][-datalen:]

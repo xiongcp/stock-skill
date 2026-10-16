@@ -13,7 +13,12 @@ from contracts import (
 )
 from forecast import compute_conformal_forecast
 from indicators import compute_all_indicators
-from market_rules import DEFAULT_BENCHMARKS, get_market_microstructure_rules, price_decimals
+from market_rules import (
+    DEFAULT_BENCHMARKS,
+    get_market_microstructure_rules,
+    price_decimals,
+    round_to_tick,
+)
 from patterns import (
     causal_nadaraya_watson,
     causal_swing_pivots,
@@ -103,7 +108,13 @@ def _build_replay_snapshots(
 
     for cut_idx in cutoffs:
         sub_bars = completed[: cut_idx + 1]
-        layer_sub = compute_structure_layer(sub_bars, None, snapshot_window)
+        sub_p_dec = price_decimals(float(sub_bars[-1]["close"]), meta["market"], meta["asset_type"], sub_bars[-1]["day"])
+        layer_sub = compute_structure_layer(
+            sub_bars,
+            None,
+            snapshot_window,
+            price_decimals=lambda price, day: price_decimals(price, meta["market"], meta["asset_type"], day),
+        )
         sview_sub = layer_sub["sview"]
         ind_sub_win = _indicators_on_window(layer_sub["hist"], len(sview_sub))
         ind_sub_full = compute_all_indicators(sub_bars)
@@ -127,12 +138,13 @@ def _build_replay_snapshots(
         )
         fc_sub = compute_conformal_forecast(sub_bars, meta=meta, horizon_bars=horizon_bars)
         realized_bars = completed[cut_idx + 1 : min(n, cut_idx + 1 + horizon_bars)]
-        realized_closes = [round(float(b["close"]), 2) for b in realized_bars]
+        realized_closes = [round(float(b["close"]), sub_p_dec) for b in realized_bars]
         realized_days = [b["day"] for b in realized_bars]
         hit_80 = None
         if len(realized_closes) == horizon_bars:
             lo80, hi80 = fc_sub["conformal_80pct_band"][-1]
-            hit_80 = lo80 <= realized_closes[-1] <= hi80
+            act_last = round_to_tick(realized_closes[-1], meta["market"], meta["asset_type"], realized_days[-1])
+            hit_80 = lo80 - 1e-6 <= act_last <= hi80 + 1e-6
 
         win_bars = layer_sub["view"]
         win_offset = len(sub_bars) - len(win_bars)
@@ -145,16 +157,16 @@ def _build_replay_snapshots(
                 {
                     "idx": i,
                     "day": b["day"],
-                    "open": round(float(b["open"]), 2),
-                    "high": round(float(b["high"]), 2),
-                    "low": round(float(b["low"]), 2),
-                    "close": round(float(b["close"]), 2),
+                    "open": round(float(b["open"]), sub_p_dec),
+                    "high": round(float(b["high"]), sub_p_dec),
+                    "low": round(float(b["low"]), sub_p_dec),
+                    "close": round(float(b["close"]), sub_p_dec),
                     "volume": round(float(b.get("volume") or 0.0), 2),
-                    "ma20": round(float(ma_sub[20][full_i]), 2) if ma_sub[20][full_i] is not None else None,
-                    "ma60": round(float(ma_sub[60][full_i]), 2) if ma_sub[60][full_i] is not None else None,
-                    "ma120": round(float(ma_sub[120][full_i]), 2) if ma_sub[120][full_i] is not None else None,
-                    "ma250": round(float(ma_sub[250][full_i]), 2) if ma_sub[250][full_i] is not None else None,
-                    "kernel_smooth": round(nw_sub[i], 2),
+                    "ma20": round(float(ma_sub[20][full_i]), sub_p_dec) if ma_sub[20][full_i] is not None else None,
+                    "ma60": round(float(ma_sub[60][full_i]), sub_p_dec) if ma_sub[60][full_i] is not None else None,
+                    "ma120": round(float(ma_sub[120][full_i]), sub_p_dec) if ma_sub[120][full_i] is not None else None,
+                    "ma250": round(float(ma_sub[250][full_i]), sub_p_dec) if ma_sub[250][full_i] is not None else None,
+                    "kernel_smooth": round(nw_sub[i], sub_p_dec),
                     "rsi14": round(float(ind_sub_full["series"]["rsi14"][full_i]), 2)
                     if ind_sub_full["series"]["rsi14"][full_i] is not None
                     else None,
@@ -168,7 +180,7 @@ def _build_replay_snapshots(
             {
                 "as_of": sub_bars[-1]["day"],
                 "cut_idx": cut_idx,
-                "base_close": round(float(sub_bars[-1]["close"]), 2),
+                "base_close": round(float(sub_bars[-1]["close"]), sub_p_dec),
                 "regime": reg_sub["regime"],
                 "regime_score": reg_sub["regime_score"],
                 "rule_score": mtf_sub["rule_score"],
@@ -324,6 +336,7 @@ def analyze_bundle(
     if not color_scheme or color_scheme == "auto":
         color_scheme = rules["color_scheme"]
 
+    p_dec = price_decimals(float(last_c), inst["market"], inst["asset_type"], view[-1]["day"])
     meta = {
         "symbol": inst["symbol"],
         "name": request.get("name") or inst.get("name") or inst["symbol"],
@@ -340,6 +353,7 @@ def analyze_bundle(
         or request.get("adjustment")
         or ("raw" if inst["asset_type"] == "index" else "split"),
         "color_scheme": color_scheme,
+        "price_decimals": p_dec,
         "data_source": bundle.get("provenance", {}).get("source", "UNKNOWN"),
     }
 

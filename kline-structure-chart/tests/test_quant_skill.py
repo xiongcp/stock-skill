@@ -840,7 +840,15 @@ def _closed_conclusions(layer: dict) -> dict:
         # 折线第 0 点是当前位置（盘中价），其余点位必须与收盘态一致
         "waypoints": {name: [p for _, p in proj[name]["waypoints_offset"][1:]] for name in ("bull", "neutral", "bear")},
     }
-    return {"scenario": scenario, "wedge": wedge, "gaps": layer["gaps"], "ladder": layer["ladder"], "paths": paths}
+    return {
+        "scenario": scenario,
+        "wedge": wedge,
+        "fibs": layer["fibs"],
+        "background": layer["background"],
+        "gaps": layer["gaps"],
+        "ladder": layer["ladder"],
+        "paths": paths,
+    }
 
 
 @pytest.mark.parametrize("symbol", ["sh000300", "sh600519", "sz399006"])

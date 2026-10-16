@@ -179,10 +179,10 @@ def test_tencent_index_failure_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_vix_and_events_failures_degrade_with_disclosure(monkeypatch: pytest.MonkeyPatch, replay_recorded) -> None:
     orig_yahoo = data_gateway.fetch_yahoo_daily_bars
 
-    def yahoo_no_vix(symbol: str, range_str: str = "2y") -> list[dict]:
+    def yahoo_no_vix(symbol: str, *args, **kwargs) -> list[dict]:
         if symbol == "^VIX":
             raise urllib.error.HTTPError("u", 503, "VIX Unavailable", {}, None)
-        return orig_yahoo(symbol, range_str)
+        return orig_yahoo(symbol, *args, **kwargs)
 
     def events_down(symbol: str, range_str: str = "5y") -> list[dict]:
         raise urllib.error.HTTPError("u", 503, "Service Unavailable", {}, None)

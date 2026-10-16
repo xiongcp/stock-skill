@@ -10,6 +10,7 @@ from market_rules import (
     get_daily_price_limit_pct,
     get_market_microstructure_rules,
     rescale_bars_as_of,
+    round_to_tick,
     round_trip_cost_rate,
 )
 from patterns import (
@@ -366,12 +367,12 @@ def run_plan_backtest(
     for cut in eval_cuts:
         pit_sub = rescale_bars_as_of(bars[: cut + horizon_bars + 1], cut)
         fc = compute_conformal_forecast(pit_sub[: cut + 1], meta=meta_stub, horizon_bars=horizon_bars)
-        actual = float(pit_sub[cut + horizon_bars]["close"])
+        actual = round_to_tick(float(pit_sub[cut + horizon_bars]["close"]), market, asset_type, pit_sub[cut + horizon_bars]["day"])
         base_c = float(pit_sub[cut]["close"])
         b50_lo, b50_hi = fc["conformal_50pct_band"][-1]
         b80_lo, b80_hi = fc["conformal_80pct_band"][-1]
-        hit_50 += int(b50_lo <= actual <= b50_hi)
-        hit_80 += int(b80_lo <= actual <= b80_hi)
+        hit_50 += int(b50_lo - 1e-6 <= actual <= b50_hi + 1e-6)
+        hit_80 += int(b80_lo - 1e-6 <= actual <= b80_hi + 1e-6)
         q50_err.append(abs(actual - float(fc["base_median_q50"][-1])) / base_c)
         rw_err.append(abs(actual - base_c) / base_c)
     n_eval = max(1, len(eval_cuts))

@@ -36,7 +36,8 @@
         "timeframe": { "type": "string", "enum": ["1D", "1W", "60m", "15m"] },
         "as_of": { "type": "string" },
         "adjustment": { "type": "string", "enum": ["raw", "split", "total_return"] },
-        "color_scheme": { "type": "string", "enum": ["cn_red_up", "us_green_up"] }
+        "color_scheme": { "type": "string", "enum": ["cn_red_up", "us_green_up"] },
+        "price_decimals": { "type": "integer" }
       }
     }
   }

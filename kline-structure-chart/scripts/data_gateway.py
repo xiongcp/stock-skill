@@ -73,7 +73,11 @@ def fetch_sina_daily_bars(sina_symbol: str, datalen: int = 450) -> list[dict[str
     return bars
 
 
-def fetch_yahoo_daily_bars(yahoo_symbol: str, range_str: str = "2y") -> list[dict[str, Any]]:
+def fetch_yahoo_daily_bars(
+    yahoo_symbol: str,
+    range_str: str = "5y",
+    datalen: int | None = FETCH_BARS,
+) -> list[dict[str, Any]]:
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{_url_token(yahoo_symbol)}?interval=1d&range={range_str}"
     raw = _http_get(url)
     payload = json.loads(raw)
@@ -117,6 +121,8 @@ def fetch_yahoo_daily_bars(yahoo_symbol: str, range_str: str = "2y") -> list[dic
             }
         )
     bars.sort(key=lambda x: x["day"])
+    if datalen is not None:
+        bars = bars[-datalen:]
     return bars
 
 
@@ -338,7 +344,7 @@ def _load_single_series(
                 src = f"TENCENT_INDEX_DAILY({t_code})"
             else:
                 y_sym = yahoo_symbol_for(symbol)
-                bars = fetch_yahoo_daily_bars(y_sym)
+                bars = fetch_yahoo_daily_bars(y_sym, datalen=datalen)
                 src = f"YAHOO_DAILY({y_sym})"
             validate_bars(bars, f"{src}:{symbol}")  # 厂商数据也要过 OHLC 包络 / 时间单调 / 正价格校验
             if as_of:
@@ -383,7 +389,7 @@ def _fetch_vix(as_of: str | None, allow_network: bool) -> tuple[float | None, st
     if not allow_network:
         return None, "NOT_FETCHED(offline)"
     try:
-        bars = fetch_yahoo_daily_bars("^VIX", range_str="3mo")
+        bars = fetch_yahoo_daily_bars("^VIX", range_str="3mo", datalen=None)
         if as_of:
             bars = [b for b in bars if b["day"] <= as_of[:10]]
         if not bars:

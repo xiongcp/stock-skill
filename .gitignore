@@ -10,3 +10,6 @@ __pycache__/
 # 运行产物（生成物，不提交、不随 skill 分发）
 artifacts/
 kline-structure-chart/artifacts/
+
+# Agent worktrees & IDE state
+.claude/

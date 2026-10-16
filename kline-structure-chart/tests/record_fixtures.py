@@ -101,7 +101,7 @@ def main() -> None:
             written.append(f"sina_daily/{code}.json")
     if "yahoo" in groups:
         for sym, market in YAHOO.items():
-            bars = _completed(fetch_yahoo_daily_bars(sym, range_str="5y"), market, now)
+            bars = _completed(fetch_yahoo_daily_bars(sym, range_str="5y", datalen=None), market, now)
             _write(f"yahoo_daily/{sym.replace('^', '')}.json", bars, manifest, f"YAHOO chart {sym} 1d range=5y", now)
             written.append(f"yahoo_daily/{sym.replace('^', '')}.json")
     if "tencent" in groups:
