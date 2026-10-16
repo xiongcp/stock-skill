@@ -222,7 +222,10 @@ def _classify(su: float, sl: float, width_ratio: float) -> str:
 
 
 def compute_structure(view: list[dict], pivots: list[dict], cur_idx: int, ref: float, atr: float, live: dict | None) -> dict:
-    """用已确认拐点的凸包切线拟合上/下轨，分类形态并判断收盘突破状态。"""
+    """用已确认拐点的凸包切线拟合上/下轨，分类形态并判断收盘突破状态。
+
+    cur_idx 是最新已收盘K线的下标，ref 是其收盘价；live 只用于在 status_text 末尾追加盘中提示。
+    """
     tol = max(0.006, 0.6 * atr)
     highs = [(p["idx"], p["price"], p["day"]) for p in pivots if p["confirmed"] and p["kind"] == "H"]
     lows = [(p["idx"], p["price"], p["day"]) for p in pivots if p["confirmed"] and p["kind"] == "L"]
@@ -305,7 +308,7 @@ def compute_structure(view: list[dict], pivots: list[dict], cur_idx: int, ref: f
         status_text = "收盘仍在上下轨之间运行" + ("（" + "，".join(notes) + "）" if notes else "")
         status_short = "收盘在轨道内运行"
     if live:
-        live_side = side(cur_idx, live["close"])
+        live_side = side(cur_idx + 1, live["close"])  # 盘中K线位于最新收盘日的下一个槽位
         if live_side != state:
             hint = {1: "盘中价已在上轨上方", -1: "盘中价已在下轨下方", 0: "盘中价已回到上下轨之间"}[live_side]
             status_text += f"；{hint}（未收盘，不作确认）"
@@ -391,9 +394,9 @@ def _abc_one(window: list[dict], live: dict | None, direction: str) -> dict | No
     down = direction == "down"
     post = window[b_i + 1 :]
     last_close = money(window[-1]["close"])
-    current = money(live["close"]) if live else last_close
-    # 结构失效：现价反向越过 A 浪起点，或 C 浪之后收盘反向越过 B 浪终点（C 浪已结束并反转）
-    if (current - start_p) * s < 0 or (last_close - b_p) * s < 0:
+    # 结构失效：收盘反向越过 A 浪起点，或 C 浪之后收盘反向越过 B 浪终点（C 浪已结束并反转）。
+    # 情景是否存在、C 浪进度与测算位状态只看已收盘K线；盘中价只写入 intraday 标注（铁律 0）
+    if (last_close - start_p) * s < 0 or (last_close - b_p) * s < 0:
         return None
     window_low = min(money(bar["low"]) for bar in window)
     window_high = max(money(bar["high"]) for bar in window)
@@ -406,31 +409,28 @@ def _abc_one(window: list[dict], live: dict | None, direction: str) -> dict | No
 
         if beyond(last_close):
             state = "收盘已跌破" if down else "收盘已站上"
-        elif live and beyond(money(live[a_key])):
-            state = "盘中刺破" if down else "盘中触及"
         elif any(beyond(money(bar["close"])) for bar in post):
             state = "曾收破已收回" if down else "曾站上已回落"
         elif any((money(bar[a_key]) - price) * s >= 0 for bar in post):
             state = "影线触及未收破" if down else "影线触及未站上"
         else:
             state = "未触及"
+        # 盘中越过该位只写标注，不改变收盘口径的 state
+        intraday = ("盘中刺破" if down else "盘中触及") if live and not beyond(last_close) and beyond(money(live[a_key])) else None
         drawn = q2(window_low * Decimal("0.92")) <= price <= q2(window_high * Decimal("1.08"))
-        return {"ratio": ratio, "price": float(price), "state": state, "drawn": drawn}
+        return {"ratio": ratio, "price": float(price), "state": state, "intraday": intraday, "drawn": drawn}
 
     levels = [level(r) for r in RATIOS]
     if levels[-1]["state"] != "未触及":
         levels.append(level(EXT_RATIO))
 
-    # C 浪进度：B 浪之后（含盘中）朝 A 浪方向走出的最远位置
+    # C 浪进度：B 浪之后已收盘K线朝 A 浪方向走出的最远位置（不含盘中）
     c_points = [(money(bar[a_key]), b_i + 1 + k) for k, bar in enumerate(post)]
-    if live:
-        c_points.append((money(live[a_key]), n))
     if c_points:
         c_ext, c_idx = (min if down else max)(c_points, key=lambda item: item[0])
         c_ratio = float((c_ext - b_p) * s / a_range)
     else:
         c_ext, c_idx, c_ratio = b_p, b_i, 0.0
-    c_day = live["day"] if (live and c_idx == n) else window[min(c_idx, n - 1)]["day"]
     if b_i >= n - 3 and c_ratio < 0.15:
         phase = "B浪可能仍在延续，C浪尚未确认"
     elif (c_ext - a_end) * s > 0:
@@ -438,6 +438,14 @@ def _abc_one(window: list[dict], live: dict | None, direction: str) -> dict | No
     else:
         phase = "C浪进行中"
     reached = [lvl for lvl in levels if lvl["state"] != "未触及"]
+    intraday_notes = []
+    if live:
+        if (money(live["close"]) - start_p) * s < 0:
+            intraday_notes.append(f"盘中价已越过A浪起点 {float(start_p):.2f}")
+        elif (money(live["close"]) - b_p) * s < 0:
+            intraday_notes.append(f"盘中价已反向越过B浪终点 {float(b_p):.2f}")
+        if (money(live[a_key]) - c_ext) * s > 0:
+            intraday_notes.append(f"盘中{'最低' if down else '最高'} {float(money(live[a_key])):.2f} 超出C浪已收盘最远位置")
     return {
         "direction": direction,
         "label": "下跌ABC" if down else "上涨ABC",
@@ -449,13 +457,15 @@ def _abc_one(window: list[dict], live: dict | None, direction: str) -> dict | No
         "b_retrace": round(float(b_size / a_range), 3),
         "c_progress": {
             "idx": c_idx,
-            "day": c_day,
+            "day": window[c_idx]["day"],
             "extreme": float(c_ext),
             "c_over_a": round(c_ratio, 3),
             "phase": phase,
             "deepest_level_reached": reached[-1]["ratio"] if reached else None,
         },
         "levels": levels,
+        # 盘中标注：不参与情景筛选、C 浪进度与测算位状态
+        "intraday_note": "；".join(intraday_notes) + "（未收盘，不作确认）" if intraday_notes else None,
         "invalidation": "日线收盘越过该线才算，盘中刺破不算",
     }
 
@@ -524,11 +534,9 @@ def background_context(bg: list[dict], ma: dict[int, list[float | None]], ref_pr
     }
 
 
-def find_unfilled_gaps(view: list[dict], intraday: dict | None, lookback: int = 60) -> list[dict]:
+def find_unfilled_gaps(view: list[dict], lookback: int = 60) -> list[dict]:
+    """只用已收盘K线判断缺口是否回补。"""
     sub = view[-lookback:] if len(view) > lookback else view
-    future_bars = list(sub)
-    if intraday:
-        future_bars.append(intraday)
     gaps = []
     for i in range(1, len(sub)):
         prev_b, curr_b = sub[i - 1], sub[i]
@@ -536,7 +544,7 @@ def find_unfilled_gaps(view: list[dict], intraday: dict | None, lookback: int = 
             upper = money(prev_b["low"])
             lower = max(
                 [money(curr_b["high"])]
-                + [money(b["high"]) for b in future_bars[i + 1 :] if money(b["high"]) > money(curr_b["high"])]
+                + [money(b["high"]) for b in sub[i + 1 :] if money(b["high"]) > money(curr_b["high"])]
             )
             if lower < upper:
                 gaps.append({"day": curr_b["day"], "type": "下跳空缺口(上方压力)", "range": [float(lower), float(upper)]})
@@ -544,7 +552,7 @@ def find_unfilled_gaps(view: list[dict], intraday: dict | None, lookback: int = 
             lower = money(prev_b["high"])
             upper = min(
                 [money(curr_b["low"])]
-                + [money(b["low"]) for b in future_bars[i + 1 :] if money(b["low"]) < money(curr_b["low"])]
+                + [money(b["low"]) for b in sub[i + 1 :] if money(b["low"]) < money(curr_b["low"])]
             )
             if lower < upper:
                 gaps.append({"day": curr_b["day"], "type": "上跳空缺口(下方支撑)", "range": [float(lower), float(upper)]})
@@ -742,10 +750,11 @@ def compute_structure_layer(bars: list[dict], intraday: dict | None, show: int) 
     s_hi_idx, s_hi = max(enumerate(sview), key=lambda item: (money(item[1]["high"]), -item[0]))
     s_lo_idx, s_lo = min(enumerate(sview), key=lambda item: (money(item[1]["low"]), item[0]))
     pivots, all_pivots, zz_thr, atr = swing_pivots(hist, len(hist) - len(sview))
-    wedge = compute_structure(sview, pivots, last_bar_idx - off, float(ref_p), atr, active_intra)
+    # 轨道、ABC、缺口只用已收盘K线（铁律 0）：轨道取最新收盘日的位置，盘中K线只进 status_text / intraday_note 标注
+    wedge = compute_structure(sview, pivots, len(sview) - 1, float(last_c), atr, active_intra)
     scenario = abc_scenario(sview, active_intra)
     fibs = fib_levels(s_hi_idx, s_hi, s_lo_idx, s_lo, ref_p)
-    gaps = find_unfilled_gaps(sview, active_intra)
+    gaps = find_unfilled_gaps(sview)
     ma_last = {n: None if ma[n][-1] is None else float(money(ma[n][-1])) for n in (20, 60, 120)}
     background = background_context(completed[-max(show, BACKGROUND_MIN_DAYS) :], ma, ref_p)
     ladder = build_ladder(
