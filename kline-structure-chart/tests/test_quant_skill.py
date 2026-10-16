@@ -46,6 +46,7 @@ from market_rules import (  # noqa: E402
     is_daily_bar_complete,
     is_trading_day,
     next_trading_dates,
+    price_decimals,
     rescale_bars_as_of,
     resolve_instrument,
     round_shares_to_lot,
@@ -860,10 +861,14 @@ def test_g08_live_bar_does_not_change_closed_structure(symbol: str) -> None:
 
 
 def test_g03_to_g07_rendering_invariants_and_low_price_etf(replay_recorded, tmp_path: Path) -> None:
-    # G-05：低价 ETF (510300.SH，价格约 4 元) 推演标签保留小数，不退化为整数
-    assert fmt_price(4.126) == "4.126"
-    assert fmt_price(24.55) == "24.55"
-    assert fmt_price(1312.97) == "1313"
+    # G-05：低价 ETF (510300.SH，价格约 4 元) 推演标签保留小数，不退化为整数。
+    # 第二轮复查 5.3-2：原先 >=100 取整（"1313"）是为了短标签，但与 *_report.md 的价位表精度不一致
+    # （BRK.B.US 图上"突破 534"而报告为 533.55），现改为调用方按 market_rules.price_decimals 传入小数位，
+    # 图、step_labels 与报告同一精度；缺省 2 位为 A 股股票口径（v4.1 CLI 无市场信息时使用）。
+    assert fmt_price(1312.97) == "1312.97"
+    assert fmt_price(5.123) == "5.12"
+    assert fmt_price(4.126, price_decimals(4.126, "CN", "etf")) == "4.126"
+    assert fmt_price(0.5, price_decimals(0.5, "US", "equity")) == "0.5000"
 
     rep_60 = run_pipeline(
         {"symbol": "510300.SH", "market": "CN", "asset_type": "etf", "display_bars": 60, "horizon_bars": 15},
@@ -871,7 +876,11 @@ def test_g03_to_g07_rendering_invariants_and_low_price_etf(replay_recorded, tmp_
     )
     # G-05 & R-10：ETF 3 位小数全链路对齐（series_export 末根收盘 == q50[0]，且风控文案保留 3 位小数）
     bull_labels = [txt for _, txt in rep_60["rule_scenarios"]["bull"]["step_labels"]]
-    assert all("." in txt for txt in bull_labels)
+    assert all(len(txt.rsplit(".", 1)[-1]) == 3 for txt in bull_labels)  # ETF 0.001 价位：3 位小数
+    r1 = rep_60["rule_scenarios"]["breakout_level"]["price"]
+    assert bull_labels[0] == f"突破 {r1:.3f}" and f"{r1:.3f}" in rep_60["rule_scenarios"]["bull"]["trigger"]
+    report_md = Path(rep_60["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    assert f"{rep_60['rule_scenarios']['bull']['target_price']:.3f}" in report_md
     assert rep_60["series_export"]["bars"][-1]["close"] == rep_60["future_projection_15d"]["base_median_q50"][0]
     sl_val = rep_60["triple_barrier_plan"]["stop_loss_barrier"]
     assert f"{sl_val:.3f}" in rep_60["triple_barrier_plan"]["left_side_constraints"]["exit_rule"]
