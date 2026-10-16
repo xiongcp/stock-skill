@@ -822,6 +822,43 @@ def test_g02_v41_render_still_matches_shared_layer() -> None:
     assert "_upper" in layer["wedge"]
 
 
+def _closed_conclusions(layer: dict) -> dict:
+    """结构层里只由已收盘K线决定的结论：ABC 情景与 C 浪进度、轨道、阶梯、三路径点位（不含盘中标注与折线起点）。"""
+    scenario = layer["scenario"]
+    if scenario is not None:
+        scenario = {k: v for k, v in scenario.items() if k != "intraday_note"}
+        scenario["levels"] = [{k: v for k, v in lvl.items() if k != "intraday"} for lvl in scenario["levels"]]
+    wedge = {k: layer["wedge"][k] for k in ("pattern", "fitted", "status", "status_short", "upper_today", "lower_today", "expired")}
+    proj = layer["projections"]
+    paths = {
+        "breakout": proj["breakout_level"],
+        "breakdown": proj["breakdown_level"],
+        "bull": [proj["bull"][k] for k in ("retest_hold", "target_price", "target_source")],
+        "neutral": [proj["neutral"]["range"], proj["neutral"]["target_price"]],
+        "bear": [proj["bear"][k] for k in ("rebound_cap", "target_price", "target_source")],
+        # 折线第 0 点是当前位置（盘中价），其余点位必须与收盘态一致
+        "waypoints": {name: [p for _, p in proj[name]["waypoints_offset"][1:]] for name in ("bull", "neutral", "bear")},
+    }
+    return {"scenario": scenario, "wedge": wedge, "gaps": layer["gaps"], "ladder": layer["ladder"], "paths": paths}
+
+
+@pytest.mark.parametrize("symbol", ["sh000300", "sh600519", "sz399006"])
+def test_g08_live_bar_does_not_change_closed_structure(symbol: str) -> None:
+    # 铁律 0：盘中K线（录制数据中下一根真实K线标记为未收盘）只做标注，不改变 ABC 情景、C 浪进度与三路径点位
+    bars = load_recorded(f"sina_daily/{symbol}.json")
+    checked = with_scenario = 0
+    for k in range(450, len(bars), 23):
+        cut = [dict(b) for b in bars[k - 450 : k]]
+        live = {**bars[k], "prev": cut[-1]["close"], "stamp": bars[k]["day"] + " 10:30:00", "complete": False}
+        closed = compute_structure_layer(cut, None, 120)
+        intra = compute_structure_layer(cut, live, 120)
+        assert intra["active_intra"] is not None and intra["completed"] == closed["completed"]
+        assert _closed_conclusions(intra) == _closed_conclusions(closed), f"{symbol} @ {cut[-1]['day']}"
+        checked += 1
+        with_scenario += closed["scenario"] is not None
+    assert checked >= 20 and with_scenario > 0
+
+
 def test_g03_to_g07_rendering_invariants_and_low_price_etf(replay_recorded, tmp_path: Path) -> None:
     # G-05：低价 ETF (510300.SH，价格约 4 元) 推演标签保留小数，不退化为整数
     assert fmt_price(4.126) == "4.126"

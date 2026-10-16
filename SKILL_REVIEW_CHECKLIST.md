@@ -278,6 +278,7 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 ### 5.3 仍可继续改进（未在本轮修改）
 
 1. **结构层使用盘中价**：`structure._abc_one` 用盘中价判断 ABC 结构是否失效，C 浪进度也包含盘中高低点（已标注“盘中”）。这与铁律 0“未收盘 K 线不得参与形态计算”的字面要求有张力，建议盘中价只用于标注、不参与情景筛选。
+   - [x] **已处理（2026-10-16）**：`_abc_one` 的结构失效判断、测算位 `state`、C 浪进度（`c_progress`）只用已收盘K线；盘中刺破/触及改写入测算位的 `intraday` 字段，盘中越过 A 浪起点/B 浪终点或超出 C 浪最远位置写入情景的 `intraday_note`（均注明“未收盘，不作确认”）。同时 `compute_structure_layer` 改为在最新已收盘日求轨道值并按收盘价分类形态（`compute_structure`），缺口回补只看已收盘K线（`find_unfilled_gaps`），因此三条推演的点位不再随盘中价变化；盘中价只用于 `status_text` 提示、折线起点与“盘中已站上/跌破，待收盘确认”注释。PNG 盘中态把卡片与文字里的“今日上轨”改标为“MM-DD收盘上轨”。回归测试 `test_g08_live_bar_does_not_change_closed_structure`：在 `sh000300`/`sh600519`/`sz399006` 的真实录制行情上逐截面把下一根真实K线标为未收盘传入，情景、C 浪进度、轨道、阶梯与三路径点位与不传入时完全一致。
 2. **PNG 标签精度与报告不一致**：`structure.fmt_price` 对 ≥100 的价格取整、<10 的价格保留 3 位，例如 `BRK.B.US` 图上“突破 534”而报告为 533.55，`600289.SH` 图上“突破 5.123”而报告为 5.12。`test_g03_*` 把取整固定为设计，如需按价位表精度显示，需要同时改测试。
 3. **区间校准“已达标”的样本量**：`600519.SH` 评估样本 107 个，约等于 7 个独立样本时状态即为“已达标”。建议晋级条件增加有效独立样本下限。
    - **已处理（2026-10-16）**：用户拍板下限取 20。`forecast.py` 晋级条件加入 `effective_independent_samples >= MIN_EFFECTIVE_INDEPENDENT_SAMPLES (20)`，并在 `calibration_audit.min_effective_independent_samples` 输出；条件与理由写入 `references/math-patterns.md` 第 5 节；`render_report_md.py`、`SKILL.md`、`README.md` 同步说明（`render_html.py` 只显示原始状态枚举，未改）。由于审计窗口使评估样本约为 122 − H，只有 H ≤ 5 可能晋级，默认 15 日区间恒为“校准观察期”（录制数据中原 7 个 PROMOTED 标的全部降级）。扩大审计窗口另开任务。测试：`test_c02_c03_*`、`test_c11_promotion_requires_effective_independent_samples_floor`、`test_report_md_numbers_match_json`（真实录制 600519）。

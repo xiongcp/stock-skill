@@ -8,7 +8,7 @@ v4.0 相对 v3.0 的算法修正：
 - 楔形上下轨改为「ZigZag 已确认拐点 + 凸包切线」拟合：轨道只由已确认的波段高/低点决定，
   不再把今日K线当成轨道支点（v3 的下轨在下跌中总是穿过今日最低价，上轨可能由相隔几天的两个高点外推）。
 - 形态分类带斜率容差与收敛比：楔形 / 三角形 / 通道 / 箱体 / 扩散，并给出收盘突破状态与持续天数。
-- ABC 测算支持下跌与上涨两个方向；测算位状态区分「收盘已破 / 盘中刺破 / 曾收破已收回 / 影线触及 / 未触及」。
+- ABC 测算支持下跌与上涨两个方向；测算位状态只按已收盘K线区分「收盘已破 / 曾收破已收回 / 影线触及 / 未触及」，盘中刺破另行标注。
 - 三条推演路径的触发位来自形态轨道，目标位取「支撑压力阶梯」中最近的有效位，并写明来源。
 - 收盘后新浪日K未入库时用腾讯收盘快照补齐当日，不再误标为「盘中未收盘」。
 
@@ -516,6 +516,7 @@ def render(
     completed, active_intra, data_note = layer["completed"], layer["active_intra"], layer["data_note"]
     ma = layer["ma"]
     view, view_start, sview, off = layer["view"], layer["view_start"], layer["sview"], layer["off"]
+    rail_when = f"{view[-1]['day'][5:]}收盘" if active_intra else "今日"  # 轨道值取最新已收盘日，盘中不重算
     plot = list(view)
     if active_intra:
         plot.append(
@@ -673,7 +674,7 @@ def render(
             f"③ 结构：{wedge['pattern']}",
             f"两轨已于 {wedge['apex_day'] or '近期'} 前后交汇，形态完成"
             if wedge["expired"]
-            else f"今日上轨 {wedge['upper_today']:.2f} | 下轨 {wedge['lower_today']:.2f}",
+            else f"{rail_when}上轨 {wedge['upper_today']:.2f} | 下轨 {wedge['lower_today']:.2f}",
             wedge["status_short"],
             WEDGE_UPPER,
         ),
@@ -818,7 +819,8 @@ def render(
             y = yp(level["price"])
             abc_ys.append(y)
             dashed_hline(draw, left, chart_right, y, (*SCEN, 185))
-            right_gutter_tags.append((y, f"ABC {level['ratio']:.3f}  {level['price']:.2f} ({level['state']})", SCEN))
+            live_tag = f"·{level['intraday']}" if level["intraday"] else ""
+            right_gutter_tags.append((y, f"ABC {level['ratio']:.3f}  {level['price']:.2f} ({level['state']}{live_tag})", SCEN))
 
     # ---------------- 绘制真实 K 线与盘中 K 线 ----------------
     kline_obstacles: list[tuple[int, int, int, int]] = []
@@ -1206,8 +1208,8 @@ def render(
             upper_now = lower_now = ""
             apex_note = f"两轨已于 {wedge['apex_day'] or '近期'} 前后交汇（收敛顶点），原形态已完成，轨道外推值不再作为今日支撑压力；"
         else:
-            upper_now = f"，今日上轨 {wedge['upper_today']:.2f}"
-            lower_now = f"，今日下轨 {wedge['lower_today']:.2f}"
+            upper_now = f"，{rail_when}上轨 {wedge['upper_today']:.2f}"
+            lower_now = f"，{rail_when}下轨 {wedge['lower_today']:.2f}"
             apex_note = ""
         rails_str = (
             f"形态：【{wedge['pattern']}】。上轨连接 {up_r['start']['day']}({up_r['start']['price']:.2f}) 与 "
@@ -1226,13 +1228,15 @@ def render(
         scen_parts = []
         for lvl in scenario["levels"]:
             out_tag = "，画面外" if not lvl["drawn"] else ""
-            scen_parts.append(f"{lvl['ratio']:.3f} 倍位 {lvl['price']:.2f}【{lvl['state']}{out_tag}】")
+            live_tag = f"，{lvl['intraday']}（未收盘，不作确认）" if lvl["intraday"] else ""
+            scen_parts.append(f"{lvl['ratio']:.3f} 倍位 {lvl['price']:.2f}【{lvl['state']}{live_tag}{out_tag}】")
         scen_str = (
             f"{scenario['label']}测算：A浪 {scenario['a_start']['day']} {scenario['a_start']['price']:.2f} → "
             f"{scenario['a_end']['day']} {scenario['a_end']['price']:.2f}（幅度 {scenario['a_range']:.2f} 点），"
             f"B浪至 {scenario['b_end']['day']} {scenario['b_end']['price']:.2f}；C浪测算位："
             + "，".join(scen_parts)
             + "。"
+            + (f"盘中提示：{scenario['intraday_note']}。" if scenario["intraday_note"] else "")
         )
     else:
         scen_str = f"ABC测算：近{STRUCT_DAYS}日无满足「反向≥5%且收回≥0.382」的B浪，不做ABC测算。"
