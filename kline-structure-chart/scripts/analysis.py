@@ -114,6 +114,7 @@ def _build_replay_snapshots(
             None,
             snapshot_window,
             price_decimals=lambda price, day: price_decimals(price, meta["market"], meta["asset_type"], day),
+            horizon_bars=horizon_bars,
         )
         sview_sub = layer_sub["sview"]
         ind_sub_win = _indicators_on_window(layer_sub["hist"], len(sview_sub))
@@ -226,6 +227,7 @@ def analyze_bundle(
             intraday,
             show,
             price_decimals=lambda price, day: price_decimals(price, inst["market"], inst["asset_type"], day),
+            horizon_bars=horizon_bars,
         )
     )
     completed, active_intra, data_note = layer["completed"], layer["active_intra"], layer["data_note"]
@@ -447,12 +449,13 @@ def analyze_bundle(
             "fib_levels": fibs,
             "recent_gaps": gaps,
             "abc_scenario": scenario,
+            "wave_counts": layer["wave_counts"],
             "wedge_structure": wedge_clean,
         },
     }
 
     report: AnalysisReport = {
-        "schema_version": "5.1.0",
+        "schema_version": "5.2.0",
         "meta": meta,
         "request": request,
         "market_benchmark": benchmark_info,
@@ -494,7 +497,7 @@ def analyze_bundle(
             "forecast_promotion_status": future_proj["promotion_status"],
         },
         "reproducibility": {
-            "engine_version": "5.1.0",
+            "engine_version": "5.2.0",
             "bars_hash": compute_canonical_hash([(b["day"], b["close"]) for b in completed[-120:]]),
             "report_hash": "",
         },

@@ -194,3 +194,14 @@ def test_vix_and_events_failures_degrade_with_disclosure(monkeypatch: pytest.Mon
     status = bundle["provenance"]["adjustment_status"]
     assert status["applied"] == "raw" and "503" in status["error"]
     assert classify_data_source(bundle["provenance"]["source"]) == "LIVE"
+
+
+def test_tencent_search_failures_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """名称转代码：网络失败或响应格式异常时报错退出，不凭记忆猜代码。"""
+    import resolve_symbol
+
+    with pytest.raises(RuntimeError, match="腾讯证券搜索接口不可用"):
+        resolve_symbol.resolve("茅台")  # conftest 已断网
+    monkeypatch.setattr(data_gateway, "_http_get", lambda *a, **k: "<html>blocked</html>")
+    with pytest.raises(RuntimeError, match="格式无法识别"):
+        resolve_symbol.resolve("茅台")

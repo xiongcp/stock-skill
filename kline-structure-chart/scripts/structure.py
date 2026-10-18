@@ -6,6 +6,7 @@ analysis.py 与 render_structure_chart.py 都只从这里取结构结果：v5 �
 """
 from __future__ import annotations
 
+import math
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Callable
 
@@ -14,9 +15,13 @@ B_MIN_RETRACE = 0.382       # ABC：B 浪至少收回 A 浪的 0.382
 B_MAX_RETRACE = 0.9         # ABC：B 浪收回超过 A 浪的 0.9 就是双顶/双底或区间，不再按 ABC 划分
 RATIOS = (0.382, 0.618, 1.0)
 EXT_RATIO = 1.618           # 1.000 倍位被触及后追加的延伸测算位
+MAX_ALT_COUNTS = 2          # 主计数之外最多输出的备选浪型计数
+MIN_TRIGGER_ATR = 0.5       # 推演触发位至少离最新收盘价这么多个 ATR，更近的价位只作「正在争夺」披露
+SIGMA_LOOKBACK = 60         # 推演折点时间用的日对数收益 RMS 回看根数（与 forecast.py 同口径）
 RETRACE_RATIOS = (0.382, 0.5, 0.618)
 MIN_RAIL_SPAN = 10          # 轨道两个支点之间至少间隔的K线根数
-FLAT_SLOPE_PCT = 0.03       # 轨道每根K线斜率绝对值 < 价格的 0.03% 视为走平
+RAIL_RECENT_PIVOTS = 4      # 轨道候选只在最近这么多个同类已确认拐点中两两组合（描述当前结构，而非窗口最早的拐点）
+FLAT_ATR_PER_BAR = 0.025   # 轨道每根K线移动不足 0.025×ATR（40 根K线累计不足 1 个 ATR）视为走平
 MARKET_CLOSE = "15:00:00"
 STRUCT_DAYS = 120           # 结构层窗口：轨道/ABC/黄金分割/阶梯/推演只用最近这么多根已收盘K线，与 --days 无关
 HISTORY_BARS = 420          # 结构层 ZigZag 与前高前低阶梯用的历史长度（约 1.7 年），与 --days 无关
@@ -152,50 +157,64 @@ def swing_pivots(completed: list[dict], view_start: int) -> tuple[list[dict], li
         thr = max(0.02, thr * 0.75)
 
 
-def _hull(points: list[tuple[int, float, str]], upper: bool) -> list[tuple[int, float, str]]:
-    """拐点的上/下凸包（单调链）。凸包任意一条边所在直线都在全部拐点的同一侧，天然满足「轨道不被拐点穿越」。"""
-    chain: list[tuple[int, float, str]] = []
-    for pt in points:
-        while len(chain) >= 2:
-            (x1, y1, _), (x2, y2, _) = chain[-2], chain[-1]
-            cross = (x2 - x1) * (pt[1] - y1) - (y2 - y1) * (pt[0] - x1)
-            if (cross >= 0) if upper else (cross <= 0):
-                chain.pop()
-            else:
-                break
-        chain.append(pt)
-    return chain
-
-
-def _pick_edge(chain: list[tuple[int, float, str]]) -> tuple | None:
-    """取最近一条跨度 ≥ MIN_RAIL_SPAN 的凸包边；都不够长则取最长的一条。"""
-    for k in range(len(chain) - 1, 0, -1):
-        if chain[k][0] - chain[k - 1][0] >= MIN_RAIL_SPAN:
-            return chain[k - 1], chain[k]
-    if len(chain) >= 2:
-        return max(zip(chain, chain[1:]), key=lambda edge: edge[1][0] - edge[0][0])
-    return None
-
-
 def rail_at(rail: dict, x: float) -> float:
     return rail["p1"] + rail["slope"] * (x - rail["x1"])
 
 
-def _make_rail(edge: tuple, points: list[tuple[int, float, str]], tol: float) -> dict:
-    (x1, p1, d1), (x2, p2, d2) = edge
-    rail = {"x1": x1, "p1": p1, "day1": d1, "x2": x2, "p2": p2, "day2": d2, "slope": (p2 - p1) / (x2 - x1)}
-    rail["touches"] = [d for x, p, d in points if x >= x1 and abs(p - rail_at(rail, x)) <= tol * rail_at(rail, x)]
-    return rail
+def _fit_rail(points: list[tuple[int, float, str]], view: list[dict], upper: bool, tol: float) -> dict | None:
+    """在同类已确认拐点两两连成的候选直线中打分选出轨道。
+
+    候选线须满足：自第一个支点起，后续同类拐点都不越过该线超过 tol（轨道不被拐点穿越）。
+    评分 = 触及拐点数 + 0.5×跨度占比 + 0.5×末支点新近度 − 2×两支点之间收盘越线的比例；同分取末支点更近的。
+    旧算法固定取凸包最后一条边：上凸包末边斜率最小、下凸包末边斜率最大，几何上偏向「上轨降、下轨升」的收敛形态。
+    """
+    side = 1 if upper else -1
+    n_view = len(view)
+    points = points[-RAIL_RECENT_PIVOTS:]
+    for min_span in (MIN_RAIL_SPAN, 1):
+        best: tuple[tuple[float, int], dict] | None = None
+        for a in range(len(points)):
+            x1, p1, d1 = points[a]
+            later = [(x, p, d) for x, p, d in points if x >= x1]
+            for x2, p2, d2 in points[a + 1 :]:
+                if x2 - x1 < min_span:
+                    continue
+                rail = {"x1": x1, "p1": p1, "day1": d1, "x2": x2, "p2": p2, "day2": d2, "slope": (p2 - p1) / (x2 - x1)}
+                if any((p - rail_at(rail, x)) * side > tol * rail_at(rail, x) for x, p, _ in later):
+                    continue
+                touches = [d for x, p, d in later if abs(p - rail_at(rail, x)) <= tol * rail_at(rail, x)]
+                breach = sum(
+                    1 for k in range(x1, x2 + 1) if (view[k]["close"] - rail_at(rail, k)) * side > tol * rail_at(rail, k)
+                )
+                score = len(touches) + 0.5 * (x2 - x1) / n_view + 0.5 * x2 / max(1, n_view - 1) - 2.0 * breach / (x2 - x1 + 1)
+                if best is None or (score, x2) > best[0]:
+                    best = ((score, x2), {**rail, "touches": touches})
+        if best is not None:
+            return best[1]
+    return None
 
 
-def _classify(su: float, sl: float, width_ratio: float) -> str:
-    """su/sl 为上/下轨每根K线斜率（占现价 %），width_ratio = 今日轨道宽度 / 形态起点宽度。"""
+def _theil_sen_slope(points: list[tuple[int, float, str]]) -> float | None:
+    """拐点价格对下标的 Theil-Sen 稳健斜率（两两斜率的中位数）；不足 3 个拐点时返回 None。"""
+    if len(points) < 3:
+        return None
+    slopes = sorted((p2 - p1) / (x2 - x1) for i, (x1, p1, _) in enumerate(points) for x2, p2, _ in points[i + 1 :] if x2 != x1)
+    mid = len(slopes) // 2
+    return slopes[mid] if len(slopes) % 2 else (slopes[mid - 1] + slopes[mid]) / 2
+
+
+def _direction(slope_pct: float, flat_pct: float) -> int:
+    return 1 if slope_pct > flat_pct else (-1 if slope_pct < -flat_pct else 0)
+
+
+def _classify(su: float, sl: float, width_ratio: float, flat_pct: float) -> str:
+    """su/sl 为上/下轨每根K线斜率（占现价 %），width_ratio = 今日轨道宽度 / 形态起点宽度，flat_pct 为走平阈值（%/根）。"""
 
     def rising(s: float) -> bool:
-        return s > FLAT_SLOPE_PCT
+        return s > flat_pct
 
     def falling(s: float) -> bool:
-        return s < -FLAT_SLOPE_PCT
+        return s < -flat_pct
 
     if width_ratio < 0.8:  # 收敛
         if falling(su) and falling(sl):
@@ -227,12 +246,10 @@ def compute_structure(view: list[dict], pivots: list[dict], cur_idx: int, ref: f
     tol = max(0.006, 0.6 * atr)
     highs = [(p["idx"], p["price"], p["day"]) for p in pivots if p["confirmed"] and p["kind"] == "H"]
     lows = [(p["idx"], p["price"], p["day"]) for p in pivots if p["confirmed"] and p["kind"] == "L"]
-    u_edge = _pick_edge(_hull(highs, upper=True)) if len(highs) >= 2 else None
-    l_edge = _pick_edge(_hull(lows, upper=False)) if len(lows) >= 2 else None
+    upper = _fit_rail(highs, view, upper=True, tol=tol) if len(highs) >= 2 else None
+    lower = _fit_rail(lows, view, upper=False, tol=tol) if len(lows) >= 2 else None
 
-    upper = lower = None
-    if u_edge and l_edge:
-        upper, lower = _make_rail(u_edge, highs, tol), _make_rail(l_edge, lows, tol)
+    if upper and lower:
         x0 = max(upper["x1"], lower["x1"])
         if rail_at(upper, x0) - rail_at(lower, x0) <= 0:
             upper = lower = None
@@ -255,8 +272,25 @@ def compute_structure(view: list[dict], pivots: list[dict], cur_idx: int, ref: f
     width_ratio = width_now / width0 if width0 > 0 else 1.0
     su = upper["slope"] / ref * 100
     sl = lower["slope"] / ref * 100
+    flat_pct = FLAT_ATR_PER_BAR * atr * 100
+    # Theil-Sen 交叉校验：轨道方向与自轨道起点以来同类拐点的稳健回归方向相反时，形态判为不明确
+    fit_check: dict[str, Any] = {"flat_pct_per_bar": round(flat_pct, 4)}
+    conflicts = []
+    for key, rail, pts, slope_pct, label in (("upper", upper, highs, su, "上"), ("lower", lower, lows, sl, "下")):
+        ts = _theil_sen_slope([pt for pt in pts if pt[0] >= rail["x1"]]) if fitted else None
+        ts_pct = None if ts is None else ts / ref * 100
+        consistent = ts_pct is None or _direction(slope_pct, flat_pct) * _direction(ts_pct, flat_pct) >= 0
+        fit_check[key] = {
+            "rail_slope_pct_per_bar": round(slope_pct, 4),
+            "theil_sen_slope_pct_per_bar": None if ts_pct is None else round(ts_pct, 4),
+            "consistent": consistent,
+        }
+        if not consistent:
+            conflicts.append(label)
     if fitted:
-        pattern = _classify(su, sl, width_ratio)
+        pattern = _classify(su, sl, width_ratio, flat_pct)
+        if conflicts:
+            pattern = f"形态不明确（{'、'.join(conflicts)}轨与拐点稳健回归方向相反）"
 
     apex_ahead = None
     apex_day = None
@@ -340,6 +374,7 @@ def compute_structure(view: list[dict], pivots: list[dict], cur_idx: int, ref: f
         "apex_bars_ahead": apex_ahead,
         "apex_day": apex_day,
         "expired": expired,
+        "fit_check": fit_check,
         "_upper": upper,
         "_lower": lower,
     }
@@ -350,18 +385,20 @@ def compute_structure(view: list[dict], pivots: list[dict], cur_idx: int, ref: f
 # ---------------------------------------------------------------------------
 
 
-def _abc_one(window: list[dict], live: dict | None, direction: str, decimals: int = 2) -> dict | None:
-    """单方向 ABC。down：A 浪自窗口最高点下跌；up：A 浪自窗口最低点上涨。"""
+def _abc_one(
+    window: list[dict], live: dict | None, direction: str, decimals: int = 2, start_i: int | None = None
+) -> dict | None:
+    """单方向 ABC。down：A 浪自起点（缺省为窗口最高点）下跌；up：A 浪自起点（缺省为窗口最低点）上涨。"""
     s = -1 if direction == "down" else 1
     a_key = "low" if direction == "down" else "high"  # A 浪终点、C 浪推进方向用的价格
     b_key = "high" if direction == "down" else "low"  # B 浪反向极值用的价格
     n = len(window)
-    if direction == "down":
-        start_i = max(range(n), key=lambda k: (money(window[k]["high"]), -k))
-        start_p = money(window[start_i]["high"])
-    else:
-        start_i = min(range(n), key=lambda k: (money(window[k]["low"]), k))
-        start_p = money(window[start_i]["low"])
+    if start_i is None:
+        if direction == "down":
+            start_i = max(range(n), key=lambda k: (money(window[k]["high"]), -k))
+        else:
+            start_i = min(range(n), key=lambda k: (money(window[k]["low"]), k))
+    start_p = money(window[start_i][b_key])
 
     qualified = []
     for i in range(start_i + 1, n):
@@ -465,6 +502,11 @@ def _abc_one(window: list[dict], live: dict | None, direction: str, decimals: in
         # 盘中标注：不参与情景筛选、C 浪进度与测算位状态
         "intraday_note": "；".join(intraday_notes) + "（未收盘，不作确认）" if intraday_notes else None,
         "invalidation": "日线收盘越过该线才算，盘中刺破不算",
+        # 计数的否定条件：日线收盘反向越过 B 浪终点，说明 C 浪不成立（与上面的情景存在性判定同一口径）
+        "count_invalidation": {
+            "price": float(b_p),
+            "text": f"日线收盘{'站上' if down else '跌破'} B 浪终点 {fmt_price(float(b_p), decimals)}，此计数失效",
+        },
     }
 
 
@@ -474,6 +516,45 @@ def abc_scenario(window: list[dict], live: dict | None, decimals: int = 2) -> di
     if not found:
         return None
     return max(found, key=lambda s: s["a_start"]["idx"])
+
+
+def wave_counts(
+    window: list[dict], live: dict | None, pivots: list[dict], primary: dict | None, atr: float, decimals: int = 2
+) -> list[dict]:
+    """主计数 + 最多 MAX_ALT_COUNTS 个备选计数。
+
+    备选计数的 A 浪起点取窗口极值以及窗口内全部已确认拐点（下跌 ABC 用高点、上涨 ABC 用低点），
+    A 浪终点与 B 浪终点都相同（只是起点不同）或 1.0 倍测算位相距 0.5% 以内的视为同一计数；按 A 浪幅度（ATR 倍数）从大到小取。
+    """
+    ref = float(window[-1]["close"])
+    atr_abs = max(1e-9, atr * ref)
+    cands: list[dict] = []
+    for direction, kind in (("down", "H"), ("up", "L")):
+        anchors = [None] + sorted({p["idx"] for p in pivots if p["confirmed"] and p["kind"] == kind and 0 <= p["idx"] < len(window)})
+        for start_i in anchors:
+            found = _abc_one(window, live, direction, decimals=decimals, start_i=start_i)
+            if found:
+                cands.append(found)
+
+    def same(a: dict, b: dict) -> bool:
+        if a["direction"] != b["direction"]:
+            return False
+        near = lambda x, y: abs(x - y) <= 0.005 * max(abs(y), 1e-9)  # noqa: E731
+        # A 浪终点与 B 浪终点都相同，只是 A 浪起点不同，C 浪的否定条件一样，视为同一数法
+        return (a["a_end"]["idx"] == b["a_end"]["idx"] and a["b_end"]["idx"] == b["b_end"]["idx"]) or near(
+            a["levels"][2]["price"], b["levels"][2]["price"]
+        )
+
+    chosen: list[dict] = []
+    if primary:
+        chosen.append({**primary, "role": "主计数", "a_range_atr": round(primary["a_range"] / atr_abs, 1)})
+    for cand in sorted(cands, key=lambda c: (-c["a_range"], -c["a_start"]["idx"])):
+        if len(chosen) >= (1 if primary else 0) + MAX_ALT_COUNTS:
+            break
+        if any(same(cand, c) for c in chosen):
+            continue
+        chosen.append({**cand, "role": "备选计数", "a_range_atr": round(cand["a_range"] / atr_abs, 1)})
+    return chosen
 
 
 def fib_levels(hi_idx: int, hi_bar: dict, lo_idx: int, lo_bar: dict, ref_price: Decimal) -> dict:
@@ -626,18 +707,42 @@ def _is_major(level: dict) -> bool:
     return any(src.startswith(MAJOR_SOURCE_PREFIXES) for src in level["sources"])
 
 
-def _trigger(levels: list[dict], rails: list[tuple[float, str]], ref: float, cap: float, fallback: float, fallback_src: str) -> tuple[float, str]:
-    """触发位优先级：距现价 cap 以内的形态轨道 → cap（再放宽到 2×cap）以内最近的重要位 → 最近的任意位 → ATR 推算。"""
-    near_rails = [r for r in rails if abs(r[0] / ref - 1) <= cap]
+def _trigger(
+    levels: list[dict], rails: list[tuple[float, str]], ref: float, cap: float, min_dist: float, fallback: float, fallback_src: str
+) -> tuple[float, str]:
+    """触发位优先级：距现价 [min_dist, cap] 内的形态轨道 → 该范围（cap 再放宽到 2×cap）内最近的重要位 → 最近的任意位 → ATR 推算。
+
+    距现价不足 min_dist 的价位落在日常波动噪声里，作为「正在争夺的价位」单独披露，不作触发位。
+    """
+    def far_enough(price: float) -> bool:
+        return abs(price / ref - 1) >= min_dist
+
+    near_rails = [r for r in rails if far_enough(r[0]) and abs(r[0] / ref - 1) <= cap]
     if near_rails:
         return near_rails[0]
     for limit in (cap, 2 * cap):
-        major = next((lvl for lvl in levels if _is_major(lvl) and abs(lvl["price"] / ref - 1) <= limit), None)
+        major = next((lvl for lvl in levels if _is_major(lvl) and far_enough(lvl["price"]) and abs(lvl["price"] / ref - 1) <= limit), None)
         if major:
             return major["price"], _src(major)
-    if levels:
-        return levels[0]["price"], _src(levels[0])
+    rest = next((lvl for lvl in levels if far_enough(lvl["price"])), None)
+    if rest:
+        return rest["price"], _src(rest)
     return fallback, fallback_src
+
+
+def _diffusion_bars(price: float, ref: float, sigma: float) -> float:
+    """按随机游走扩散尺度估计走完 |price/ref−1| 所需的K线根数：t ≈ (距离 / 日波动)²。"""
+    return (abs(price / ref - 1) / max(sigma, 1e-6)) ** 2
+
+
+def _path_slots(trigger_eta: float, target_eta: float, horizon: int) -> tuple[int, int, int]:
+    """路径三个折点（触发、回踩/反抽、目标）的时间槽：取扩散尺度估计，截断在预测期 horizon 以内且严格递增。"""
+    if horizon < 3:
+        return horizon, horizon, horizon
+    t3 = min(horizon, max(3, round(target_eta)))
+    t1 = min(t3 - 2, max(1, round(trigger_eta)))
+    t2 = min(t3 - 1, max(t1 + 1, round((t1 + t3) / 2)))
+    return t1, t2, t3
 
 
 def compute_projections(
@@ -645,7 +750,8 @@ def compute_projections(
     struct: dict,
     ladder: dict,
     atr: float,
-    future_slots: int,
+    horizon_bars: int,
+    sigma: float,
     live_price: float | None = None,
     decimals: int = 2,
 ) -> dict:
@@ -653,6 +759,8 @@ def compute_projections(
 
     ref 是最新已收盘价：三条路径都以日线收盘确认，所以选位以收盘价为基准；盘中时折线从盘中价出发，
     盘中价已越过触发位的，在触发条件里注明「待收盘确认」。
+    触发位至少离现价 MIN_TRIGGER_ATR 个 ATR；折点时间按扩散尺度 (距离/σ)² 估计并截断在 horizon_bars 以内，
+    未截断的估计值写入 eta_bars，超出预测期时 target_within_horizon = False。
     """
     above, below = ladder["resistances"], ladder["supports"]
     start = live_price if live_price is not None else ref
@@ -661,9 +769,22 @@ def compute_projections(
     rails_up = sorted((p, "形态上轨" if p == u else "已跌破的下轨(反压)") for p in live_rails if p > ref)
     rails_dn = sorted(((p, "形态下轨" if p == l else "已突破的上轨(回踩支撑)") for p in live_rails if p < ref), reverse=True)
     cap = max(0.04, 3 * atr)  # 触发位离现价超过 max(4%, 3×ATR) 就失去短线参考意义
-    r1, r1_src = _trigger(above, rails_up, ref, cap, ref * (1 + atr), "1倍ATR上沿")
-    s1, s1_src = _trigger(below, rails_dn, ref, cap, ref * (1 - atr), "1倍ATR下沿")
+    min_dist = MIN_TRIGGER_ATR * atr
+    r1, r1_src = _trigger(above, rails_up, ref, cap, min_dist, ref * (1 + atr), "1倍ATR上沿")
+    s1, s1_src = _trigger(below, rails_dn, ref, cap, min_dist, ref * (1 - atr), "1倍ATR下沿")
     r1, s1 = float(money(r1)), float(money(s1))
+    contested = [
+        {"price": lvl["price"], "sources": lvl["sources"], "side": side}
+        for side, levels in (("above", above), ("below", below))
+        for lvl in levels
+        if abs(lvl["price"] / ref - 1) < min_dist
+    ]
+    contested += [
+        {"price": float(money(p)), "sources": [src], "side": side}
+        for side, rails in (("above", rails_up), ("below", rails_dn))
+        for p, src in rails
+        if abs(p / ref - 1) < min_dist and not any(abs(c["price"] - p) <= p * 0.0025 for c in contested)
+    ]
 
     gap = max(0.01, 0.8 * atr)  # 目标位至少离触发位这么远，才算「下一个」有效位
     height = struct["height_at_start"] if struct["fitted"] else 0.0
@@ -694,16 +815,32 @@ def compute_projections(
     r1_note = "（盘中已站上，待收盘确认）" if live_price is not None and live_price > r1 else ""
     s1_note = "（盘中已跌破，待收盘确认）" if live_price is not None and live_price < s1 else ""
 
-    s1_slot = max(4, int(future_slots * 0.26))
-    s2_slot = max(8, int(future_slots * 0.52))
-    s3_slot = max(14, int(future_slots * 0.86))
-    n1_slot = max(5, int(future_slots * 0.38))  # 黄线转折点与红/绿线错开，避免重叠
-    n2_slot = max(10, int(future_slots * 0.68))
+    horizon = max(1, int(horizon_bars))
+    eta = {
+        "bull": (_diffusion_bars(r1, ref, sigma), _diffusion_bars(bull_target, ref, sigma)),
+        "bear": (_diffusion_bars(s1, ref, sigma), _diffusion_bars(bear_target, ref, sigma)),
+    }
+    b1, b2, b3 = _path_slots(*eta["bull"], horizon)
+    d1, d2, d3 = _path_slots(*eta["bear"], horizon)
+    if horizon < 3:
+        n1 = n2 = horizon
+    else:
+        n1 = min(horizon - 2, max(1, round(_diffusion_bars(neutral_high, ref, sigma))))
+        n2 = min(horizon - 1, max(n1 + 1, round(n1 + _diffusion_bars(neutral_low, neutral_high, sigma))))
+
+    def eta_info(key: str) -> dict:
+        trig, tgt = eta[key]
+        return {"trigger": round(trig, 1), "target": round(tgt, 1)}
 
     return {
         "atr_pct": round(atr * 100, 2),
+        "sigma_1d_pct": round(sigma * 100, 3),
+        "horizon_bars": horizon,
+        "min_trigger_distance_atr": MIN_TRIGGER_ATR,
+        "timing_method": "按扩散尺度 t≈(距离/日波动σ)² 估计折点时间，截断在预测期内",
         "breakout_level": {"price": r1, "source": r1_src},
         "breakdown_level": {"price": s1, "source": s1_src},
+        "contested_levels": sorted(contested, key=lambda c: c["price"], reverse=True),
         "bull": {
             "name": "上攻突破路径",
             "trigger": f"日线放量收盘站上 {fp(r1)}（{r1_src}）{r1_note}",
@@ -711,16 +848,18 @@ def compute_projections(
             "target_price": bull_target,
             "target_source": bull_src,
             "invalidation": f"突破后收盘跌回 {fp(bull_retest)} 下方视为假突破",
-            "waypoints_offset": [(0, start), (s1_slot, r1), (s2_slot, bull_retest), (s3_slot, bull_target)],
-            "step_labels": [(s1_slot, f"突破 {fp(r1)}"), (s2_slot, f"回踩 {fp(bull_retest)}")],
+            "eta_bars": eta_info("bull"),
+            "target_within_horizon": round(eta["bull"][1], 1) <= horizon,  # 与 eta_bars 公布的取整值一致
+            "waypoints_offset": [(0, start), (b1, r1), (b2, bull_retest), (b3, bull_target)],
+            "step_labels": [(b1, f"突破 {fp(r1)}"), (b2, f"回踩 {fp(bull_retest)}")],
         },
         "neutral": {
             "name": "区间震荡路径",
             "range": [neutral_low, neutral_high],
             "target_price": neutral_mid,
             "condition": f"收盘既未站上 {fp(r1)} 也未跌破 {fp(s1)}",
-            "waypoints_offset": [(0, start), (n1_slot, neutral_high), (n2_slot, neutral_low), (s3_slot, neutral_mid)],
-            "step_labels": [(n1_slot, f"受阻 {fp(neutral_high)}"), (n2_slot, f"企稳 {fp(neutral_low)}")],
+            "waypoints_offset": [(0, start), (n1, neutral_high), (n2, neutral_low), (horizon, neutral_mid)],
+            "step_labels": [(n1, f"受阻 {fp(neutral_high)}"), (n2, f"企稳 {fp(neutral_low)}")],
         },
         "bear": {
             "name": "下探破位路径",
@@ -729,8 +868,10 @@ def compute_projections(
             "target_price": bear_target,
             "target_source": bear_src,
             "invalidation": f"跌破后收盘重新站回 {fp(bear_rebound)} 上方视为假跌破",
-            "waypoints_offset": [(0, start), (s1_slot, s1), (s2_slot, bear_rebound), (s3_slot, bear_target)],
-            "step_labels": [(s1_slot, f"破位 {fp(s1)}"), (s2_slot, f"反抽 {fp(bear_rebound)}")],
+            "eta_bars": eta_info("bear"),
+            "target_within_horizon": round(eta["bear"][1], 1) <= horizon,  # 与 eta_bars 公布的取整值一致
+            "waypoints_offset": [(0, start), (d1, s1), (d2, bear_rebound), (d3, bear_target)],
+            "step_labels": [(d1, f"破位 {fp(s1)}"), (d2, f"反抽 {fp(bear_rebound)}")],
         },
     }
 
@@ -740,10 +881,12 @@ def compute_structure_layer(
     intraday: dict | None,
     show: int,
     price_decimals: Callable[[float, str], int] | None = None,
+    horizon_bars: int = 15,
 ) -> dict[str, Any]:
     """一次性计算结构层全部结果，供 JSON 报告与 PNG 渲染共用。
 
     结构窗口固定为 HISTORY_BARS / STRUCT_DAYS，与展示根数 show 无关；show 只影响 view、背景层与展示用波段骨架。
+    horizon_bars 是预测期：推演折点都落在预测期以内，PNG 推演区宽度也随它而定。
     price_decimals(最新已收盘价, 当日) -> 价格文本小数位，由知道市场与品种的调用方传入（与报告同一精度）；
     缺省时按 A 股股票口径 2 位。
     """
@@ -760,7 +903,9 @@ def compute_structure_layer(
     ref_p = money(active_intra["close"]) if active_intra else last_c
     decimals = price_decimals(float(last_c), view[-1]["day"]) if price_decimals else 2
     struct_slots = len(sview) + (1 if active_intra else 0)
-    future_slots = max(28, int(struct_slots * 0.28))
+    future_slots = max(18, int(horizon_bars) + 6)  # 推演区：预测期 + 右侧标签留白
+    log_rets = [math.log(b["close"] / a["close"]) for a, b in zip(completed[-SIGMA_LOOKBACK - 1 : -1], completed[-SIGMA_LOOKBACK:])]
+    sigma = math.sqrt(sum(r * r for r in log_rets) / len(log_rets)) if log_rets else 0.015
 
     s_hi_idx, s_hi = max(enumerate(sview), key=lambda item: (money(item[1]["high"]), -item[0]))
     s_lo_idx, s_lo = min(enumerate(sview), key=lambda item: (money(item[1]["low"]), item[0]))
@@ -768,6 +913,7 @@ def compute_structure_layer(
     # 轨道、ABC、缺口、黄金分割与背景层只用已收盘K线（铁律 0）：盘中K线只进 status_text / intraday_note 标注及折线起点
     wedge = compute_structure(sview, pivots, len(sview) - 1, float(last_c), atr, active_intra)
     scenario = abc_scenario(sview, active_intra, decimals=decimals)
+    counts = wave_counts(sview, active_intra, pivots, scenario, atr, decimals=decimals)
     fibs = fib_levels(s_hi_idx, s_hi, s_lo_idx, s_lo, last_c)
     gaps = find_unfilled_gaps(sview)
     ma_last = {n: None if ma[n][-1] is None else float(money(ma[n][-1])) for n in (20, 60, 120)}
@@ -789,7 +935,8 @@ def compute_structure_layer(
         wedge,
         ladder,
         atr,
-        future_slots,
+        horizon_bars,
+        sigma,
         live_price=float(ref_p) if active_intra else None,
         decimals=decimals,
     )
@@ -819,6 +966,7 @@ def compute_structure_layer(
         "atr": atr,
         "wedge": wedge,
         "scenario": scenario,
+        "wave_counts": counts,
         "fibs": fibs,
         "gaps": gaps,
         "ma_last": ma_last,

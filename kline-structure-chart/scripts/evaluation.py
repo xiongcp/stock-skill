@@ -267,6 +267,92 @@ def _summarize_returns(rets: list[float], years: float) -> dict[str, Any]:
     }
 
 
+def _average_ranks(values: list[float]) -> list[float]:
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        for k in range(i, j + 1):
+            ranks[order[k]] = (i + j) / 2.0
+        i = j + 1
+    return ranks
+
+
+def _spearman(xs: list[float], ys: list[float]) -> float | None:
+    """Spearman 秩相关（并列取平均秩）；样本不足 3 个或任一侧无变化时返回 None。"""
+    if len(xs) < 3:
+        return None
+    rx, ry = _average_ranks(xs), _average_ranks(ys)
+    mx, my = sum(rx) / len(rx), sum(ry) / len(ry)
+    vx = sum((a - mx) ** 2 for a in rx)
+    vy = sum((b - my) ** 2 for b in ry)
+    if vx <= 0 or vy <= 0:
+        return None
+    return sum((a - mx) * (b - my) for a, b in zip(rx, ry)) / math.sqrt(vx * vy)
+
+
+RULE_SCORE_BUCKETS = ((0.0, 38.0), (38.0, 52.0), (52.0, 65.0), (65.0, 100.01))
+MIN_IC_INDEPENDENT_SAMPLES = 20  # 有效独立样本低于此值时，IC 不足以说明规则分有排序能力
+MIN_STABLE_ABS_IC = 0.05
+
+
+def _forward_stats(rets: list[float]) -> dict[str, Any]:
+    if not rets:
+        return {"decisions": 0, "mean_forward_return_pct": None, "median_forward_return_pct": None, "up_share_pct": None}
+    ordered = sorted(rets)
+    mid = len(ordered) // 2
+    median = ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+    return {
+        "decisions": len(rets),
+        "mean_forward_return_pct": round(sum(rets) / len(rets) * 100.0, 2),
+        "median_forward_return_pct": round(median * 100.0, 2),
+        "up_share_pct": round(sum(1 for r in rets if r > 0) / len(rets) * 100.0, 1),
+    }
+
+
+def _decision_diagnostics(rows: list[tuple[float, str, float]], horizon_bars: int, step: int) -> dict[str, Any]:
+    """决策日诊断：规则分与未来 H 日收益的 Spearman IC、规则分分层与各动作的前瞻收益。
+
+    相邻决策日的结果期重叠，有效独立样本约为 决策数 × 步长 / H；IC 只在有效独立样本 ≥ 20 且 |IC| ≥ 0.05 时才视为有排序能力。
+    """
+    scores = [r[0] for r in rows]
+    rets = [r[2] for r in rows]
+    ic = _spearman(scores, rets)
+    eff = len(rows) * max(1, step) // max(1, horizon_bars)
+    informative = ic is not None and eff >= MIN_IC_INDEPENDENT_SAMPLES and abs(ic) >= MIN_STABLE_ABS_IC
+    if ic is None:
+        verdict = "样本不足或规则分无变化，无法计算 IC"
+    elif eff < MIN_IC_INDEPENDENT_SAMPLES:
+        verdict = f"有效独立样本仅约 {eff} 个（< {MIN_IC_INDEPENDENT_SAMPLES}），IC 不稳定，规则分只作描述"
+    elif not informative:
+        verdict = f"|IC| < {MIN_STABLE_ABS_IC}，规则分在该标的上没有显示排序能力，只作描述"
+    elif ic > 0:
+        verdict = "规则分越高、未来收益越高（样本内回放统计，非未来保证）"
+    else:
+        verdict = "规则分与未来收益负相关，规则分在该标的上方向相反，只作描述"
+    return {
+        "rule_score_ic": {
+            "spearman": None if ic is None else round(ic, 3),
+            "decisions": len(rows),
+            "effective_independent_samples": eff,
+            "forward_horizon_bars": horizon_bars,
+            "informative": informative,
+            "verdict": verdict,
+        },
+        "rule_score_buckets": [
+            {"range": [lo, min(hi, 100.0)], **_forward_stats([r[2] for r in rows if lo <= r[0] < hi])}
+            for lo, hi in RULE_SCORE_BUCKETS
+        ],
+        "action_forward_returns": {
+            action: _forward_stats([r[2] for r in rows if r[1] == action])
+            for action in ("LONG_CONFIRMED", "WATCH_LONG_SETUP", "NEUTRAL_HOLD_WAIT", "DEFENSIVE_AVOID")
+        },
+    }
+
+
 def run_plan_backtest(
     bundle: dict[str, Any],
     request: dict[str, Any],
@@ -296,15 +382,18 @@ def run_plan_backtest(
     sub_request = {**request, "display_bars": 120, "account_equity": None}
     trades: dict[str, list[dict[str, Any]]] = {"LONG_CONFIRMED": [], "WATCH_LONG_SETUP": []}
     actions_seen: dict[str, int] = {}
+    veto_counts: dict[str, int] = {}
+    decision_rows: list[tuple[float, str, float]] = []  # (rule_score, action, 未来 H 日收益)
     no_fill = 0
     decisions = 0
+    busy_until = -1  # 持仓期间照常记录决策（用于 IC 与动作前瞻收益），但不重复开仓
 
     t = start
     while t < end:
         cut_day = bars[t]["day"]
         pit_bars = rescale_bars_as_of(bars[: min(n, t + horizon_bars + 2)], t)
         sub_bundle = {
-            "schema_version": "5.1.0",
+            "schema_version": "5.2.0",
             "market": market,
             "target": {"instrument": inst, "bars": pit_bars[: t + 1], "intraday": None},
             "benchmark": {**bench, "bars": [b for b in bench["bars"] if b["day"] <= cut_day]} if bench else None,
@@ -316,6 +405,15 @@ def run_plan_backtest(
         decisions += 1
         action = rep["meta_labeling_decision"]["action"]
         actions_seen[action] = actions_seen.get(action, 0) + 1
+        for code in rep["meta_labeling_decision"].get("veto_codes") or []:
+            veto_counts[code] = veto_counts.get(code, 0) + 1
+        # 前瞻收益用全历史复权价（含分红送转）计算，只用于事后评估，不进入决策
+        decision_rows.append(
+            (float(rep["multi_timeframe_score"]["rule_score"]), action, float(bars[t + horizon_bars]["close"]) / float(bars[t]["close"]) - 1.0)
+        )
+        if t <= busy_until:
+            t += step
+            continue
         if action in trades:
             plan = rep["triple_barrier_plan"]
             entry_low, entry_high = plan["entry_zone"]
@@ -347,8 +445,7 @@ def run_plan_backtest(
                             "plan_take_profit_1": float(plan["take_profit_1"]),
                         }
                     )
-                    t = int(res["exit_idx"]) + 1
-                    continue
+                    busy_until = int(res["exit_idx"])
             else:
                 no_fill += 1
         t += step
@@ -393,6 +490,8 @@ def run_plan_backtest(
         "long_confirmed": _summarize_returns([float(x["net_return"]) for x in trades["LONG_CONFIRMED"]], years),
         "watch_long_setup": _summarize_returns([float(x["net_return"]) for x in trades["WATCH_LONG_SETUP"]], years),
         "buy_and_hold_return_pct": round(bh_ret, 2),
+        "veto_reason_counts": dict(sorted(veto_counts.items(), key=lambda kv: -kv[1])),
+        **_decision_diagnostics(decision_rows, horizon_bars, step),
         "sample_trades": all_trades[-3:],
         "sample_size_warning": (
             f"成交仅 {total} 笔（少于 30），胜率/夏普等统计量置信度很低，仅供参考" if total < 30 else None

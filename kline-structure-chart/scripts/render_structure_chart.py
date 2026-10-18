@@ -872,16 +872,16 @@ def render(
         q90_s = conformal_forecast["q90"]
         h_len = len(q10_s)
         if h_len > 0:
-            s3_slot = projections["bull"]["waypoints_offset"][-1][0]
+            # 第 h 步画在第 h 个未来交易日槽位上（与推演折点同一时间轴，不再按推演终点拉伸）
             start_pt = (x_of(last_bar_idx), yp(float(ref_p)))
             fan80 = [start_pt]
             fan50 = [start_pt]
             for idx_h in range(h_len):
-                slot_x = x_of(last_bar_idx + (idx_h + 1) / h_len * s3_slot)
+                slot_x = x_of(last_bar_idx + idx_h + 1)
                 fan80.append((slot_x, yp(min(max(float(q90_s[idx_h]), pmin), pmax))))
                 fan50.append((slot_x, yp(min(max(float(q75_s[idx_h]), pmin), pmax))))
             for idx_h in range(h_len - 1, -1, -1):
-                slot_x = x_of(last_bar_idx + (idx_h + 1) / h_len * s3_slot)
+                slot_x = x_of(last_bar_idx + idx_h + 1)
                 fan80.append((slot_x, yp(min(max(float(q10_s[idx_h]), pmin), pmax))))
                 fan50.append((slot_x, yp(min(max(float(q25_s[idx_h]), pmin), pmax))))
             draw.polygon(fan80, fill=(56, 189, 248, 28))
@@ -1098,7 +1098,9 @@ def render(
     # 预判区未来时间刻度（只跳过周末，未扣除节假日，故标「≈」）
     base_day = plot[-1]["day"]
     prev_right = nx + tw // 2
-    for f_off in sorted({pt[0] for pt in projections["bull"]["waypoints_offset"][1:]}):
+    # 刻度按预测期等分（约 1/3、2/3 与终点），与各路径的折点时间无关
+    horizon_ticks = int(projections.get("horizon_bars") or projections["bull"]["waypoints_offset"][-1][0])
+    for f_off in sorted({max(1, round(horizon_ticks * k / 3)) for k in (1, 2, 3)}):
         fx = x_of(last_bar_idx + f_off)
         f_date_str = f"≈+{f_off}日({add_trading_days_str(base_day, f_off)})"
         tw, _ = text_size(draw, f_date_str, f_tiny_sm)

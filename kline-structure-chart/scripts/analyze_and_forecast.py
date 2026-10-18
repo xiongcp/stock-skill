@@ -53,6 +53,7 @@ def run_pipeline(
         bundle["target"].get("intraday"),
         int(request.get("display_bars") or 120),
         price_decimals=lambda price, day: price_decimals(price, inst["market"], inst["asset_type"], day),
+        horizon_bars=horizon_bars,
     )
     report = analyze_bundle(bundle, request, include_replay=True, structure=layer)
 

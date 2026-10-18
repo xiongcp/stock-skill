@@ -137,6 +137,34 @@ def render_report_markdown(report: dict[str, Any], backtest: dict[str, Any] | No
         f"| {_cell(sc['bear']['invalidation'])} |",
         "",
     ]
+    horizon_sc = sc.get("horizon_bars")
+    for key, label in (("bull", "上攻"), ("bear", "下探")):
+        eta = sc[key].get("eta_bars")
+        if eta and horizon_sc:
+            reach = f"在 {horizon_sc} 日预测期内" if sc[key].get("target_within_horizon") else f"超出 {horizon_sc} 日预测期"
+            lines += [
+                f"- {label}路径时间尺度：按近 60 日日波动 {sc['sigma_1d_pct']:.2f}% 的随机游走扩散尺度估算，走到触发位约 {max(1.0, eta['trigger']):.0f} 个交易日、"
+                f"走到目标位约 {max(1.0, eta['target']):.0f} 个交易日，{reach}（只是时间量级，不是方向预测）。"
+            ]
+    contested = sc.get("contested_levels") or []
+    if contested:
+        items = "；".join(f"{price(c['price'])}（{'/'.join(c['sources'])}）" for c in contested)
+        lines += [
+            f"- 现价 {sc['min_trigger_distance_atr']} 个 ATR 以内正在争夺的价位：{items}。这些价位落在日常波动范围内，不作触发条件。"
+        ]
+    counts = levels.get("wave_counts") or []
+    if counts:
+        lines += ["", "| 浪型计数 | A 浪 | B 浪终点 | C 浪进度 | 1.0 倍测算位 | 否定条件 |", "| --- | --- | --- | --- | --- | --- |"]
+        for wc in counts:
+            lvl_1 = next((lv for lv in wc["levels"] if lv["ratio"] == 1.0), None)
+            lines += [
+                f"| {wc['role']}：{wc['label']} | {wc['a_start']['day']} {price(wc['a_start']['price'])} → "
+                f"{wc['a_end']['day']} {price(wc['a_end']['price'])}（{wc['a_range_atr']:.1f} 个 ATR） "
+                f"| {wc['b_end']['day']} {price(wc['b_end']['price'])} | {_cell(wc['c_progress']['phase'])} "
+                f"| {price(lvl_1['price']) if lvl_1 else '—'}（{lvl_1['state'] if lvl_1 else '—'}） | {_cell(wc['count_invalidation']['text'])} |"
+            ]
+        lines += ["", "- 浪型计数是对同一段走势的不同数法，备选计数用于提示主计数可能错在哪里，不代表可能性大小。"]
+    lines += [""]
     ladder = levels.get("key_levels") or {}
     res = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("resistances") or [])[:3]]
     sup = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("supports") or [])[:3]]
@@ -174,7 +202,13 @@ def render_report_markdown(report: dict[str, Any], backtest: dict[str, Any] | No
         lines += [f"- 注意：{rules['settlement_note']}。"]
     if rules.get("day_trading_rule"):
         lines += [f"- 日内交易：{rules['day_trading_rule']}。"]
-    if sizing.get("recommended_shares") is not None:
+    if sizing.get("recommended_shares") == 0:
+        lines += [
+            f"- 仓位：账户 {sizing['account_equity']:,.2f}、单笔风险 {sizing['max_risk_pct']:.2f}% 时，"
+            f"风险预算 {sizing['risk_budget_amount']:,.2f} 按止损距离折算不足最小申报 {sizing['min_order_shares']} 股，"
+            "**该计划在此账户与风险比例下没有可执行的股数**。"
+        ]
+    elif sizing.get("recommended_shares") is not None:
         lines += [
             f"- 仓位：账户 {sizing['account_equity']:,.2f}、单笔风险 {sizing['max_risk_pct']:.2f}% 时，"
             f"按止损距离计算为 **{sizing['recommended_shares']} 股**（约 {sizing['estimated_notional']:,.2f} {meta['currency']}）。"
@@ -183,6 +217,30 @@ def render_report_markdown(report: dict[str, Any], backtest: dict[str, Any] | No
         lines += [f"- 仓位：{sizing['reason']}"]
     if debate.get("risk_officer_veto"):
         lines += ["- 风控已否决：以上点位只用于观察与复核，不构成做多建议。"]
+    defense = plan.get("holder_defense_plan") or {}
+    if defense.get("available"):
+        lines += ["", "**持仓防守计划**（已持有该标的时参考）", ""] + [f"- {r}" for r in defense["rules"]]
+        lines += [f"- 下方参考位：{price(defense['downside_reference']['price'])}（{_cell(defense['downside_reference']['source'])}）。"]
+        if defense.get("note"):
+            lines += [f"- {defense['note']}。"]
+    short = plan.get("short_plan") or {}
+    if short.get("available"):
+        lines += [
+            "",
+            "**破位做空计划**（需融券，仅港股/美股）",
+            "",
+            "| 触发 | 入场区 | 止损 | TP1 | TP2 | 时间屏障 | 扣费后盈亏比（未计融券费） |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+            f"| {_cell(short['trigger'])} | {price(short['entry_zone'][0])} ~ {price(short['entry_zone'][1])} "
+            f"| {price(short['stop_loss_barrier'])} | {price(short['take_profit_1'])} | {price(short['take_profit_2'])} "
+            f"| {short['time_barrier_bars']} 根 K 线 | {short['risk_reward_ratio']:.2f} |",
+            "",
+            f"- 失效：{short['invalidation']}。",
+            f"- 交易限制：{short['constraints']}。",
+        ]
+        lines += [f"- 注意：{w}。" for w in short.get("warnings") or []]
+    elif short.get("reason") and asset_type != "index":
+        lines += ["", f"- 做空：{short['reason']}。"]
     lines += [""]
 
     # 5. 形态与信号证据
@@ -270,6 +328,44 @@ def render_report_markdown(report: dict[str, Any], backtest: dict[str, Any] | No
         lines += ["", f"- 同期买入持有收益：{bt.get('buy_and_hold_return_pct', 0):.2f}%。"]
         if bt.get("sample_size_warning"):
             lines += [f"- 样本提示：{bt['sample_size_warning']}。"]
+        ic = bt.get("rule_score_ic") or {}
+        if ic:
+            ic_text = "—" if ic.get("spearman") is None else f"{ic['spearman']:.3f}"
+            lines += [
+                f"- 规则分与未来 {ic['forward_horizon_bars']} 日收益的秩相关 IC = {ic_text}"
+                f"（{ic['decisions']} 个决策日，约 {ic['effective_independent_samples']} 个独立样本）：{ic['verdict']}。"
+            ]
+        afr = bt.get("action_forward_returns") or {}
+        if any(row.get("decisions") for row in afr.values()):
+            lines += [
+                "",
+                f"| 决策日动作 | 次数 | 未来 {ic.get('forward_horizon_bars', horizon)} 日平均收益 | 中位数 | 上涨占比 |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+            action_cn = {
+                "LONG_CONFIRMED": "确认做多",
+                "WATCH_LONG_SETUP": "观察做多",
+                "NEUTRAL_HOLD_WAIT": "观望",
+                "DEFENSIVE_AVOID": "防守回避",
+            }
+            for action, row in afr.items():
+                if not row.get("decisions"):
+                    continue
+                lines += [
+                    f"| {action_cn.get(action, action)} | {row['decisions']} | {row['mean_forward_return_pct']:.2f}% "
+                    f"| {row['median_forward_return_pct']:.2f}% | {row['up_share_pct']:.1f}% |"
+                ]
+            lines += ["", "- 上表是每个决策日之后的实际涨跌，用于检验动作标签是否与后续走势一致，不是交易收益。"]
+        veto_counts = bt.get("veto_reason_counts") or {}
+        if veto_counts:
+            veto_cn = {
+                "BENCHMARK_MISSING": "缺少大盘基准",
+                "BENCHMARK_WEAK": "大盘偏弱",
+                "RR_INSUFFICIENT": "盈亏比不足",
+                "BELOW_LOWER_RAIL": "收盘在下轨下方",
+                "BREAKOUT_LOW_VOLUME": "突破缺量",
+            }
+            lines += ["- 风控否决原因统计：" + "；".join(f"{veto_cn.get(k, k)} {v} 次" for k, v in veto_counts.items()) + "。"]
         if audit_bt:
             lines += [
                 f"- 无前视审计：{'通过' if audit_bt.get('passed') else '未通过'}"

@@ -290,3 +290,19 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 8. **HTML 看板制度栏**：`render_html.py` 仍显示交收制度原始枚举，可复用报告的中文说明。
 9. **Windows**：全流程未实测。
 
+## 6. 第三轮复查（2026-10-17 ~ 2026-10-18）：推演失真修正、一键安装与文档（5.2.0）
+
+方案与证据见仓库根目录 `OPTIMIZATION_PLAN.md`。
+
+| ID | 级别 | 位置 | 问题 | 修复状态与验证测试 |
+| --- | --- | --- | --- | --- |
+| O3-01 | P0 | `structure._fit_rail` | 轨道固定取凸包最后一条边，几何上偏向收敛，85.5% 截面判为收敛形态 | ✅ 最近 4 个拐点候选打分 + Theil-Sen 交叉校验；`test_o3_01_rail_fit_has_no_convergence_bias` |
+| O3-02 | P0 | `structure.compute_projections` | 三条推演折点固定第 8/17/28 根、超出预测期；58.7% 截面的触发位距现价不足 0.5 ATR | ✅ 扩散尺度折点 + 0.5 ATR 最小距离 + `contested_levels`；`test_o3_02_*`、`test_g08_*` |
+| O3-03 | P0 | `structure.wave_counts` | ABC 只有一个锚点、一种数法 | ✅ 主计数 + 最多 2 个备选，各带否定条件；`test_o3_03_*` |
+| O3-04 | P1 | `risk.py` | 只有做多计划；否决原因无编码 | ✅ `holder_defense_plan`、`short_plan`、`veto_codes`；`test_o3_04_*` |
+| O3-05 | P1 | `evaluation.py` | 回测不检验规则分与动作标签的方向信息 | ✅ `rule_score_ic`、分层、动作前瞻收益、否决统计；`test_o3_05_*` |
+| O3-10 ~ O3-18 | P1/P2 | `install.sh`、`install.ps1`、`.claude-plugin/`、`scripts/doctor.py`、`scripts/resolve_symbol.py`、README、`references/*`、`examples/`、CHANGELOG、CI | 无一键安装、不支持名称转代码、文档偏薄 | ✅ 见 `CHANGELOG.md` 5.2.0；`test_tools.py`、`test_docs_contract.py` |
+
+- 未验证：`install.ps1` 未在 Windows 实测；安装后 Claude Code / Codex 新会话能否识别技能未实测。
+- 新暴露的现象（未改动规则）：茅台 2025-08 ~ 2026-09 回放中，"确认做多"之后 15 日平均 −2.90%（45 个决策日），规则分 IC = −0.320（约 17 个独立样本，判定为不稳定）。规则分与动作标签的有效性有待阶段 2 的历史条件频率检验。
+
