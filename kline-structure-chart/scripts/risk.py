@@ -93,17 +93,23 @@ def compute_triple_barrier_plan(
     net_risk = unit_risk + entry_mid * fee_rate
     rr_ratio = round(net_reward / net_risk, 2) if net_risk > 0 else 0.0
 
-    # Independent Risk Officer Veto checks
+    # Independent Risk Officer Veto checks（veto_codes 为稳定编码，供回测统计否决原因）
     veto_reasons: list[str] = []
+    veto_codes: list[str] = []
     if benchmark_info.get("benchmark_missing"):
+        veto_codes.append("BENCHMARK_MISSING")
         veto_reasons.append("缺少大盘基准行情，无法执行先大盘、后个股检查，禁止给出做多确认")
     elif float(benchmark_info.get("regime_score") or 50.0) < 35.0:
+        veto_codes.append("BENCHMARK_WEAK")
         veto_reasons.append(f"大盘环境评分偏弱 ({benchmark_info.get('regime_score')}<35)，压降个股做多评级")
     if rr_ratio < 1.20:
+        veto_codes.append("RR_INSUFFICIENT")
         veto_reasons.append(f"扣除交易成本后 TP1 净盈亏比不足 ({rr_ratio:.2f} < 1.20)")
     if wedge.get("status") == "below":
+        veto_codes.append("BELOW_LOWER_RAIL")
         veto_reasons.append("日线收盘处于结构下轨下方（破位状态未修复）")
     if setup_type == "RIGHT_SIDE_BREAKOUT" and rv < 1.15:
+        veto_codes.append("BREAKOUT_LOW_VOLUME")
         veto_reasons.append(f"上攻突破缺乏成交量配合 (RVOL={rv:.2f} < 1.15)，警惕假突破")
 
     vetoed = len(veto_reasons) > 0
@@ -167,11 +173,16 @@ def compute_triple_barrier_plan(
         "action_cn": action_cn,
         "risk_veto_applied": vetoed,
         "veto_reasons": veto_reasons,
+        "veto_codes": veto_codes,
     }
 
     p_dec = price_decimals(last_c, market, asset_type, as_of_day)
     retest_hold = float(projections["bull"]["retest_hold"])
     bear_target = float(projections["bear"]["target_price"])
+    holder_defense = _holder_defense_plan(market, asset_type, as_of_day, p_dec, projections, stop_loss, s1, r1, bear_target)
+    short_plan = _short_plan(
+        market, asset_type, as_of_day, p_dec, projections, s1, r1, bear_target, atr14, fee_rate, benchmark_info
+    )
 
     tb_plan = {
         "entry_zone": [entry_low, entry_high],
@@ -192,6 +203,8 @@ def compute_triple_barrier_plan(
         "time_stop_rule": f"持仓满 {horizon_bars} 根K线未触及 TP1({tp1:.{p_dec}f}) 且偏离成本不足 0.5*ATR 时触发时间屏障离场",
         "market_microstructure": rules,
         "position_sizing": position_sizing,
+        "holder_defense_plan": holder_defense,
+        "short_plan": short_plan,
     }
 
     # Bull vs Bear structured falsification (TradingAgents style)
@@ -220,6 +233,7 @@ def compute_triple_barrier_plan(
         "bear_case": bear_case[:4],
         "risk_officer_veto": vetoed,
         "veto_reasons": veto_reasons,
+        "veto_codes": veto_codes,
         "final_verdict_cn": (
             f"【{action_cn}】综合规则分 {rule_score:.1f}/100，当前属于「{setup_label_cn}」；"
             f"关键突破位 {r1:.{p_dec}f}，关键防守/止损位 {stop_loss:.{p_dec}f}，TP1 {tp1:.{p_dec}f}（净盈亏比 {rr_ratio:.2f}）。"
@@ -227,3 +241,99 @@ def compute_triple_barrier_plan(
     }
 
     return meta_decision, tb_plan, debate
+
+
+def _holder_defense_plan(
+    market: str,
+    asset_type: str,
+    day: str | None,
+    p_dec: int,
+    projections: dict[str, Any],
+    stop_loss: float,
+    s1: float,
+    r1: float,
+    bear_target: float,
+) -> dict[str, Any]:
+    """已持仓者的防守计划：收盘跌破下方触发位减仓、跌破硬止损离场；跌破后反抽不过反抽上限不宜回补。"""
+    if asset_type == "index":
+        return {"available": False, "reason": "指数不可直接持有，请映射到对应宽基 ETF 后再看防守位"}
+    reduce_level = round_to_tick(s1, market, asset_type, day)
+    exit_level = float(stop_loss)
+    rebound_cap = float(projections["bear"]["rebound_cap"])
+    src = projections["breakdown_level"]["source"]
+    if exit_level < reduce_level:
+        rules = [
+            f"日线收盘跌破 {reduce_level:.{p_dec}f}（{src}）先减仓",
+            f"日线收盘跌破 {exit_level:.{p_dec}f}（硬止损屏障）离场",
+        ]
+    else:
+        rules = [f"日线收盘跌破 {reduce_level:.{p_dec}f}（{src}）离场"]
+    rules.append(f"跌破后反抽收盘未能站回 {rebound_cap:.{p_dec}f} 上方，不宜回补")
+    return {
+        "available": True,
+        "applies_to": "已持仓者",
+        "reduce_level": reduce_level,
+        "exit_level": exit_level,
+        "rebound_cap": rebound_cap,
+        "upside_recheck_level": r1,
+        "downside_reference": {"price": bear_target, "source": projections["bear"]["target_source"]},
+        "rules": rules,
+        "note": "A 股 T+1：当日买入的部分次日才能卖出" if market == "CN" else None,
+    }
+
+
+def _short_plan(
+    market: str,
+    asset_type: str,
+    day: str | None,
+    p_dec: int,
+    projections: dict[str, Any],
+    s1: float,
+    r1: float,
+    bear_target: float,
+    atr14: float,
+    fee_rate: float,
+    benchmark_info: dict[str, Any],
+) -> dict[str, Any]:
+    """港股/美股的破位做空计划（三重屏障镜像）：收盘跌破下方触发位后次日执行，止损在破位位上方 1.5×ATR14 与反抽上限中较高者。
+
+    A 股融券受标的名单、券源与额度限制，指数不可直接交易，均不提供做空计划。融券费用未计入盈亏比。
+    """
+    if asset_type == "index":
+        return {"available": False, "reason": "指数不可直接交易"}
+    if market == "CN":
+        return {"available": False, "reason": "A 股融券受标的名单、券源与额度限制，本技能不提供做空计划；持仓者参考防守计划"}
+    entry_high = round_to_tick(s1, market, asset_type, day)
+    entry_low = round_to_tick(s1 - 0.25 * atr14, market, asset_type, day)
+    entry_mid = (entry_low + entry_high) / 2.0
+    rebound_cap = float(projections["bear"]["rebound_cap"])
+    stop = round_to_tick(max(s1 + 1.5 * atr14, rebound_cap), market, asset_type, day)
+    unit_risk = max(atr14 * 0.5, stop - entry_mid)
+    tp1 = round_to_tick(max(entry_mid * 0.01, entry_mid - 1.5 * unit_risk), market, asset_type, day)
+    tp2 = round_to_tick(max(entry_mid * 0.01, min(entry_mid - 2.5 * unit_risk, bear_target)), market, asset_type, day)
+    net_reward = max(0.0, (entry_mid - tp1) - entry_mid * fee_rate)
+    net_risk = unit_risk + entry_mid * fee_rate
+    rr = round(net_reward / net_risk, 2) if net_risk > 0 else 0.0
+    warnings = []
+    if float(benchmark_info.get("regime_score") or 50.0) >= 65.0:
+        warnings.append(f"大盘环境评分偏强（{benchmark_info.get('regime_score')} ≥ 65），逆势做空风险高")
+    if rr < 1.20:
+        warnings.append(f"扣除交易成本后 TP1 净盈亏比不足（{rr:.2f} < 1.20，且未计融券费用）")
+    constraints = (
+        "港股只能卖空港交所指定的可卖空证券，且须先借入股票（禁止无担保卖空）；融券费用另计，以券商为准"
+        if market == "HK"
+        else "须券商确认可借券（Reg SHO locate 要求）；单日跌幅达 10% 触发 Rule 201 后，当日及次日只能以高于全国最优买价的价格卖空；融券费用另计"
+    )
+    return {
+        "available": True,
+        "trigger": f"日线收盘跌破 {s1:.{p_dec}f}（{projections['breakdown_level']['source']}）后次日执行",
+        "entry_zone": [entry_low, entry_high],
+        "stop_loss_barrier": stop,
+        "take_profit_1": tp1,
+        "take_profit_2": tp2,
+        "time_barrier_bars": projections.get("horizon_bars"),
+        "risk_reward_ratio": rr,
+        "invalidation": f"收盘站回 {stop:.{p_dec}f} 上方止损；收盘站上 {r1:.{p_dec}f} 则空头结构失效",
+        "constraints": constraints,
+        "warnings": warnings,
+    }

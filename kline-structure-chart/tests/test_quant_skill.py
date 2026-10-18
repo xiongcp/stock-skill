@@ -829,11 +829,22 @@ def _closed_conclusions(layer: dict) -> dict:
     if scenario is not None:
         scenario = {k: v for k, v in scenario.items() if k != "intraday_note"}
         scenario["levels"] = [{k: v for k, v in lvl.items() if k != "intraday"} for lvl in scenario["levels"]]
-    wedge = {k: layer["wedge"][k] for k in ("pattern", "fitted", "status", "status_short", "upper_today", "lower_today", "expired")}
+    wedge = {k: layer["wedge"][k] for k in ("pattern", "fitted", "status", "status_short", "upper_today", "lower_today", "expired", "fit_check")}
+    counts = [
+        {
+            **{k: v for k, v in wc.items() if k != "intraday_note"},
+            "levels": [{k: v for k, v in lvl.items() if k != "intraday"} for lvl in wc["levels"]],
+        }
+        for wc in layer["wave_counts"]
+    ]
     proj = layer["projections"]
     paths = {
         "breakout": proj["breakout_level"],
         "breakdown": proj["breakdown_level"],
+        "contested": proj["contested_levels"],
+        "eta": {name: proj[name]["eta_bars"] for name in ("bull", "bear")},
+        # 折点时间只由收盘价与已收盘K线的波动决定，盘中不改变
+        "offsets": {name: [o for o, _ in proj[name]["waypoints_offset"]] for name in ("bull", "neutral", "bear")},
         "bull": [proj["bull"][k] for k in ("retest_hold", "target_price", "target_source")],
         "neutral": [proj["neutral"]["range"], proj["neutral"]["target_price"]],
         "bear": [proj["bear"][k] for k in ("rebound_cap", "target_price", "target_source")],
@@ -842,6 +853,7 @@ def _closed_conclusions(layer: dict) -> dict:
     }
     return {
         "scenario": scenario,
+        "wave_counts": counts,
         "wedge": wedge,
         "fibs": layer["fibs"],
         "background": layer["background"],
@@ -990,3 +1002,167 @@ def test_p2_schema_file_drives_report_validation(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(contracts, "load_report_schema", lambda: stricter)
     with pytest.raises(ValueError, match="brand_new_section"):
         validate_report(report)
+
+
+# ---------------------------------------------------------------------------
+# 第三轮复查 O3：推演失真修正（真实录制行情）
+# ---------------------------------------------------------------------------
+
+O3_SERIES = (
+    *(f"sina_daily/{p.stem}.json" for p in sorted((RECORDED_DIR / "sina_daily").glob("*.json"))),
+    "yahoo_daily/0700.HK.json",
+    "yahoo_daily/1810.HK.json",
+    "yahoo_daily/HSI.json",
+    "yahoo_daily/NVDA.json",
+    "yahoo_daily/SPY.json",
+)
+CONVERGING = ("对称三角形", "上升楔形", "下降楔形", "上升三角形", "下降三角形", "收敛整理")
+
+
+def _o3_layers(step: int = 20, horizon_bars: int = 15):
+    for rel in O3_SERIES:
+        bars = load_recorded(rel)
+        for cut in range(450, len(bars), step):
+            yield rel, bars, cut, compute_structure_layer(bars[: cut + 1], None, 120, horizon_bars=horizon_bars)
+
+
+def _ols_r2_slope(values: list[float]) -> tuple[float, float]:
+    xs = range(len(values))
+    mx, my = (len(values) - 1) / 2, sum(values) / len(values)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, values))
+    sxx = sum((x - mx) ** 2 for x in xs)
+    syy = sum((y - my) ** 2 for y in values)
+    return (sxy * sxy / (sxx * syy) if sxx and syy else 0.0), sxy / sxx
+
+
+def test_o3_01_rail_fit_has_no_convergence_bias() -> None:
+    # 旧算法取凸包最后一条边，1034 个截面中收敛类占 85.5%、对称三角形 42.5%，强趋势截面被判成对称三角形/反向形态 35%
+    patterns: list[str] = []
+    strong = misread = 0
+    for _, _, _, layer in _o3_layers():
+        wedge = layer["wedge"]
+        name = wedge["pattern"].split("（")[0]
+        patterns.append(name)
+        assert {"upper", "lower", "flat_pct_per_bar"} <= set(wedge["fit_check"])
+        if wedge["pattern"].startswith("形态不明确"):
+            assert not (wedge["fit_check"]["upper"]["consistent"] and wedge["fit_check"]["lower"]["consistent"])
+        r2, slope = _ols_r2_slope(causal_nadaraya_watson([b["close"] for b in layer["sview"]], bandwidth=3.0))
+        if r2 >= 0.85:
+            strong += 1
+            wrong = ("对称三角形", "下降楔形", "下降三角形", "下降通道") if slope > 0 else ("对称三角形", "上升楔形", "上升三角形", "上升通道")
+            misread += name in wrong
+    n = len(patterns)
+    assert n >= 400 and strong >= 30
+    assert sum(p in CONVERGING for p in patterns) / n <= 0.65
+    assert patterns.count("对称三角形") / n <= 0.20
+    assert misread / strong <= 0.20, f"强趋势截面误判 {misread}/{strong}"
+
+
+@pytest.mark.parametrize("horizon_bars", [15, 5])
+def test_o3_02_projection_timeline_within_horizon_and_triggers_off_noise(horizon_bars: int) -> None:
+    signatures = set()
+    checked = 0
+    for _, _, _, layer in _o3_layers(step=40, horizon_bars=horizon_bars):
+        proj = layer["projections"]
+        ref = float(layer["last_c"])
+        min_dist = proj["min_trigger_distance_atr"] * proj["atr_pct"] / 100
+        assert proj["horizon_bars"] == horizon_bars
+        for key in ("bull", "neutral", "bear"):
+            offsets = [o for o, _ in proj[key]["waypoints_offset"]]
+            assert offsets[0] == 0 and max(offsets) <= horizon_bars
+            assert offsets == sorted(offsets) and len(set(offsets)) == len(offsets), (key, offsets)
+        for key, level in (("bull", proj["breakout_level"]["price"]), ("bear", proj["breakdown_level"]["price"])):
+            assert abs(level / ref - 1) >= min_dist - 0.0001, (key, level, ref)
+            eta = proj[key]["eta_bars"]
+            assert proj[key]["target_within_horizon"] == (eta["target"] <= horizon_bars)
+        for c in proj["contested_levels"]:
+            assert abs(c["price"] / ref - 1) < min_dist + 0.0001
+        assert layer["future_slots"] >= horizon_bars + 6
+        signatures.add(tuple(o for o, _ in proj["bull"]["waypoints_offset"] + proj["bear"]["waypoints_offset"]))
+        checked += 1
+    assert checked >= 100
+    # 折点时间随距离与波动率变化，不再是固定模板（旧版只有 1 种）
+    assert len(signatures) >= (20 if horizon_bars == 15 else 5)
+
+
+def test_o3_03_wave_counts_primary_plus_distinct_alternates() -> None:
+    with_alt = 0
+    for _, _, _, layer in _o3_layers(step=40):
+        counts = layer["wave_counts"]
+        primary = layer["scenario"]
+        assert len(counts) <= 3
+        if primary:
+            assert counts[0]["role"] == "主计数" and counts[0]["a_start"] == primary["a_start"]
+        for wc in counts:
+            assert wc["count_invalidation"]["price"] == wc["b_end"]["price"]
+            assert wc["a_range_atr"] > 0
+        alts = [wc for wc in counts if wc["role"] == "备选计数"]
+        with_alt += bool(alts)
+        for i, a in enumerate(counts):
+            for b in counts[i + 1 :]:
+                same_ends = a["direction"] == b["direction"] and a["a_end"]["idx"] == b["a_end"]["idx"] and a["b_end"]["idx"] == b["b_end"]["idx"]
+                assert not same_ends, "同一 A/B 终点只是起点不同的计数应去重"
+    assert with_alt >= 50
+
+
+def test_o3_04_defense_and_short_plans_by_market(replay_recorded) -> None:
+    cases = (
+        ("600519.SH", "CN", "equity", False),
+        ("00700.HK", "HK", "equity", True),
+        ("NVDA.US", "US", "equity", True),
+        ("000001.SH", "CN", "index", False),
+    )
+    for symbol, market, asset_type, shortable in cases:
+        req = {"symbol": symbol, "market": market, "asset_type": asset_type, "display_bars": 120, "horizon_bars": 15}
+        report = analyze_bundle(load_bundle(req), req, include_replay=False)
+        plan = report["triple_barrier_plan"]
+        decision = report["meta_labeling_decision"]
+        assert len(decision["veto_codes"]) == len(decision["veto_reasons"])
+        assert report["debate_and_veto"]["veto_codes"] == decision["veto_codes"]
+        defense, short = plan["holder_defense_plan"], plan["short_plan"]
+        s1 = report["rule_scenarios"]["breakdown_level"]["price"]
+        if asset_type == "index":
+            assert defense["available"] is False and short["available"] is False
+            continue
+        assert defense["available"] and defense["exit_level"] <= defense["reduce_level"]
+        assert defense["reduce_level"] == pytest.approx(s1, abs=0.01)
+        assert short["available"] is shortable
+        if shortable:
+            lo, hi = short["entry_zone"]
+            assert short["stop_loss_barrier"] > hi >= lo > short["take_profit_1"] >= short["take_profit_2"] > 0
+            assert short["time_barrier_bars"] == 15 and short["constraints"]
+        else:
+            assert "融券" in short["reason"]
+
+
+def test_o3_05_backtest_reports_rule_score_ic_and_action_forward_returns(replay_recorded) -> None:
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    bt = run_plan_backtest(bundle, req, horizon_bars=15, step=10)
+    decisions = bt["decision_window"]["decisions"]
+    ic = bt["rule_score_ic"]
+    assert ic["decisions"] == decisions and ic["effective_independent_samples"] == decisions * 10 // 15
+    assert ic["spearman"] is None or -1.0 <= ic["spearman"] <= 1.0
+    assert ic["informative"] == (ic["spearman"] is not None and ic["effective_independent_samples"] >= 20 and abs(ic["spearman"]) >= 0.05)
+    assert sum(b["decisions"] for b in bt["rule_score_buckets"]) == decisions
+    assert sum(r["decisions"] for r in bt["action_forward_returns"].values()) == sum(
+        v for k, v in bt["actions_seen"].items() if k in bt["action_forward_returns"]
+    )
+    codes = {"BENCHMARK_MISSING", "BENCHMARK_WEAK", "RR_INSUFFICIENT", "BELOW_LOWER_RAIL", "BREAKOUT_LOW_VOLUME"}
+    assert set(bt["veto_reason_counts"]) <= codes
+    for prev, nxt in zip(bt["sample_trades"], bt["sample_trades"][1:]):
+        assert nxt["entry_idx"] > prev["exit_idx"]
+
+
+def test_o3_report_md_shows_wave_counts_defense_and_short_plans(replay_recorded, tmp_path: Path) -> None:
+    rep = run_pipeline(
+        {"symbol": "00700.HK", "market": "HK", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        output_dir=tmp_path,
+    )
+    md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    plan = rep["triple_barrier_plan"]
+    assert "持仓防守计划" in md and "破位做空计划" in md
+    assert f"{plan['short_plan']['stop_loss_barrier']:.2f}" in md
+    if rep["mathematical_indicators"]["structure_levels"]["wave_counts"]:
+        assert "| 浪型计数 |" in md and "此计数失效" in md
+    assert "只是时间量级，不是方向预测" in md
