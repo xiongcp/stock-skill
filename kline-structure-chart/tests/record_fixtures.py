@@ -3,9 +3,10 @@
 
 用法：
   uv run python tests/record_fixtures.py                    # 全量重录，写入 tests/fixtures/recorded/
-  uv run python tests/record_fixtures.py --only quotes      # 只录指定分组（sina / yahoo / tencent / events / quotes，可逗号分隔）
+  uv run python tests/record_fixtures.py --only quotes      # 只录指定分组（sina / yahoo / tencent / events / quotes / search，可逗号分隔）
 
-录制内容：新浪不复权日线、Yahoo 日线、腾讯指数日线、Yahoo 除权除息事件，以及腾讯行情快照中的证券简称与港股每手股数。
+录制内容：新浪不复权日线、Yahoo 日线、腾讯指数日线、Yahoo 除权除息事件、腾讯行情快照中的证券简称与港股每手股数，
+以及腾讯证券搜索（名称转代码）的原始响应。
 只保存已收盘K线（按交易所时区与收盘时间判定），并在 MANIFEST.json 记录每个文件的录制时间、来源与 sha256。
 """
 from __future__ import annotations
@@ -28,6 +29,7 @@ from data_gateway import (  # noqa: E402
     fetch_yahoo_daily_bars,
 )
 from market_rules import is_daily_bar_complete  # noqa: E402
+from resolve_symbol import fetch_tencent_search_raw  # noqa: E402
 
 OUT = Path(__file__).resolve().parent / "fixtures" / "recorded"
 SINA = {
@@ -53,7 +55,20 @@ QUOTES = (
     "hkHSI", "hkHSTECH", "hk00700", "hk01810", "hk00005",
     "usNVDA", "usSPY", "usBRK.B",
 )
-GROUPS = ("sina", "yahoo", "tencent", "events", "quotes")
+# 腾讯证券搜索（名称/拼音/代码 → 候选列表）：文件名 -> 查询词，保存原始响应供 resolve_symbol 离线回放
+SEARCH = {
+    "maotai_zh": "茅台",
+    "maotai_py": "maotai",
+    "xiaomi_zh": "小米",
+    "tencent_zh": "腾讯",
+    "pingan_bank_zh": "平安银行",
+    "code_000001": "000001",
+    "hs300_zh": "沪深300",
+    "nvda": "nvda",
+    "brk": "brk",
+    "not_found": "zzqqxxnotexist",
+}
+GROUPS = ("sina", "yahoo", "tencent", "events", "quotes", "search")
 
 
 def _completed(bars: list[dict], market: str, now: datetime) -> list[dict]:
@@ -117,6 +132,11 @@ def main() -> None:
         for code in QUOTES:
             _write(f"tencent_quote/{code}.json", fetch_tencent_quote_meta(code), manifest, f"TENCENT qt.gtimg.cn q={code}（简称/每手股数）", now)
             written.append(f"tencent_quote/{code}.json")
+    if "search" in groups:
+        for fname, query in SEARCH.items():
+            payload = {"query": query, "raw": fetch_tencent_search_raw(query)}
+            _write(f"tencent_search/{fname}.json", payload, manifest, f"TENCENT smartbox.gtimg.cn/s3 q={query}（原始响应）", now)
+            written.append(f"tencent_search/{fname}.json")
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: (manifest["files"][k]["rows"], manifest["files"][k]["last_day"]) for k in written}, ensure_ascii=False))
 

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: pytest + 跨窗口不变性（只用录制数据）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装中文字体（PNG 渲染与 doctor 测试需要）
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: 同步依赖（uv.lock 锁定；ta-lib 有 manylinux wheel）
+        run: uv sync --frozen --python 3.12 --directory kline-structure-chart
+
+      - name: 门禁 1：全量 pytest（conftest 统一断网）
+        run: uv run --frozen --directory kline-structure-chart pytest -v
+
+      - name: 门禁 2：v4.1 结构层跨窗口不变性
+        run: uv run --frozen --directory kline-structure-chart python tests/check_days_invariance.py --data tests/fixtures/recorded/sina_daily --step 40
+
+  install:
+    name: install.sh 安装 / 卸载演练（临时 HOME）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: 语法与静态检查
+        run: |
+          bash -n install.sh
+          shellcheck install.sh
+
+      - name: 从本地检出安装、校验软链、卸载
+        run: |
+          set -euo pipefail
+          export UV_CACHE_DIR="$HOME/.cache/uv" UV_PYTHON_INSTALL_DIR="$HOME/.local/share/uv/python"
+          FAKE_HOME="$(mktemp -d)"
+          HOME="$FAKE_HOME" bash install.sh --source "$PWD" --agents claude,codex,gemini --no-test
+          for d in .claude/skills .agents/skills .gemini/skills; do
+            test -L "$FAKE_HOME/$d/kline-structure-chart"
+            test -f "$FAKE_HOME/$d/kline-structure-chart/SKILL.md"
+          done
+          HOME="$FAKE_HOME" bash install.sh --source "$PWD" --agents claude,codex,gemini --no-test
+          HOME="$FAKE_HOME" bash "$FAKE_HOME/.local/share/stock-skill/install.sh" --uninstall
+          test ! -e "$FAKE_HOME/.claude/skills/kline-structure-chart"
+          test ! -e "$FAKE_HOME/.agents/skills/kline-structure-chart"
+          test ! -e "$FAKE_HOME/.local/share/stock-skill"

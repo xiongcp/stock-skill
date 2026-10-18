@@ -369,6 +369,96 @@
       "first_day": null,
       "last_day": null,
       "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "tencent_search/maotai_zh.json": {
+      "kind": "object",
+      "source": "TENCENT smartbox.gtimg.cn/s3 q=茅台（原始响应）",
+      "recorded_at_utc": "2026-10-18T04:23:33+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "0a00e3cfcb642e933f4a2eca4e8cd861b09bdd7fdac5c227a9e7297fe5b81180"
+    },
+    "tencent_search/maotai_py.json": {
+      "kind": "object",
+      "source": "TENCENT smartbox.gtimg.cn/s3 q=maotai（原始响应）",
+      "recorded_at_utc": "2026-10-18T04:23:33+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "636e5e34322813546407b94165f4cad50c21e70e74728ddecceb1141126d656c"
+    },
+    "tencent_search/xiaomi_zh.json": {
+      "kind": "object",
+      "source": "TENCENT smartbox.gtimg.cn/s3 q=小米（原始响应）",
+      "recorded_at_utc": "2026-10-18T04:23:33+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "02a4639a6281c0520acfc7526d24ce610891d79d0a64b16c0d64f0d13077eaa8"
+    },
+    "tencent_search/tencent_zh.json": {
+      "kind": "object",
+      "source": "TENCENT smartbox.gtimg.cn/s3 q=腾讯（原始响应）",
+      "recorded_at_utc": "2026-10-18T04:23:33+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "3292da83dcef820837e8556255bc54d76402fe3681f5d36d273ded668203f16b"
+    },
+    "tencent_search/pingan_bank_zh.json": {
+      "kind": "object",
+      "source": "TENCENT smartbox.gtimg.cn/s3 q=平安银行（原始响应）",
+      "recorded_at_utc": "2026-10-18T04:23:33+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "a5804b64d207e8efb62ae22f7b38e53e499290c3e440c471742c9022553b1781"
+    },
+    "tencent_search/code_000001.json": {
+      "kind": "object",
+      "source": "TENCENT smartbox.gtimg.cn/s3 q=000001（原始响应）",
+      "recorded_at_utc": "2026-10-18T04:23:33+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "6569fb10d658f487497c25465a4601f2d3eb6f7988227e4214d6f5cf2f91da0e"
+    },
+    "tencent_search/hs300_zh.json": {
+      "kind": "object",
+      "source": "TENCENT smartbox.gtimg.cn/s3 q=沪深300（原始响应）",
+      "recorded_at_utc": "2026-10-18T04:23:33+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "717d7ab9f1b101796f988bbe5c6092db8136315019308302d0629faac841abd7"
+    },
+    "tencent_search/nvda.json": {
+      "kind": "object",
+      "source": "TENCENT smartbox.gtimg.cn/s3 q=nvda（原始响应）",
+      "recorded_at_utc": "2026-10-18T04:23:33+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "0c18a4d07ae7163aa70ced4412c7936db950773293142eec534cc3d0942d1c98"
+    },
+    "tencent_search/brk.json": {
+      "kind": "object",
+      "source": "TENCENT smartbox.gtimg.cn/s3 q=brk（原始响应）",
+      "recorded_at_utc": "2026-10-18T04:23:33+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "2800a1ad35ada78b7a354e097d711cc3ea74788de4bd1434f1b455b0700bef10"
+    },
+    "tencent_search/not_found.json": {
+      "kind": "object",
+      "source": "TENCENT smartbox.gtimg.cn/s3 q=zzqqxxnotexist（原始响应）",
+      "recorded_at_utc": "2026-10-18T04:23:33+00:00",
+      "rows": 1,
+      "first_day": null,
+      "last_day": null,
+      "sha256": "71a50d115862ee63c4d7172b6e8973fa46594a72e9080a6bede4677245b547b9"
     }
   }
 }

@@ -1,0 +1,21 @@
+{
+  "name": "stock-skill",
+  "owner": {
+    "name": "xiongcp"
+  },
+  "metadata": {
+    "description": "A股 / 港股 / 美股 K 线结构分析技能（真实行情、确定性计算、JSON + PNG + 离线 HTML）",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "kline-structure-chart",
+      "description": "Deterministic CN/HK/US candlestick structure analysis from real OHLCV data: indicators, patterns, risk levels, calibrated price ranges and plan-replay backtests",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./kline-structure-chart"
+      ]
+    }
+  ]
+}

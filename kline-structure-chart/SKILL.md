@@ -1,6 +1,6 @@
 ---
 name: kline-structure-chart
-description: "Deterministic multi-market (A-share CN / Hong Kong HK / US) candlestick (K-line) technical analysis from real OHLCV data: indicators, swing and candlestick patterns, SMC zones, volume profile, triple-barrier risk levels, a calibrated 15-bar price range and a plan-replay backtest, rendered as JSON + PNG + offline HTML. Use when the user asks to analyze an index, stock or ETF chart, e.g. 上证指数/沪深300/600519.SH/00700.HK/恒生指数/NVDA/SPY; 分析K线、走势、技术形态、支撑压力、买卖点、回测或未来区间. Not for fundamentals, news, earnings, real-time order placement, or personalized investment advice."
+description: "Deterministic multi-market (A-share CN / Hong Kong HK / US) candlestick (K-line) technical analysis from real OHLCV data: indicators, swing and candlestick patterns, SMC zones, volume profile, triple-barrier risk levels, a calibrated 15-bar price range and a plan-replay backtest, rendered as JSON + PNG + offline HTML. Use when the user asks to analyze an index, stock or ETF chart, e.g. 上证指数/沪深300/茅台/600519.SH/小米/00700.HK/恒生指数/NVDA/SPY; 分析K线、走势、技术形态、支撑压力、买卖点、回测或未来区间. Not for fundamentals, news, earnings, real-time order placement, or personalized investment advice."
 license: MIT
 compatibility: "Requires Python 3.12+, uv, and network access to PyPI and to Sina / Yahoo / Tencent market-data endpoints. Without live data the scripts exit with [DATA_UNAVAILABLE] instead of fabricating prices."
 metadata:
@@ -17,37 +17,70 @@ metadata:
 - **使用**：用户要分析某个指数、个股或 ETF 的 K 线结构、技术形态、支撑压力、触发与失效位、风控计划、历史回测或未来区间。
 - **不使用**：基本面、财报解读、新闻事件、资金流向等脚本不计算的内容；替用户下单或给出个性化投资建议。脚本不计算的数据在回答中一律标注"未复核"。
 
-## 一、运行
-
 工作目录为本 `SKILL.md` 所在目录（技能根目录），以下命令均为相对路径。首次运行时 `uv` 会按 `pyproject.toml` 联网安装依赖，取行情同样需要联网。
 
+## 一、第一步：名称转代码
+
+用户给的是完整代码（带 `.SH` / `.SZ` / `.BJ` / `.HK` / `.US` 后缀）时跳过本步。用户只说了名称、拼音或不带后缀的代码（"茅台"、"小米"、"腾讯"、"000001"），**必须先查询，不得凭记忆补全代码**：
+
 ```bash
-# A股指数 / 个股（个股会同步拉取沪深300 基准，施加涨跌停与 T+1 约束）
+uv run python scripts/resolve_symbol.py 茅台
+uv run python scripts/resolve_symbol.py 腾讯 --market HK   # 可用 --market / --asset-type 缩小范围
+```
+
+| 输出 | 处理 |
+| --- | --- |
+| `status = RESOLVED` | 直接使用输出里的 `symbol`、`market`、`asset_type`（`command` 字段是可直接运行的命令） |
+| `status = AMBIGUOUS` | 把 `candidates` 的名称和代码列给用户，请用户选择；不得替用户挑一个 |
+| `[INVALID_ARGUMENT]` 退出 | 搜不到该名称，请用户提供完整代码 |
+| `[DATA_UNAVAILABLE]` 退出 | 腾讯证券搜索接口不可用，请用户直接提供完整代码 |
+
+- 数据源为腾讯证券搜索接口，已过滤港股人民币柜台、美股场外粉单、权证牛熊证和场外基金。
+- 北交所股票目前搜不到，请用户提供 `.BJ` 代码；港股 ETF 按名称含"ETF"识别，其余按股票处理。
+
+## 二、问题类型 → 命令参数
+
+基础命令：`uv run python scripts/analyze_and_forecast.py --market <CN|HK|US> --symbol <代码> --asset-type <index|equity|etf> --output-dir artifacts/<目录>`，再按问题追加参数：
+
+| 用户的问题 | 追加参数 | 说明 |
+| --- | --- | --- |
+| 看结构、形态、支撑压力、触发与失效位 | 无 | 默认即可 |
+| 能不能买、风控计划、止损止盈 | 无 | 读报告第 4 节；风控否决时只给观察位 |
+| 买多少股、仓位 | `--account-equity <净值>`，可加 `--max-risk-pct 0.005` | 只在用户给出账户净值时传入；默认单笔风险 1% |
+| 历史表现、回测、这套规则靠不靠谱 | `--backtest`（慢时加 `--backtest-step 5`） | 生成 `*_backtest.json` |
+| 未来几天的波动区间 | `--horizon-bars <N>`（1~60，默认 15） | 只描述幅度，不含方向 |
+| 想看更长或更短的图 | `--days <N>`（60~500，默认 120） | 只影响显示，不影响任何计算结果 |
+| 复盘某个历史日期 | `--as-of YYYY-MM-DD` | 只用截至该日已收盘的数据 |
+| 港股 ETF | `--asset-type etf` | 港股 ETF 无法从代码识别（ETF 免印花税） |
+| 看不复权的原始价 | `--adjustment raw` | 默认个股/ETF 前复权含分红，指数不复权 |
+| 换一个对比基准 | `--benchmark <代码>` | 默认 A 股沪深300、港股恒生指数、美股 SPY |
+| 用户提供了本地真实行情文件 | `--input <文件> --offline` | 本地文件无大盘数据，质量为 `PARTIAL` |
+| 上市前 5 日的新股 | `--ipo-no-limit` | 不设涨跌幅 |
+| 同时看几个标的（如上证和创业板） | 每个标的单独运行 | 每个标的单独成段，点位不得混用 |
+
+示例：
+
+```bash
 uv run python scripts/analyze_and_forecast.py --market CN --symbol 000001.SH --asset-type index --output-dir artifacts/cn_index --backtest
 uv run python scripts/analyze_and_forecast.py --market CN --symbol 600519.SH --asset-type equity --account-equity 500000 --output-dir artifacts/cn_stock --backtest
-
-# 港股（基准恒生指数）与美股（基准 SPY）
 uv run python scripts/analyze_and_forecast.py --market HK --symbol 00700.HK --asset-type equity --output-dir artifacts/hk_stock --backtest
 uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --asset-type equity --output-dir artifacts/us_stock --backtest
 ```
 
-- 代码格式：`600519.SH` / `000002.SZ` / `830799.BJ` / `00700.HK` / `HSI.HK` / `NVDA.US`。
-- `--days 60~500` 只改变主图显示根数，不影响任何计算结果。
-- 默认复权为个股/ETF 前复权含分红（`total_return`），指数为原始价。
-- `--account-equity` 只在用户给出账户净值时传入；未提供时报告不会给出股数。
-- 证券简称、A 股 ST/\*ST 标识与港股每手股数自动取自腾讯行情快照；取不到时报告 `quality.notes` 会写明，可用 `--name` / `--st` 手动指定。`--ipo-no-limit` 标记上市前 5 日无涨跌停新股，`--color-scheme` 切换涨跌配色。
+- 证券简称、A 股 ST/\*ST 标识与港股每手股数自动取自腾讯行情快照；取不到时报告 `quality.notes` 会写明，可用 `--name` / `--st` 手动指定。`--color-scheme` 切换涨跌配色。
 - 生产与测试一律禁止合成数据：不传 `--input` 本地真实行情文件时，断网或数据源异常会直接以 `[DATA_UNAVAILABLE]` 退出。
+- 环境有问题时先运行 `uv run python scripts/doctor.py`，逐项查看 Python、依赖、中文字体、数据源连通和技能注册。
 
 产物（文件名以标的代码开头）：
 - `*_report.md`：按下文"回复契约"组织好的中文分析报告，数字全部取自 `*_result.json`，**回答用户时以它为骨架**。
-- `*_result.json`：全部计算结果，已通过 `assets/analysis.schema.json` 顶层契约校验。
+- `*_result.json`：全部计算结果，已通过 `assets/analysis.schema.json` 顶层契约校验。字段含义见 `references/output-fields.md`。
 - `*_preview.png`：结构推演图，配色随市场（A股/港股红涨绿跌，美股绿涨红跌）。
 - `*_dashboard.html`：离线交互看板，提供 7 个图层开关、悬停查看 OHLC/均线/RSI/预测分位、相对强弱切换、历史回放滑块和导出 PNG。
 - `*_backtest.json`（传 `--backtest` 时生成）：线上计划逐日回放的成交统计，以及区间样本外覆盖率。
 
 数据质量不是 `OK` 时，PNG 和 HTML 都会带红色告警横幅与水印。
 
-## 二、运行后必检（按顺序，任一不满足即停止解读）
+## 三、运行后必检（按顺序，任一不满足即停止解读）
 
 1. **退出码**：脚本非零退出时不输出任何价位。`[DATA_UNAVAILABLE]` 表示真实行情取不到，如实告诉用户原因，不得改用合成或估算数据；`[INVALID_ARGUMENT]` 表示代码或参数有误，按"失败处理"请用户补充。
 2. **`quality.status`**：
@@ -57,10 +90,11 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 3. **`quality.notes`**：逐条转述，例如"某日 K 线未收盘，已排除出计算"、"数据只到某日，最近已收盘交易日的日线数据源尚未提供"、"复权未生效"、"未来日期超出休市表覆盖范围，按工作日估算"。
 4. **空值**：`future_projection_15d.volatility_scaling.vix` 为 `null` 表示没有取得 VIX，不得自行补数。
 
-## 三、回复契约（按此顺序组织回答）
+## 四、回复契约（按此顺序组织回答）
 
-`*_report.md` 已按以下顺序写好，直接据此转述即可：不得改动其中任何数字，不得补充报告里没有的价位；用户追问细节时再查 `*_result.json`。
+`*_report.md` 已按以下顺序写好，直接据此转述即可：不得改动其中任何数字，不得补充报告里没有的价位；用户追问细节时再查 `*_result.json`（字段字典见 `references/output-fields.md`，解读要点见 `references/interpretation-guide.md`）。
 
+0. **先答所问**：用 1~2 句话、只用报告里的数字直接回答用户的具体问题，再展开下面各部分。
 1. **数据说明**：数据源（`meta.data_source`）、截止日（`meta.as_of`）、复权口径（`meta.adjustment`），以及上一步需要转述的告警或备注。
 2. **大盘先行**：基准的 `market_benchmark.regime`、`regime_score`，以及个股的 `relative_strength_vs_index`。
 3. **结构与规则**：
@@ -70,30 +104,61 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 4. **风控**：
    - `debate_and_veto.risk_officer_veto` 为 `true` 时，**置顶**列出 `veto_reasons`，不得给出做多建议。
    - 否则给出 `triple_barrier_plan` 的入场区、止损、TP1/TP2 与时间屏障。
+   - 做空、融券、卖空限制只按对应市场的制度手册（`references/cn-market.md`、`references/hk-market.md`、`references/us-market.md`）说明，不得给出报告中没有的做空点位。
 5. **未来 15 日区间**：
    - `future_projection_15d` 以最新收盘价为中心（`q50_method = MARTINGALE_LAST_CLOSE`），只描述波动幅度，不包含方向判断，不得把 q75/q25 说成看涨/看跌概率。
    - 必须同时给出 `calibration_audit` 的实测覆盖率与 `effective_independent_samples`。
    - `promotion_status` 为 `RESEARCH_CALIBRATION_WARMUP` 时称"校准观察期"，不得把覆盖率说成区间已验证可靠；有效独立样本低于 `min_effective_independent_samples`（20）时不会晋级（判定见 `references/math-patterns.md` 第 5 节）。
-6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。
+6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率（带 95% 区间）、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。
 7. **文件**：给出 `result.json` 与 `dashboard.html` 的路径；客户端能显示图片时再内嵌 `preview.png`，否则只给路径。
 8. **免责声明**：结尾注明"以上为规则化技术分析，仅供研究参考，不构成投资建议"。
 
-## 四、失败处理
+## 五、对外表述与概率规则
+
+- `rule_score`、`regime_score`、过滤分都是确定性规则打分，**不是**胜率、概率或置信度；Volume Profile 是成交分布近似，不是真实持仓筹码。
+- 只允许两类概率，而且**只有 JSON 中存在对应字段时才能说出数字**：
+  1. **历史条件频率**：脚本在该标的自身历史上无前视统计的"情景触发后先到目标 / 先到失效 / 到期"频率。必须写成"历史条件频率 X%（n = …，95% 区间 a%~b%）"，不叫胜率、不叫上涨概率。字段为 `rule_scenarios[*].historical_frequency`（尚未提供）。
+  2. **主观研判概率**：由你（运行技能的 agent）以历史条件频率为锚点做有界调整，引用证据编号、不超过调整上限、写入研判 JSON 并通过校验脚本后才能给出，必须标注"主观研判，已记录待检验"。字段为 `*_judgment.json`（尚未提供）。
+- **当前版本没有上述任何字段**：回答中不得出现"上涨概率 60%""胜算七成""大概率突破"这类概率数字或等价说法。唯一可以转述的百分比统计是报告里已有的回测成交胜率（附 95% 区间与样本量提示）和区间覆盖率，且不得说成未来概率。
+- 推演路径只写"触发条件 → 目标位 → 失效条件"；15 个交易日的方向本身接近随机，不得承诺涨跌。
+
+## 六、失败处理
 
 | 情况 | 处理 |
 | --- | --- |
-| `[DATA_UNAVAILABLE]`（网络失败、代码无法映射、限流、数据损坏） | 转述错误原因，请用户核对代码格式或稍后重试；不估算、不改用合成数据 |
-| `[INVALID_ARGUMENT]`（`Cannot resolve market` / `Ambiguous symbol` / 参数越界） | 请用户补充交易所后缀或 `--market`，例如 `000001.SH`（上证指数）与 `000001.SZ`（平安银行）的区别；参数越界时改正后重跑 |
+| `[DATA_UNAVAILABLE]`（网络失败、代码无法映射、限流、数据损坏） | 转述错误原因，请用户核对代码格式或稍后重试；不估算、不改用合成数据。可运行 `scripts/doctor.py` 定位是哪个数据源不通 |
+| `[INVALID_ARGUMENT]`（`Cannot resolve market` / `Ambiguous symbol` / 参数越界） | 先用 `scripts/resolve_symbol.py` 查代码，仍不确定就请用户补充交易所后缀，例如 `000001.SH`（上证指数）与 `000001.SZ`（平安银行）的区别；参数越界时改正后重跑 |
 | `历史长度不足` | 说明该标的上市时间太短或 `--as-of` 太早，无法计算 |
 | 基准指数取不到 | 整次分析失败，按 `[DATA_UNAVAILABLE]` 处理（不得跳过大盘直接分析个股） |
 | `quality.notes` 提示复权未生效（如北交所） | 告知价格为不复权原始价，除权缺口可能被误识别 |
 | `quality.notes` 提示港股每手股数或证券简称未取得 | 转述该提示；仓位股数按假设值计算，提醒用户下单前向券商核对 |
+| `no CJK font found` | 缺中文字体，按 `scripts/doctor.py` 给出的命令安装后重跑 |
 | 用户要求下单、预测确定涨跌或给出个性化仓位 | 说明本技能只做规则化技术分析，不替用户交易、不承诺方向 |
 
-## 五、参考文档（按需读取）
+## 七、回复示例
 
+以下示例节选自仓库 `examples/` 中用真实行情生成的报告（贵州茅台，数据截至 2026-10-16）。**示例里的数字只用来说明格式，回答时一律使用本次运行的输出。**
+
+用户问："茅台现在能买吗？"
+
+正确的回复开头：
+
+> 风控已否决做多：大盘环境评分偏弱（沪深300 状态分 16.0 < 35），以下点位只用于观察，不构成做多建议。
+>
+> 数据为新浪日线，截至 2026-10-16，前复权含分红，数据质量 OK。规则分 81.0/100（多周期多头共振），这是规则加权分，不是胜率。结构上是对称三角形，10-16 起收盘站上上轨 1 个交易日：上攻需日线放量收盘站上 1329.88，目标 1351.22，收盘跌回 1321.31 下方视为假突破；下探以收盘跌破 1312.19 为触发，目标 1291.44。……（大盘、风控、区间、回测、文件、免责声明依次展开）
+
+错误的回复（不得这样写）：
+
+> ~~茅台突破三角形，上涨概率约 70%，建议 1330 附近买入，目标 1400。~~
+
+错在：没有置顶风控否决；编造了概率；1400 不在报告里；给出了个性化买入建议。
+
+## 八、参考文档（按需读取）
+
+- `references/output-fields.md`：`result.json` / `backtest.json` 每个字段的含义、单位、取值范围、能否为空和对外怎么说。用户追问某个字段时阅读。
+- `references/interpretation-guide.md`：形态、浪型、市场状态、风控计划、未来区间和回测的解读要点与常见误读。
 - `references/math-patterns.md`：用户追问某个指标、形态或预测区间如何计算时阅读。
-- `references/cn-market.md`：A股涨跌停（主板 ±10%、双创 ±20%、北交所 ±30%，ST 按板块与日期区分）、T+1、代码识别、复权与交易日历。
-- `references/hk-market.md`：港股价位表（含 2025-08 / 2026-08 两期下调）、双边印花税、恒生科技指数数据源。
-- `references/us-market.md`：美股 T+1 结算、PDT 规则取消后的过渡期、VIX 与财报窗口说明。
+- `references/cn-market.md`：A股交易时段与集合竞价、涨跌停（主板 ±10%、双创 ±20%、北交所 ±30%，ST 按板块与日期区分）、科创板与北交所申报细则、T+1、融券限制、代码识别、复权与交易日历。
+- `references/hk-market.md`：港股交易时段与收市竞价、价位表（含 2025-08 / 2026-08 两期下调）、碎股、卖空规则、双边印花税、恒生科技指数数据源。
+- `references/us-market.md`：美股常规与盘前盘后时段、T+1 结算、PDT 规则取消后的过渡期、Reg SHO 卖空规则、VIX 与财报窗口说明。
 - `references/failure-modes.md`：撰写文字分析前对照，避免常见的数字与表述错误。
