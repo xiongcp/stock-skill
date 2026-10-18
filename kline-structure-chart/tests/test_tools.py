@@ -68,6 +68,14 @@ def test_resolve_symbol_filters_unsupported_listings(replay_search) -> None:
             assert not (c["market"] == "HK" and code.startswith("8")), c
             assert c["vendor_type"] in resolve_symbol._TYPE_MAP, c
     assert "BRK.B.US" in {c["symbol"] for c in resolve_symbol.resolve("brk")["candidates"]}
+    # 过滤深市 988xxx 外币镜像指数，并支持常见指数口语别名（沪指 / 恒生科技 / 标普500 / 纳指）
+    raw_cyb = 'v_hint="sz~399006~创业板指~cybz~ZS^sz~988007~创业板指(美元)(CNH)~cybzmy~ZS";'
+    cyb = resolve_symbol.resolve("创业板指", raw=raw_cyb)
+    assert [c["symbol"] for c in cyb["candidates"]] == ["399006.SZ"]
+    assert resolve_symbol.resolve("沪指", raw='v_hint="N";')["symbol"] == "000001.SH"
+    assert resolve_symbol.resolve("恒生科技", raw='v_hint="N";')["symbol"] == "HSTECH.HK"
+    assert resolve_symbol.resolve("标普500", raw='v_hint="N";')["symbol"] == "SPY.US"
+    assert resolve_symbol.resolve("纳指", raw='v_hint="N";')["symbol"] == "QQQ.US"
 
 
 def test_resolve_symbol_not_found_exits_invalid_argument(replay_search, monkeypatch: pytest.MonkeyPatch, capsys) -> None:

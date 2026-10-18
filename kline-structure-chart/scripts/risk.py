@@ -128,10 +128,13 @@ def compute_triple_barrier_plan(
         veto_reasons.append(f"上攻突破缺乏成交量配合 (RVOL={rv:.2f} < 1.15)，警惕假突破")
 
     vetoed = len(veto_reasons) > 0
-    if not vetoed and rule_score >= 65.0 and setup_type in ("RIGHT_SIDE_BREAKOUT", "LEFT_SIDE_PULLBACK"):
+    ema20 = float(ind_snapshot["trend"].get("ema20") or last_c)
+    rsi14 = float(ind_snapshot["momentum"].get("rsi14") or 50.0)
+    overextended = ((last_c - ema20) / atr14 > 2.0) or (rsi14 >= 70.0)
+    if not vetoed and not overextended and rule_score >= 65.0 and setup_type in ("RIGHT_SIDE_BREAKOUT", "LEFT_SIDE_PULLBACK"):
         action = "LONG_CONFIRMED"
         action_cn = "右侧/结构看多确认"
-    elif not vetoed and rule_score >= 52.0:
+    elif not vetoed and not overextended and rule_score >= 52.0:
         action = "WATCH_LONG_SETUP"
         action_cn = "条件观察（待放量/收盘确认）"
     elif rule_score <= 38.0 or wedge.get("status") == "below":

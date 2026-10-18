@@ -37,6 +37,24 @@ _TYPE_MAP = {
 # 港股指数只支持有数据源的两个（见 references/hk-market.md）
 _HK_INDICES = ("HSI", "HSTECH")
 
+# 常见口语指数简称 → KNOWN_INSTRUMENTS 中的权威基准代码（仍须先经过搜索接口，满足断网即报错契约）
+_CANONICAL_INDEX_ALIASES: dict[str, dict[str, str]] = {
+    "沪指": {"symbol": "000001.SH", "market": "CN", "asset_type": "index", "name": "上证指数", "vendor_type": "ZS"},
+    "上证": {"symbol": "000001.SH", "market": "CN", "asset_type": "index", "name": "上证指数", "vendor_type": "ZS"},
+    "深成指": {"symbol": "399001.SZ", "market": "CN", "asset_type": "index", "name": "深证成指", "vendor_type": "ZS"},
+    "深证成指": {"symbol": "399001.SZ", "market": "CN", "asset_type": "index", "name": "深证成指", "vendor_type": "ZS"},
+    "恒指": {"symbol": "HSI.HK", "market": "HK", "asset_type": "index", "name": "恒生指数", "vendor_type": "ZS"},
+    "恒生科技": {"symbol": "HSTECH.HK", "market": "HK", "asset_type": "index", "name": "恒生科技指数", "vendor_type": "ZS"},
+    "恒科": {"symbol": "HSTECH.HK", "market": "HK", "asset_type": "index", "name": "恒生科技指数", "vendor_type": "ZS"},
+    "恒生科技指数": {"symbol": "HSTECH.HK", "market": "HK", "asset_type": "index", "name": "恒生科技指数", "vendor_type": "ZS"},
+    "标普500": {"symbol": "SPY.US", "market": "US", "asset_type": "etf", "name": "标普500 ETF (SPY)", "vendor_type": "ETF"},
+    "标普": {"symbol": "SPY.US", "market": "US", "asset_type": "etf", "name": "标普500 ETF (SPY)", "vendor_type": "ETF"},
+    "纳指": {"symbol": "QQQ.US", "market": "US", "asset_type": "etf", "name": "纳斯达克100 ETF (QQQ)", "vendor_type": "ETF"},
+    "纳指100": {"symbol": "QQQ.US", "market": "US", "asset_type": "etf", "name": "纳斯达克100 ETF (QQQ)", "vendor_type": "ETF"},
+    "纳斯达克": {"symbol": "QQQ.US", "market": "US", "asset_type": "etf", "name": "纳斯达克100 ETF (QQQ)", "vendor_type": "ETF"},
+    "纳斯达克100": {"symbol": "QQQ.US", "market": "US", "asset_type": "etf", "name": "纳斯达克100 ETF (QQQ)", "vendor_type": "ETF"},
+}
+
 
 def fetch_tencent_search_raw(query: str) -> str:
     """调用腾讯证券搜索接口，返回原始响应文本（形如 v_hint="sh~600519~\\u8d35...~gzmt~GP-A^..."）。"""
@@ -85,6 +103,10 @@ def to_candidate(row: dict[str, str]) -> dict[str, Any] | None:
     if exchange in ("sh", "sz", "bj"):
         if not re.fullmatch(r"\d{6}", code):
             return None
+        if asset_type == "index" and not (
+            (exchange == "sh" and code.startswith("000")) or (exchange == "sz" and code.startswith("399"))
+        ):
+            return None
         symbol, market = f"{code}.{exchange.upper()}", "CN"
     elif exchange == "hk":
         if asset_type == "index":
@@ -132,6 +154,10 @@ def resolve(
         raise ValueError(f"查询词长度须为 1~{MAX_QUERY_LEN} 个字符: {query!r}")
     rows = parse_search_response(raw if raw is not None else fetch_tencent_search_raw(q))
     candidates: list[dict[str, Any]] = []
+    nq = _norm(q)
+    alias_cand = _CANONICAL_INDEX_ALIASES.get(nq)
+    if alias_cand and (not market or alias_cand["market"] == market) and (not asset_type or alias_cand["asset_type"] == asset_type):
+        candidates.append(dict(alias_cand))
     for row in rows:
         cand = to_candidate(row)
         if not cand or any(c["symbol"] == cand["symbol"] for c in candidates):
@@ -144,9 +170,10 @@ def resolve(
     if not candidates:
         scope = "".join(f" {k}={v}" for k, v in (("market", market), ("asset_type", asset_type)) if v)
         raise ValueError(f"找不到与 {q!r}{scope} 对应的 A股/港股/美股 代码，请提供完整代码（如 600519.SH、00700.HK、NVDA.US）")
-    nq = _norm(q)
     # 名称或代码完全一致的候选（如"平安银行"、"00700"、"nvda"）优先于模糊匹配
     exact = [c for c in candidates if nq in (_norm(c["name"]), c["symbol"].lower(), c["symbol"].rsplit(".", 1)[0].lower())]
+    if not exact and alias_cand and candidates and candidates[0]["symbol"] == alias_cand["symbol"]:
+        exact = [candidates[0]]
     chosen = exact if len(exact) == 1 else candidates if len(candidates) == 1 else None
     out: dict[str, Any] = {"query": q, "source": SOURCE, "status": "RESOLVED" if chosen else "AMBIGUOUS"}
     if chosen:

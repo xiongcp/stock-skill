@@ -98,6 +98,7 @@
   - 入场区 `entry_zone` 围绕最新收盘价 $C_{\text{now}}$ 的可成交价格带构造（不把远端上方阻力 $R_1$ 当作入场区上沿）：右侧突破确认取 $[\max(S_1, C_{\text{now}}-0.35\,\text{ATR}_{14}),\ \min(R_1, C_{\text{now}}+0.30\,\text{ATR}_{14})]$（若 $C_{\text{now}} \ge R_1$ 则取 $[\min(C_{\text{now}}, 0.996 R_1),\ \max(C_{\text{now}}, 1.005 R_1)]$）；左侧回踩观察取 $[\max(0.995 S_1, C_{\text{now}}-0.45\,\text{ATR}_{14}),\ \min(R_1, C_{\text{now}}+0.20\,\text{ATR}_{14})]$；区间观察取 $[\max(S_1, C_{\text{now}}-0.40\,\text{ATR}_{14}),\ \min(R_1, C_{\text{now}}+0.35\,\text{ATR}_{14})]$。
   - 止损位 `stop_loss_barrier`：右侧突破取 $\min(S_1,\ \max(S_1-0.25\,\text{ATR}_{14},\ C_{\text{now}}-1.35\,\text{ATR}_{14}))$；左侧回踩与区间观察取 $\min(S_1-0.15\,\text{ATR}_{14},\ \max(S_1-0.50\,\text{ATR}_{14},\ C_{\text{now}}-1.45\,\text{ATR}_{14}))$。
   - 第一目标位 `take_profit_1`：设入场中值为 $E$，单位风险 $R = \max(0.5\,\text{ATR}_{14}, E - \text{止损})$，15 日有效摆动风险 $R_{\text{eff}} = \min(R, 1.50\,\text{ATR}_{14})$，上方结构上限 $U = \max(R_1, \text{上攻目标})$（非突破态且 $R_1 \ge E + 1.15 R$ 时取 $U = R_1$），则 $\text{TP1} = \min(U,\ E + 1.5 R_{\text{eff}})$。当上方结构空间受阻或止损距离过大导致扣费后净盈亏比 $< 1.20$ 时，触发 `RR_INSUFFICIENT` 否决。
+  - 短期极度超买防追高过滤：当 $(C_{\text{now}} - \text{EMA}_{20}) / \text{ATR}_{14} > 2.0$ 或 $\text{RSI}_{14} \ge 70$ 时，不给出 `LONG_CONFIRMED` / `WATCH_LONG_SETUP` 追高信号，降级为 `NEUTRAL_HOLD_WAIT`（观望等待回踩）。
 - **持仓防守**（`triple_barrier_plan.holder_defense_plan`，指数不适用）：
   - 日线收盘跌破下探触发位 $S_1$ 减仓；
   - 跌破硬止损屏障离场（与做多计划同一止损；止损不低于 $S_1$ 时合并为"跌破 $S_1$ 离场"）；
