@@ -1743,9 +1743,9 @@
     }
   ],
   "multi_timeframe_score": {
-    "rule_score": 81.0,
-    "rating": "BULLISH_RESONANCE",
-    "rating_cn": "多周期多头共振",
+    "rule_score": 28.5,
+    "rating": "BEARISH_PRESSURE",
+    "rating_cn": "多周期空头承压",
     "components": {
       "macro_trend_25": 25.0,
       "structure_pattern_25": 23.5,
@@ -1756,17 +1756,20 @@
       "weekly_trend": "BULLISH",
       "daily_structure": "above",
       "active_bull_strategies": 2,
-      "active_bear_strategies": 0
+      "active_bear_strategies": 0,
+      "causal_momentum_ic_15d": -0.282,
+      "scoring_regime": "MEAN_REVERSION_ADAPTED",
+      "weekly_60w_position_pct": 46.7
     },
     "note": "rule_score 为确定性多维度规则加权分（0~100），不代表统计胜率或预测概率。"
   },
   "meta_labeling_decision": {
     "setup_type": "RIGHT_SIDE_BREAKOUT",
     "setup_label_cn": "右侧顺势突破确认",
-    "rule_score": 81.0,
+    "rule_score": 28.5,
     "scoring_method": "DETERMINISTIC_MULTI_FACTOR_RULE_V5",
-    "action": "NEUTRAL_HOLD_WAIT",
-    "action_cn": "观望等待突破信号",
+    "action": "DEFENSIVE_AVOID",
+    "action_cn": "防守回避/破位警惕",
     "risk_veto_applied": true,
     "veto_reasons": [
       "大盘环境评分偏弱 (16.0<35)，压降个股做多评级"
@@ -3282,7 +3285,7 @@
     "veto_codes": [
       "BENCHMARK_WEAK"
     ],
-    "final_verdict_cn": "【观望等待突破信号】综合规则分 81.0/100，当前属于「右侧顺势突破确认」；关键突破位 1358.18，关键防守/止损位 1308.80，TP1 1357.91（净盈亏比 1.34）。"
+    "final_verdict_cn": "【防守回避/破位警惕】综合规则分 28.5/100，当前属于「右侧顺势突破确认」；关键突破位 1358.18，关键防守/止损位 1308.80，TP1 1357.91（净盈亏比 1.34）。"
   },
   "replay_snapshots": [
     {
@@ -3291,8 +3294,8 @@
       "base_close": 1284.6,
       "regime": "MEAN_REVERTING_RANGE",
       "regime_score": 19.2,
-      "rule_score": 20.5,
-      "rating": "BEARISH_PRESSURE",
+      "rule_score": 84.7,
+      "rating": "BULLISH_RESONANCE",
       "horizon_dates": [
         "2026-05-21",
         "2026-05-22",
@@ -4399,8 +4402,8 @@
       "base_close": 1211.33,
       "regime": "MEAN_REVERTING_RANGE",
       "regime_score": 21.5,
-      "rule_score": 31.0,
-      "rating": "BEARISH_PRESSURE",
+      "rule_score": 74.5,
+      "rating": "BULLISH_RESONANCE",
       "horizon_dates": [
         "2026-06-18",
         "2026-06-22",
@@ -5507,7 +5510,7 @@
       "base_close": 1258.99,
       "regime": "MEAN_REVERTING_RANGE",
       "regime_score": 33.5,
-      "rule_score": 45.0,
+      "rule_score": 41.3,
       "rating": "NEUTRAL_WATCH",
       "horizon_dates": [
         "2026-07-17",
@@ -6615,8 +6618,8 @@
       "base_close": 1355.29,
       "regime": "TRENDING_BULL",
       "regime_score": 80.5,
-      "rule_score": 70.0,
-      "rating": "BULLISH_RESONANCE",
+      "rule_score": 35.1,
+      "rating": "BEARISH_PRESSURE",
       "horizon_dates": [
         "2026-08-14",
         "2026-08-17",
@@ -7723,8 +7726,8 @@
       "base_close": 1285.13,
       "regime": "SQUEEZE_CONSOLIDATION",
       "regime_score": 28.1,
-      "rule_score": 23.0,
-      "rating": "BEARISH_PRESSURE",
+      "rule_score": 65.3,
+      "rating": "BULLISH_RESONANCE",
       "horizon_dates": [
         "2026-09-11",
         "2026-09-14",
@@ -11201,7 +11204,7 @@
   "reproducibility": {
     "engine_version": "5.3.0",
     "bars_hash": "a521cb76bd6b1d4c",
-    "report_hash": "f9c66a65af10d3a8"
+    "report_hash": "ba8dcfd4a8fd7790"
   },
   "judgment_pack": {
     "schema_version": "5.3.0",
@@ -11257,9 +11260,9 @@
         "id": "E5",
         "category": "SCORE",
         "json_path": "multi_timeframe_score.rule_score",
-        "value": 81.0,
-        "direction": "BULLISH",
-        "summary_cn": "多周期规则综合分为 81.0/100，二阶段动作分类为「观望等待突破信号」"
+        "value": 28.5,
+        "direction": "BEARISH",
+        "summary_cn": "多周期规则综合分为 28.5/100，二阶段动作分类为「防守回避/破位警惕」"
       },
       {
         "id": "E6",
@@ -11334,7 +11337,6 @@
         "bullish_evidence_ids": [
           "E2",
           "E3",
-          "E5",
           "E6",
           "E7",
           "E8",
@@ -11344,9 +11346,10 @@
         ],
         "bearish_evidence_ids": [
           "E1",
+          "E5",
           "E10"
         ],
-        "summary_cn": "当前截面同时存在偏多证据（E2, E3, E5, E6, E7, E8, E9, E11, E12）与偏空/风控约束证据（E1, E10），不可单边外推"
+        "summary_cn": "当前截面同时存在偏多证据（E2, E3, E6, E7, E8, E9, E11, E12）与偏空/风控约束证据（E1, E5, E10），不可单边外推"
       }
     ],
     "scenario_anchors": [

@@ -130,7 +130,19 @@ def compute_triple_barrier_plan(
     vetoed = len(veto_reasons) > 0
     ema20 = float(ind_snapshot["trend"].get("ema20") or last_c)
     rsi14 = float(ind_snapshot["momentum"].get("rsi14") or 50.0)
-    overextended = ((last_c - ema20) / atr14 > 2.0) or (rsi14 >= 70.0)
+    ext_atr = (last_c - ema20) / atr14
+    overextended = (ext_atr > 2.0) or (rsi14 >= 70.0)
+    tf_aligned = mtf_score.get("timeframes_aligned") or {}
+    scoring_regime = tf_aligned.get("scoring_regime", "MOMENTUM_TREND")
+    w_pos = float(tf_aligned.get("weekly_60w_position_pct") or 50.0)
+
+    if scoring_regime == "MEAN_REVERSION_ADAPTED":
+        if ext_atr > 0.35 or w_pos > 78.0 or setup_type == "RIGHT_SIDE_BREAKOUT":
+            overextended = True
+        elif not vetoed and ext_atr <= 0.15 and wedge.get("status") != "below":
+            setup_type = "LEFT_SIDE_PULLBACK"
+            setup_label_cn = "左侧支撑回踩观察"
+
     if not vetoed and not overextended and rule_score >= 65.0 and setup_type in ("RIGHT_SIDE_BREAKOUT", "LEFT_SIDE_PULLBACK"):
         action = "LONG_CONFIRMED"
         action_cn = "右侧/结构看多确认"
@@ -143,6 +155,16 @@ def compute_triple_barrier_plan(
     else:
         action = "NEUTRAL_HOLD_WAIT"
         action_cn = "观望等待突破信号"
+
+    # L2 历史条件频率守门（经验 Meta-Labeling）：若该标的自身历史上攻先到目标频率 < 30% 且显著低于失效或下探频率，将确认做多降级为观察
+    bull_hf = (projections.get("bull") or {}).get("historical_frequency") or {}
+    bear_hf = (projections.get("bear") or {}).get("historical_frequency") or {}
+    b_tgt = float(bull_hf.get("target_freq") or 0.45)
+    b_inv = float(bull_hf.get("invalidation_freq") or 0.40)
+    dn_tgt = float(bear_hf.get("target_freq") or 0.40)
+    if action == "LONG_CONFIRMED" and b_tgt < 0.30 and (b_inv > b_tgt + 0.12 or dn_tgt > b_tgt + 0.12):
+        action = "WATCH_LONG_SETUP"
+        action_cn = "条件观察（待放量/收盘确认）"
 
     # Position sizing calculation
     position_sizing: dict[str, Any]

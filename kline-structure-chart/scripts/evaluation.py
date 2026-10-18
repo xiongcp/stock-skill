@@ -196,9 +196,9 @@ def label_triple_barrier_event(
             break
 
         # ATR Trailing Stop update at bar close (Alorse-style dynamic stop ratchet, applied from next bar)
-        highest_since_entry = max(highest_since_entry, cl)
-        if trailing_stop and highest_since_entry >= entry_open + 1.0 * unit_risk:
-            active_sl = max(active_sl, entry_open + 0.15 * unit_risk, highest_since_entry - 1.15 * unit_risk)
+        highest_since_entry = max(highest_since_entry, hi)
+        if trailing_stop and highest_since_entry >= entry_open + 0.90 * unit_risk and cl >= entry_open + 0.30 * unit_risk:
+            active_sl = max(active_sl, entry_open + 0.08 * unit_risk)
 
     if outcome == "TIME_BARRIER":
         label = 1 if exit_price > entry_open else -1
@@ -545,7 +545,7 @@ def run_plan_backtest(
                     symbol=symbol,
                     is_st=is_st,
                     is_ipo_no_limit=is_ipo_no_limit,
-                    trailing_stop=False,
+                    trailing_stop=True,
                 )
                 if res.get("tradable"):
                     trades[action].append(

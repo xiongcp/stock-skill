@@ -52,9 +52,9 @@
       "id": "E5",
       "category": "SCORE",
       "json_path": "multi_timeframe_score.rule_score",
-      "value": 81.0,
-      "direction": "BULLISH",
-      "summary_cn": "多周期规则综合分为 81.0/100，二阶段动作分类为「观望等待突破信号」"
+      "value": 28.5,
+      "direction": "BEARISH",
+      "summary_cn": "多周期规则综合分为 28.5/100，二阶段动作分类为「防守回避/破位警惕」"
     },
     {
       "id": "E6",
@@ -129,7 +129,6 @@
       "bullish_evidence_ids": [
         "E2",
         "E3",
-        "E5",
         "E6",
         "E7",
         "E8",
@@ -139,9 +138,10 @@
       ],
       "bearish_evidence_ids": [
         "E1",
+        "E5",
         "E10"
       ],
-      "summary_cn": "当前截面同时存在偏多证据（E2, E3, E5, E6, E7, E8, E9, E11, E12）与偏空/风控约束证据（E1, E10），不可单边外推"
+      "summary_cn": "当前截面同时存在偏多证据（E2, E3, E6, E7, E8, E9, E11, E12）与偏空/风控约束证据（E1, E5, E10），不可单边外推"
     }
   ],
   "scenario_anchors": [

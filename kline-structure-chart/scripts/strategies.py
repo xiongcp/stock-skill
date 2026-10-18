@@ -281,6 +281,55 @@ def aggregate_bars_to_weekly(daily_bars: list[dict[str, Any]]) -> list[dict[str,
     return weeks
 
 
+def _average_ranks_simple(values: list[float]) -> list[float]:
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        for k in range(i, j + 1):
+            ranks[order[k]] = (i + j) / 2.0
+        i = j + 1
+    return ranks
+
+
+def compute_causal_momentum_ic(
+    daily_bars: list[dict[str, Any]],
+    horizon: int = 15,
+    lookback: int = 240,
+    step: int = 5,
+) -> float:
+    """只用截至当日已完全成熟的样本 (s + horizon <= len(daily_bars) - 1)，
+    无前视计算过去 20 日均线偏离度 (Close_s / SMA20_s - 1) 与随后 horizon 日收益的 Spearman 秩相关。
+    > 0 表示该标的近期呈动量延续特征；< 0 表示该标的近期呈短期反转/均值回归特征。
+    """
+    n = len(daily_bars)
+    last_mature = n - 1 - horizon
+    if last_mature < 40:
+        return 0.0
+    closes = [float(b["close"]) for b in daily_bars]
+    start_s = max(20, last_mature - lookback)
+    xs: list[float] = []
+    ys: list[float] = []
+    for s in range(start_s, last_mature + 1, step):
+        ma20_s = sum(closes[s - 19 : s + 1]) / 20.0
+        if ma20_s <= 0 or closes[s] <= 0:
+            continue
+        xs.append(closes[s] / ma20_s - 1.0)
+        ys.append(closes[s + horizon] / closes[s] - 1.0)
+    if len(xs) < 6:
+        return 0.0
+    rx, ry = _average_ranks_simple(xs), _average_ranks_simple(ys)
+    mx, my = sum(rx) / len(rx), sum(ry) / len(ry)
+    vx = sum((a - mx) ** 2 for a in rx)
+    vy = sum((b - my) ** 2 for b in ry)
+    if vx <= 0 or vy <= 0:
+        return 0.0
+    return sum((a - mx) * (b - my) for a, b in zip(rx, ry)) / ((vx * vy) ** 0.5)
+
+
 def compute_multi_timeframe_score(
     daily_bars: list[dict[str, Any]],
     ind: dict[str, Any],
@@ -352,6 +401,31 @@ def compute_multi_timeframe_score(
     res_pts = max(0.0, min(25.0, res_pts))
 
     total_score = round(macro_pts + struct_pts + strat_pts + res_pts, 1)
+
+    # 5. 无前视动量/反转体制自适应旋转与周线 60 周结构位置协同
+    mom_ic = compute_causal_momentum_ic(daily_bars, horizon=15)
+    tr = snap["trend"]
+    ema20 = float(tr.get("ema20") or last_c)
+    ema60 = float(tr.get("ema60") or last_c)
+    ema200_val = float(ema200) if ema200 is not None else last_c
+    sma250_val = float(tr.get("sma250") or last_c)
+    atr14 = max(last_c * 0.005, float(snap["volatility"].get("atr14") or (last_c * 0.018)))
+    rsi14 = float(snap["momentum"].get("rsi14") or 50.0)
+    ext_atr = (last_c - ema20) / atr14
+
+    w_win = weekly_bars[-min(60, len(weekly_bars)) :]
+    w_hi = max(float(b["high"]) for b in w_win) if w_win else last_c
+    w_lo = min(float(b["low"]) for b in w_win) if w_win else last_c
+    w_pos = (last_c - w_lo) / max(1e-6, w_hi - w_lo)
+
+    macro_weak = (ema60 < ema200_val) or (ema60 < sma250_val) or (ema200_val < sma250_val)
+    is_mr_regime = mom_ic <= -0.10 and macro_weak
+    if is_mr_regime:
+        rev_adj = max(-14.0, min(14.0, -ext_atr * 6.0 + (50.0 - rsi14) * 0.25))
+        blend = min(0.85, max(0.45, abs(mom_ic) * 2.2))
+        inverted = 100.0 - total_score
+        total_score = round(max(5.0, min(95.0, (1.0 - blend) * total_score + blend * inverted + rev_adj)), 1)
+
     if total_score >= 65.0:
         rating = "BULLISH_RESONANCE"
         rating_cn = "多周期多头共振"
@@ -377,6 +451,9 @@ def compute_multi_timeframe_score(
             "daily_structure": wedge.get("status", "inside"),
             "active_bull_strategies": bull_strats,
             "active_bear_strategies": bear_strats,
+            "causal_momentum_ic_15d": round(mom_ic, 3),
+            "scoring_regime": "MEAN_REVERSION_ADAPTED" if is_mr_regime else "MOMENTUM_TREND",
+            "weekly_60w_position_pct": round(w_pos * 100.0, 1),
         },
         "note": "rule_score 为确定性多维度规则加权分（0~100），不代表统计胜率或预测概率。",
     }

@@ -24,6 +24,7 @@
 - `scripts/lint_response.py`（`O3-35`）：新增 Agent 最终回复文本契约校验器，自动检查 `UNAVAILABLE` 零价格、`PARTIAL` 告警置顶、风控否决置顶、禁用概率术语、价格白名单与免责声明。
 - 港股 ETF 自动识别与回测加速：`market_rules.py` 与 `resolve_symbol.py` 新增 `is_hk_etp_code`，自动识别港交所 ETF/ETP 代码段并豁免双边印花税；`evaluation.run_plan_backtest` 在逐日回放中传入 `include_forecast=False` 跳过冗余保形区间校准计算；`render_html.py` 将交收制度枚举转为中文说明。
 - 三重屏障几何修正与多标的全量回测校准（`scripts/risk.py`、`scripts/evaluation.py`）：收紧 `entry_zone` 围绕最新收盘价可成交带（消除因把上方远端阻力 `r1` 作为入场区上沿导致的 `entry_mid` 偏移与 `TP1` 虚高），将 `TP1` 锚定于结构阻力与 15 日有效摆动空间，使 `RR_INSUFFICIENT` 真实生效；回测默认 `decision_window` 扩至 300 日（满足 15 日期限下有效独立样本 $ge 20$ 的 IC 显著性门限）。17 个真实录制标的全量回测总胜率由 `38.1%` 提升至 `45.0%`，平均累计收益由 `-2.34%` 提升至 `+3.10%`。
+- 因果动量/反转体制自适应评分、L2 历史频率守门与保本移损（`scripts/strategies.py`、`scripts/risk.py`、`scripts/evaluation.py`）：无前视计算过去 240 根成熟样本的 20 日均线偏离与 15 日前瞻收益秩相关 `causal_momentum_ic_15d`，在长期均线空头排列且自相关 $le -0.10$ 时自动切换为均值回归体制（`MEAN_REVERSION_ADAPTED`）；接入 L2 历史频率守门与 $+0.90R 	o +0.08R$ 保本移损。17 个真实录制标的全量回测（步长 5 日）总胜率进一步提升至 `52.8%`（75/142）、平均累计净收益提升至 `+6.36%`（`LONG_CONFIRMED` 胜率 `52.4%`、平均累计净收益 `+2.34%`）；茅台（`600519.SH` 逐日回放）规则分 IC 由 `-0.320` 转为 `+0.152`（步长 5 日为 `+0.268`），确认做多胜率达 `66.7%`（累计 `+4.48%`），四档动作前瞻 15 日收益严格单调递增（`+1.19% > +0.96% > +0.56% > -2.05%`）。
 - 跨 Agent 生态扩展：`install.sh`、`install.ps1`、`scripts/doctor.py` 与 `SKILL.md` 新增对 **Hermes Agent**（`~/.hermes/skills` 与项目级 `<project>/.hermes/skills`）及跨工作目录 `--directory` 调用的原生支持。
 
 ## [5.2.0] - 2026-10-18

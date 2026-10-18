@@ -1540,3 +1540,22 @@ def test_triple_barrier_entry_zone_anchored_and_rr_insufficient_veto(replay_reco
     bt = run_plan_backtest(bundle, req, horizon_bars=15, step=10)
     assert bt["veto_reason_counts"].get("RR_INSUFFICIENT", 0) > 0
     assert bt["rule_score_ic"]["effective_independent_samples"] >= 20
+
+
+def test_regime_adaptive_scoring_and_breakeven_ratchet_boost_moutai_ic_and_winrate(replay_recorded) -> None:
+    from analysis import analyze_bundle
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    rep = analyze_bundle(bundle, req, include_replay=False)
+    tf = rep["multi_timeframe_score"]["timeframes_aligned"]
+    assert "causal_momentum_ic_15d" in tf
+    assert tf["scoring_regime"] in ("MOMENTUM_TREND", "MEAN_REVERSION_ADAPTED")
+    assert 0.0 <= tf["weekly_60w_position_pct"] <= 100.0
+
+    bt = run_plan_backtest(bundle, req, horizon_bars=15, step=5)
+    assert bt["rule_score_ic"]["spearman"] is not None and bt["rule_score_ic"]["spearman"] > 0.15
+    assert bt["all_long_signals"]["win_rate_pct"] >= 50.0
+    assert bt["all_long_signals"]["cumulative_return_pct"] > 0.0
+    assert bt["long_confirmed"]["win_rate_pct"] >= 60.0
+    assert bt["long_confirmed"]["cumulative_return_pct"] > 0.0
