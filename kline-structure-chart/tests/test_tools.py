@@ -143,7 +143,7 @@ def test_install_sh_syntax_and_help() -> None:
     out = subprocess.run(["bash", str(script), "--help"], capture_output=True, text=True, check=True).stdout
     for flag in ("--dir", "--source", "--agents", "--project", "--copy", "--dry-run", "--uninstall", "--update", "--no-test", "--install-uv"):
         assert flag in out, flag
-    for rel in ("~/.claude/skills", "~/.agents/skills", "~/.gemini/skills", "~/.cursor/skills", "~/.config/opencode/skills"):
+    for rel in ("~/.claude/skills", "~/.agents/skills", "~/.hermes/skills", "~/.gemini/skills", "~/.cursor/skills", "~/.config/opencode/skills"):
         assert rel in out, rel
 
 

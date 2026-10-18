@@ -11,7 +11,7 @@ REPO_URL="https://github.com/xiongcp/stock-skill.git"
 SKILL_NAME="kline-structure-chart"
 # 代码目录与复制安装目录中的归属标记：卸载时只删除带标记的目录
 MARKER_NAME=".stock-skill-installer"
-ALL_AGENTS="claude codex gemini cursor opencode"
+ALL_AGENTS="claude codex hermes gemini cursor opencode"
 
 INSTALL_DIR="${STOCK_SKILL_DIR:-$HOME/.local/share/stock-skill}"
 SOURCE="$REPO_URL"
@@ -29,7 +29,7 @@ usage() {
 
   --dir <目录>        代码安装目录（默认 ~/.local/share/stock-skill，也可用环境变量 STOCK_SKILL_DIR）
   --source <地址>     克隆来源：Git 地址或本地检出路径（默认 GitHub xiongcp/stock-skill）
-  --agents <列表>     逗号分隔：claude,codex,gemini,cursor,opencode 或 all（默认自动探测）
+  --agents <列表>     逗号分隔：claude,codex,hermes,gemini,cursor,opencode 或 all（默认自动探测）
   --project <目录>    只注册到某个项目（Claude Code 用 <目录>/.claude/skills，其余用 <目录>/.agents/skills）
   --copy              复制技能目录而不是软链（更新后需重新执行本脚本）
   --install-uv        缺少 uv 时直接用官方安装器安装（非交互环境必须显式传入）
@@ -41,8 +41,8 @@ usage() {
 
 技能目录（与 vercel-labs/skills 的约定一致）：
   claude   ~/.claude/skills            codex    ~/.agents/skills
-  gemini   ~/.gemini/skills            cursor   ~/.cursor/skills
-  opencode ~/.config/opencode/skills
+  hermes   ~/.hermes/skills            gemini   ~/.gemini/skills
+  cursor   ~/.cursor/skills            opencode ~/.config/opencode/skills
 EOF
 }
 
@@ -95,6 +95,7 @@ skills_dir_for() {
   if [ -n "$PROJECT_DIR" ]; then
     case "$agent" in
       claude) printf '%s\n' "$PROJECT_DIR/.claude/skills" ;;
+      hermes) printf '%s\n' "$PROJECT_DIR/.hermes/skills" ;;
       *) printf '%s\n' "$PROJECT_DIR/.agents/skills" ;;
     esac
     return
@@ -102,6 +103,7 @@ skills_dir_for() {
   case "$agent" in
     claude) printf '%s\n' "$HOME/.claude/skills" ;;
     codex) printf '%s\n' "$HOME/.agents/skills" ;;
+    hermes) printf '%s\n' "$HOME/.hermes/skills" ;;
     gemini) printf '%s\n' "$HOME/.gemini/skills" ;;
     cursor) printf '%s\n' "$HOME/.cursor/skills" ;;
     opencode) printf '%s\n' "$HOME/.config/opencode/skills" ;;
@@ -113,6 +115,7 @@ detect_agents() {
   local found=""
   command -v claude >/dev/null 2>&1 && found="$found claude"
   command -v codex >/dev/null 2>&1 && found="$found codex"
+  command -v hermes >/dev/null 2>&1 && found="$found hermes"
   command -v gemini >/dev/null 2>&1 && found="$found gemini"
   command -v cursor-agent >/dev/null 2>&1 && found="$found cursor"
   command -v opencode >/dev/null 2>&1 && found="$found opencode"
@@ -123,8 +126,8 @@ resolve_agents() {
   if [ -z "$AGENTS" ]; then
     AGENTS="$(detect_agents)"
     if [ -z "$AGENTS" ]; then
-      AGENTS="claude codex"
-      warn "未探测到 claude / codex / gemini / cursor-agent / opencode 命令，默认注册到 Claude Code 与 ~/.agents/skills"
+      AGENTS="claude codex hermes"
+      warn "未探测到 claude / codex / hermes / gemini / cursor-agent / opencode 命令，默认注册到 Claude Code、~/.agents/skills 与 ~/.hermes/skills"
     fi
   elif [ "$AGENTS" = "all" ]; then
     AGENTS="$ALL_AGENTS"

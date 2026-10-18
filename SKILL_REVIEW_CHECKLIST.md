@@ -313,6 +313,8 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 | O3-33 | P2 | `scripts/render_report_md.py` | 报告缺少受约束主观研判独立章节 | ✅ 新增「LLM 情景研判（主观判断，已记录待检验）」章节，与确定性指标章节严格隔离，展示调整前后概率、证据编号与证伪条件；`test_o3_30_to_o3_34_judgment_layer_and_scoring` |
 | O3-34 | P1 | `scripts/score_judgments.py` | 缺少对已到期主观研判的后验校准打分 | ✅ 用真实行情回放计算 Brier 分数、对数损失、5 档可靠性分桶与相对 L2 基准频率的技能分 `BSS`（`n >= 20` 且 `BSS <= 0` 时建议收紧调整上限）；`test_o3_30_to_o3_34_judgment_layer_and_scoring` |
 | O3-35 | P2 | `scripts/lint_response.py` | 缺少对 Agent 最终自然语言回复的契约校验器 | ✅ 校验 `UNAVAILABLE` 零价格、`PARTIAL` 告警置顶、风控否决置顶、禁用术语（禁止将规则分称为胜率/上涨概率）、价格白名单与免责声明；`test_lint_response_catches_contract_violations_and_passes_clean_report` |
+| O3-36 | P1 | `scripts/risk.py`、`scripts/evaluation.py` | 三重屏障 `tp1 = entry_mid + 1.5 * unit_risk` 恒等构造使 `RR_INSUFFICIENT` 永远不触发，且 `WAIT_CONFIRMATION` 入场区横跨整个 120 日通道导致 `TP1` 远达 5~6 ATR；默认 `decision_window=260` 导致 15 日期限下独立样本恒为 17 (<20) | ✅ 收紧入场区、锚定结构阻力与 15 日有效摆动空间、`decision_window` 升至 300；17 个真实标的回测总胜率 `38.1% -> 45.0%`，平均累计收益 `-2.34% -> +3.10%`；`test_triple_barrier_entry_zone_anchored_and_rr_insufficient_veto` |
+| O3-37 | P2 | `install.sh`、`install.ps1`、`scripts/doctor.py`、`SKILL.md` | 缺少 Hermes Agent（`~/.hermes/skills`）注册与跨目录 `--directory` 调用说明 | ✅ 新增 `hermes` 自动探测与软链/复制安装支持，`SKILL.md` 明确跨工作目录 `--directory` 调用规范；`test_install_sh_syntax_and_help` |
 
 - 未验证：`install.ps1` 未在 Windows 实测；安装后 Claude Code / Codex 新会话能否识别技能未实测。
 - 阶段 2 实测结果：在茅台（`600519.SH`）录制行情 2025-08 ~ 2026-09 回放（步长 5 日，共 151 次情景事件）中，历史条件频率样本外 Brier 分数 = 0.2340，优于全样本基准率（climatology = 38.4%）的 Brier 分数 0.2366（技能分 `BSS = +0.0108 > 0`，历史频率具有区分度）。

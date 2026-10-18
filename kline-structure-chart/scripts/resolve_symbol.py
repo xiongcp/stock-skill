@@ -106,6 +106,8 @@ def to_candidate(row: dict[str, str]) -> dict[str, Any] | None:
         if venue == "PS" or not US_TICKER_PATTERN.fullmatch(ticker):
             return None  # .ps 为场外粉单（OTC），本技能不支持
         symbol, market = f"{ticker}.US", "US"
+        if "etf" in row["name"].lower():
+            asset_type = "etf"
     else:
         return None
     try:

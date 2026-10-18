@@ -66,26 +66,41 @@ def compute_triple_barrier_plan(
     if wedge.get("status") == "above" or (last_c >= r1 and rv >= 1.35):
         setup_type = "RIGHT_SIDE_BREAKOUT"
         setup_label_cn = "右侧顺势突破确认"
-        entry_low = round_to_tick(min(last_c, r1 * 0.996), market, asset_type, as_of_day)
-        entry_high = round_to_tick(max(last_c, r1 * 1.005), market, asset_type, as_of_day)
-        stop_loss = round_to_tick(min(s1, last_c - 1.5 * atr14), market, asset_type, as_of_day)
+        if last_c >= r1:
+            entry_low = round_to_tick(min(last_c, r1 * 0.996), market, asset_type, as_of_day)
+            entry_high = round_to_tick(max(last_c, r1 * 1.005), market, asset_type, as_of_day)
+        else:
+            entry_low = round_to_tick(max(s1, last_c - 0.35 * atr14), market, asset_type, as_of_day)
+            entry_high = round_to_tick(min(r1, last_c + 0.30 * atr14), market, asset_type, as_of_day)
+        stop_loss = round_to_tick(min(s1, max(s1 - 0.25 * atr14, last_c - 1.35 * atr14)), market, asset_type, as_of_day)
     elif rule_score >= 52.0 and (has_bull_div or has_bull_candle or abs(last_c - s1) <= 0.8 * atr14):
         setup_type = "LEFT_SIDE_PULLBACK"
         setup_label_cn = "左侧支撑回踩观察"
-        entry_low = round_to_tick(max(s1 * 0.995, last_c - 0.5 * atr14), market, asset_type, as_of_day)
-        entry_high = round_to_tick(last_c, market, asset_type, as_of_day)
-        stop_loss = round_to_tick(min(s1 - 0.8 * atr14, last_c - 1.6 * atr14), market, asset_type, as_of_day)
+        entry_low = round_to_tick(max(s1 * 0.995, last_c - 0.45 * atr14), market, asset_type, as_of_day)
+        entry_high = round_to_tick(min(r1, last_c + 0.20 * atr14), market, asset_type, as_of_day)
+        stop_loss = round_to_tick(min(s1 - 0.15 * atr14, max(s1 - 0.50 * atr14, last_c - 1.45 * atr14)), market, asset_type, as_of_day)
     else:
         setup_type = "WAIT_CONFIRMATION"
         setup_label_cn = "区间观察/等待右侧收盘突破"
-        entry_low = round_to_tick(s1, market, asset_type, as_of_day)
-        entry_high = round_to_tick(r1, market, asset_type, as_of_day)
-        stop_loss = round_to_tick(min(s1 - 0.8 * atr14, last_c - 1.5 * atr14), market, asset_type, as_of_day)
+        entry_low = round_to_tick(max(s1, last_c - 0.40 * atr14), market, asset_type, as_of_day)
+        entry_high = round_to_tick(min(r1, last_c + 0.35 * atr14), market, asset_type, as_of_day)
+        stop_loss = round_to_tick(min(s1 - 0.15 * atr14, max(s1 - 0.50 * atr14, last_c - 1.40 * atr14)), market, asset_type, as_of_day)
+    if entry_low > entry_high:
+        entry_low = round_to_tick(last_c * 0.995, market, asset_type, as_of_day)
+        entry_high = round_to_tick(last_c * 1.005, market, asset_type, as_of_day)
 
     entry_mid = (entry_low + entry_high) / 2.0
     unit_risk = max(atr14 * 0.5, entry_mid - stop_loss)
-    tp1 = round_to_tick(entry_mid + 1.5 * unit_risk, market, asset_type, as_of_day)
-    tp2 = round_to_tick(max(entry_mid + 2.5 * unit_risk, bull_target_ladder), market, asset_type, as_of_day)
+    eff_swing_risk = min(unit_risk, 1.50 * atr14)
+    if setup_type == "RIGHT_SIDE_BREAKOUT":
+        struct_cap = max(r1, bull_target_ladder)
+    else:
+        struct_cap = r1 if r1 >= entry_mid + 1.15 * unit_risk else bull_target_ladder
+    raw_tp1 = min(struct_cap, entry_mid + 1.5 * eff_swing_risk)
+    if raw_tp1 <= entry_mid:
+        raw_tp1 = entry_mid + 1.0 * atr14
+    tp1 = round_to_tick(raw_tp1, market, asset_type, as_of_day)
+    tp2 = round_to_tick(max(tp1 + 0.8 * atr14, bull_target_ladder), market, asset_type, as_of_day)
 
     # Round-trip fee deduction in price units
     fee_rate = round_trip_cost_rate(rules)

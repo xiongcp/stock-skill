@@ -24,7 +24,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $SkillName = 'kline-structure-chart'
 $MarkerName = '.stock-skill-installer'
-$AllAgents = @('claude', 'codex', 'gemini', 'cursor', 'opencode')
+$AllAgents = @('claude', 'codex', 'hermes', 'gemini', 'cursor', 'opencode')
 
 function Say([string]$Msg) { Write-Host "==> $Msg" -ForegroundColor Cyan }
 function Warn([string]$Msg) { Write-Warning $Msg }
@@ -55,11 +55,13 @@ if (Test-Path -LiteralPath $Source -PathType Container) { $Source = (Resolve-Pat
 function Get-SkillsDir([string]$Agent) {
     if ($Project) {
         if ($Agent -eq 'claude') { return [IO.Path]::Combine($Project, '.claude', 'skills') }
+        if ($Agent -eq 'hermes') { return [IO.Path]::Combine($Project, '.hermes', 'skills') }
         return [IO.Path]::Combine($Project, '.agents', 'skills')
     }
     switch ($Agent) {
         'claude' { return [IO.Path]::Combine($HOME, '.claude', 'skills') }
         'codex' { return [IO.Path]::Combine($HOME, '.agents', 'skills') }
+        'hermes' { return [IO.Path]::Combine($HOME, '.hermes', 'skills') }
         'gemini' { return [IO.Path]::Combine($HOME, '.gemini', 'skills') }
         'cursor' { return [IO.Path]::Combine($HOME, '.cursor', 'skills') }
         'opencode' { return [IO.Path]::Combine($HOME, '.config', 'opencode', 'skills') }
@@ -72,13 +74,13 @@ function Resolve-Agents {
     if ($list.Count -eq 1 -and $list[0] -eq 'all') { return $AllAgents }
     if ($list.Count -gt 0) { return $list }
     $found = @()
-    $commands = @{ claude = 'claude'; codex = 'codex'; gemini = 'gemini'; cursor = 'cursor-agent'; opencode = 'opencode' }
+    $commands = @{ claude = 'claude'; codex = 'codex'; hermes = 'hermes'; gemini = 'gemini'; cursor = 'cursor-agent'; opencode = 'opencode' }
     foreach ($a in $AllAgents) {
         if (Get-Command $commands[$a] -ErrorAction SilentlyContinue) { $found += $a }
     }
     if ($found.Count -eq 0) {
-        Warn '未探测到 claude / codex / gemini / cursor-agent / opencode 命令，默认注册到 Claude Code 与 ~/.agents/skills'
-        $found = @('claude', 'codex')
+        Warn '未探测到 claude / codex / hermes / gemini / cursor-agent / opencode 命令，默认注册到 Claude Code、~/.agents/skills 与 ~/.hermes/skills'
+        $found = @('claude', 'codex', 'hermes')
     }
     return $found
 }

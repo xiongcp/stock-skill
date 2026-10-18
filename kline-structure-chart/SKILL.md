@@ -18,6 +18,7 @@ metadata:
 - **不使用**：基本面、财报解读、新闻事件、资金流向等脚本不计算的内容；替用户下单或给出个性化投资建议。脚本不计算的数据在回答中一律标注"未复核"。
 
 工作目录为本 `SKILL.md` 所在目录（技能根目录），以下命令均为相对路径。首次运行时 `uv` 会按 `pyproject.toml` 联网安装依赖，取行情同样需要联网。
+若当前 shell 工作目录不在本 `SKILL.md` 所在目录（例如在 Hermes Agent、Claude Code 或 Codex 的用户工作区中调用），请在 `uv run` 中显式传入 `--directory <本SKILL.md所在目录>`（如 `uv run --directory ~/.hermes/skills/kline-structure-chart`、`~/.claude/skills/kline-structure-chart` 或 `~/.agents/skills/kline-structure-chart`），并将 `--output-dir` 设为绝对路径。
 
 ## 一、第一步：名称转代码
 

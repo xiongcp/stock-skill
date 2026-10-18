@@ -463,7 +463,7 @@ def run_plan_backtest(
     request: dict[str, Any],
     horizon_bars: int = 15,
     step: int = 1,
-    decision_window: int = 260,
+    decision_window: int = 300,
 ) -> dict[str, Any]:
     """逐日回放线上真实流水线：在每个决策日 t 只用 t 及之前的数据调用 analyze_bundle，
     对给出 LONG_CONFIRMED / WATCH_LONG_SETUP 的计划，按计划自身的入场区、止损、TP1 与时间屏障在 t+1 开盘撮合。

@@ -28,6 +28,7 @@ INSTALL_HINT = "在仓库根目录执行 bash install.sh（或按 README 第 3 �
 AGENT_SKILL_DIRS = {
     "Claude Code": ".claude/skills",
     "Codex / 通用 .agents": ".agents/skills",
+    "Hermes Agent": ".hermes/skills",
     "Gemini CLI": ".gemini/skills",
     "Cursor": ".cursor/skills",
     "OpenCode": ".config/opencode/skills",

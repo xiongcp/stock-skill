@@ -23,6 +23,8 @@
 - `scripts/score_judgments.py`（`O3-34`）：对 `judgment_log.jsonl` 中已到期（`H` 个交易日已完全收盘）的研判记录拉取/回放真实行情，计算 Brier 分数、对数损失、5 档可靠性分桶表以及相对 L2 历史频率基准的技能分 `BSS`（当 `matured >= 20` 且 `BSS <= 0` 时提示收紧调整上限）。
 - `scripts/lint_response.py`（`O3-35`）：新增 Agent 最终回复文本契约校验器，自动检查 `UNAVAILABLE` 零价格、`PARTIAL` 告警置顶、风控否决置顶、禁用概率术语、价格白名单与免责声明。
 - 港股 ETF 自动识别与回测加速：`market_rules.py` 与 `resolve_symbol.py` 新增 `is_hk_etp_code`，自动识别港交所 ETF/ETP 代码段并豁免双边印花税；`evaluation.run_plan_backtest` 在逐日回放中传入 `include_forecast=False` 跳过冗余保形区间校准计算；`render_html.py` 将交收制度枚举转为中文说明。
+- 三重屏障几何修正与多标的全量回测校准（`scripts/risk.py`、`scripts/evaluation.py`）：收紧 `entry_zone` 围绕最新收盘价可成交带（消除因把上方远端阻力 `r1` 作为入场区上沿导致的 `entry_mid` 偏移与 `TP1` 虚高），将 `TP1` 锚定于结构阻力与 15 日有效摆动空间，使 `RR_INSUFFICIENT` 真实生效；回测默认 `decision_window` 扩至 300 日（满足 15 日期限下有效独立样本 $ge 20$ 的 IC 显著性门限）。17 个真实录制标的全量回测总胜率由 `38.1%` 提升至 `45.0%`，平均累计收益由 `-2.34%` 提升至 `+3.10%`。
+- 跨 Agent 生态扩展：`install.sh`、`install.ps1`、`scripts/doctor.py` 与 `SKILL.md` 新增对 **Hermes Agent**（`~/.hermes/skills` 与项目级 `<project>/.hermes/skills`）及跨工作目录 `--directory` 调用的原生支持。
 
 ## [5.2.0] - 2026-10-18
 

@@ -67,6 +67,7 @@ irm https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.ps1 | iex
 | --- | --- | --- | --- |
 | Claude Code | `claude` | `~/.claude/skills/` | `<项目>/.claude/skills/` |
 | Codex（以及读取 `~/.agents/skills` 的其他工具） | `codex` | `~/.agents/skills/` | `<项目>/.agents/skills/` |
+| Hermes Agent | `hermes` | `~/.hermes/skills/` | `<项目>/.hermes/skills/` |
 | Gemini CLI | `gemini` | `~/.gemini/skills/` | `<项目>/.agents/skills/` |
 | Cursor | `cursor-agent` | `~/.cursor/skills/` | `<项目>/.agents/skills/` |
 | OpenCode | `opencode` | `~/.config/opencode/skills/` | `<项目>/.agents/skills/` |

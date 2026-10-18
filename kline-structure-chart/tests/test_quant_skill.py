@@ -1481,6 +1481,7 @@ def test_hk_etp_auto_detection_and_stamp_duty_exemption() -> None:
 
     assert is_hk_etp_code("02800.HK") is True
     assert is_hk_etp_code("03033.HK") is True
+    assert is_hk_etp_code("07788.HK") is True
     assert is_hk_etp_code("09067.HK") is True
     assert is_hk_etp_code("00700.HK") is False
 
@@ -1518,3 +1519,24 @@ def test_lint_response_catches_contract_violations_and_passes_clean_report(repla
     assert any("上涨概率" in e or "规则分" in e for e in errs_bad)
     assert any("9123.45" in e for e in errs_bad)
     assert any("免责声明" in e for e in errs_bad)
+
+
+def test_triple_barrier_entry_zone_anchored_and_rr_insufficient_veto(replay_recorded) -> None:
+    from analysis import analyze_bundle
+
+    req = {"symbol": "00700.HK", "market": "HK", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    rep = analyze_bundle(bundle, req, include_replay=False)
+    last_c = float(rep["series_export"]["bars"][-1]["close"])
+    atr14 = float(rep["mathematical_indicators"]["volatility"]["atr14"])
+    tb = rep["triple_barrier_plan"]
+    ez_lo, ez_hi = tb["entry_zone"]
+    # 入场区围绕最新收盘价，不再横跨整个 120 日通道（宽度不超过 1.2 * ATR14）
+    assert (ez_hi - ez_lo) <= 1.2 * atr14
+    # TP1 距离最新收盘价不超过 2.5 * ATR14（15日可达范围）
+    assert (tb["take_profit_1"] - last_c) <= 2.5 * atr14
+
+    # 回测中 RR_INSUFFICIENT 不再是死代码，能真实拦截上方空间不足或止损过宽的截面
+    bt = run_plan_backtest(bundle, req, horizon_bars=15, step=10)
+    assert bt["veto_reason_counts"].get("RR_INSUFFICIENT", 0) > 0
+    assert bt["rule_score_ic"]["effective_independent_samples"] >= 20
