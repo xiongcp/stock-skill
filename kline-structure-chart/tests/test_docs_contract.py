@@ -207,3 +207,39 @@ def test_no_unimplemented_capability_claims() -> None:
         if phrase in f.read_text(encoding="utf-8")
     ]
     assert not hits, f"残留不实宣称: {hits}"
+
+
+# ---------------------------------------------------------------------------
+# 阶段 1 文档：无占位符、字段字典覆盖顶层契约、制度规则带生效日期与来源
+# ---------------------------------------------------------------------------
+PLACEHOLDER = re.compile(r"<(?:仓库|repo|REPO|your|YOUR|owner|OWNER)[^>]*>|git clone <|xxx/stock-skill")
+
+
+def test_docs_have_no_placeholders() -> None:
+    docs = DOCS + [p for p in (AGENTS, README) if p.exists()]
+    hits = [f"{d.name}: {m.group(0)}" for d in docs for m in PLACEHOLDER.finditer(d.read_text(encoding="utf-8"))]
+    assert not hits, f"文档残留占位符: {hits}"
+
+
+def test_output_fields_dictionary_covers_schema_top_level() -> None:
+    import json
+
+    schema = json.loads((SKILL_DIR / "assets" / "analysis.schema.json").read_text(encoding="utf-8"))
+    top = set(schema.get("required", [])) | set(schema.get("properties", {}))
+    text = (SKILL_DIR / "references" / "output-fields.md").read_text(encoding="utf-8")
+    missing = sorted(k for k in top if f"`{k}" not in text)
+    assert not missing, f"output-fields.md 缺少顶层字段: {missing}"
+
+
+@pytest.mark.parametrize("market", ["cn", "hk", "us"])
+def test_market_rules_have_effective_date_and_source(market: str) -> None:
+    text = (SKILL_DIR / "references" / f"{market}-market.md").read_text(encoding="utf-8")
+    tables = re.findall(r"^\| 规则 \| 内容 \| 生效日期 \| 来源 \|\n\| --- .*\n((?:\|.*\n?)+)", text, re.M)
+    assert len(tables) >= 3, f"{market}-market.md 应以「规则 | 内容 | 生效日期 | 来源」表格列出制度"
+    for table in tables:
+        for row in table.strip().splitlines():
+            cells = [c.strip() for c in row.strip().strip("|").split(" | ")]
+            assert len(cells) == 4 and all(cells), f"{market}: 行格式不对 {row}"
+            assert cells[3] != "—", f"{market}: 缺少来源 {row}"
+    for topic in ("交易时段", "空"):
+        assert topic in text, f"{market}-market.md 缺少 {topic} 相关章节"

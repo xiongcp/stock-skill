@@ -31,60 +31,133 @@
 
 ## 2. 环境要求
 
-- macOS 或 Linux（Windows 见第 9 节的已知限制）。
-- [uv](https://docs.astral.sh/uv/)：用来安装 Python 3.12 和依赖。
-- 网络：首次安装需要访问 PyPI；每次分析需要访问新浪、Yahoo、腾讯的行情接口。没有网络的沙箱环境无法使用（会直接报 `[DATA_UNAVAILABLE]`）。
-- 中文字体（画 PNG 用）：
-  - macOS 自带，无需处理。
-  - Linux 需要安装文泉驿或 Noto CJK，例如 `sudo apt install fonts-wqy-zenhei` 或 `sudo apt install fonts-noto-cjk`。
+- macOS、Linux 或 Windows（Windows 安装脚本尚未实测，见第 10 节）。
+- `git` 与 [uv](https://docs.astral.sh/uv/)：uv 用来安装 Python 3.12 和锁定版本的依赖。缺 uv 时安装脚本会询问是否代为安装。
+- 网络：安装时需要访问 GitHub 与 PyPI；每次分析需要访问新浪、Yahoo、腾讯的行情接口。没有网络的沙箱环境无法使用（会直接报 `[DATA_UNAVAILABLE]`）。
+- 中文字体（画 PNG 用）：macOS 与 Windows 自带；Linux 需要文泉驿或 Noto CJK，安装脚本发现缺字体时会打印对应发行版的安装命令（不会自动 sudo）。
 
 ---
 
 ## 3. 安装
 
-### 3.1 获取代码并安装依赖
+### 3.1 一行命令安装（推荐）
+
+macOS / Linux：
 
 ```bash
-git clone <仓库地址> stock-skill
+curl -fsSL https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.sh | bash
+```
+
+Windows（PowerShell）：
+
+```powershell
+irm https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.ps1 | iex
+```
+
+脚本依次完成：
+
+1. 检查 `git` 和 `uv`（缺 uv 时询问是否用官方安装器安装；非交互环境需要加 `--install-uv`）。
+2. 把代码克隆到 `~/.local/share/stock-skill`；已存在时执行 `git pull --ff-only`，所以**重复执行同一条命令就是更新**。
+3. 执行 `uv sync --frozen --python 3.12`，按 `uv.lock` 安装依赖。
+4. Linux 下检查中文字体。
+5. 自动探测已安装的 `claude`、`codex`、`gemini`、`cursor-agent`、`opencode`，把技能目录**软链**到对应的技能目录（见下表）。目标位置已有同名的普通目录时先备份为 `*.bak.<时间>`。
+6. 运行离线快速自检（文档契约与工具测试）和环境自检 `doctor`，最后打印下一步。
+
+| Agent | 探测命令 | 全局技能目录 | `--project` 时的目录 |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | `~/.claude/skills/` | `<项目>/.claude/skills/` |
+| Codex（以及读取 `~/.agents/skills` 的其他工具） | `codex` | `~/.agents/skills/` | `<项目>/.agents/skills/` |
+| Gemini CLI | `gemini` | `~/.gemini/skills/` | `<项目>/.agents/skills/` |
+| Cursor | `cursor-agent` | `~/.cursor/skills/` | `<项目>/.agents/skills/` |
+| OpenCode | `opencode` | `~/.config/opencode/skills/` | `<项目>/.agents/skills/` |
+
+目录约定与 [vercel-labs/skills](https://github.com/vercel-labs/skills) 一致。一个都没探测到时，默认注册到 Claude Code 和 `~/.agents/skills/`。
+
+安装完成后**新开一个会话**，试问"帮我分析 600519.SH"或"看看茅台的 K 线"。
+
+### 3.2 安装选项
+
+通过管道运行时用 `bash -s --` 传参，例如：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.sh | bash -s -- --agents claude,codex --dry-run
+```
+
+| 选项（`install.sh`） | Windows（`install.ps1`） | 说明 |
+| --- | --- | --- |
+| `--dir <目录>` | `-Dir` | 代码目录，默认 `~/.local/share/stock-skill`（也可用环境变量 `STOCK_SKILL_DIR`） |
+| `--agents claude,codex` | `-Agents claude,codex` | 只注册到指定 agent；`all` 表示全部五个 |
+| `--project <目录>` | `-Project` | 只注册到某个项目（项目级技能目录），不动全局目录 |
+| `--copy` | `-Copy` | 复制而不是软链（更新代码后需重新执行脚本） |
+| `--install-uv` | `-InstallUv` | 缺 uv 时直接安装，不询问 |
+| `--no-test` | `-NoTest` | 跳过安装后的自检 |
+| `--dry-run` | `-DryRun` | 只打印将要执行的操作，不做任何修改 |
+| `--source <地址或路径>` | `-Source` | 从其他 Git 地址或本地检出安装（开发测试用） |
+| `--update` | `-Update` | 更新，等同重新执行安装 |
+| `--uninstall` | `-Uninstall` | 卸载 |
+
+### 3.3 更新与卸载
+
+更新：重新执行 3.1 的安装命令即可（软链安装会随 `git pull` 自动生效；`--copy` 安装会重新复制）。
+
+卸载：
+
+```bash
+bash ~/.local/share/stock-skill/install.sh --uninstall
+```
+
+卸载只删除**本脚本创建的**软链、带安装标记的复制目录和代码目录；其他技能、你自己放在同名位置的目录（会提示"跳过"）以及安装时生成的 `*.bak.*` 备份都不会被删除。安装时用过 `--dir` 或 `--project` 的，卸载时请带上同样的参数。
+
+### 3.4 其他安装方式
+
+**Claude Code 插件市场**：在 Claude Code 里执行
+
+```text
+/plugin marketplace add xiongcp/stock-skill
+/plugin install kline-structure-chart@stock-skill
+```
+
+插件市场清单在 [.claude-plugin/marketplace.json](.claude-plugin/marketplace.json)，直接指向 `kline-structure-chart/` 目录。插件方式不会运行 `uv sync`，首次分析时 `uv run` 会自动安装依赖。
+
+**npx skills（vercel-labs/skills）**：会自动识别已安装的 agent。
+
+```bash
+npx skills add xiongcp/stock-skill
+```
+
+常用参数：`-g` 安装到用户目录、`-a claude-code` 指定 agent、`--copy` 复制而不软链。
+
+**手动安装**：
+
+```bash
+git clone https://github.com/xiongcp/stock-skill.git ~/.local/share/stock-skill
 ```
 
 ```bash
-cd stock-skill
+cd ~/.local/share/stock-skill && uv sync --frozen --python 3.12 --directory kline-structure-chart
 ```
 
 ```bash
-uv sync --python 3.12 --directory kline-structure-chart
+mkdir -p ~/.claude/skills && ln -sfn ~/.local/share/stock-skill/kline-structure-chart ~/.claude/skills/kline-structure-chart
 ```
 
-### 3.2 把技能注册到你的 AI 助手
+其他 agent 把最后一步的 `~/.claude/skills` 换成 3.1 表格里的目录。
 
-AI 助手会到固定目录里查找技能。下面用软链接的方式注册，以后 `git pull` 更新代码，技能会同步更新。请在仓库根目录执行。
+### 3.5 验证安装
 
-**Claude Code（对所有项目生效）**
+以下命令在代码目录（默认 `~/.local/share/stock-skill`）执行。先跑环境自检，逐项显示 ✅/❌ 和修复建议（断网时数据源几项为 ❌，其余可离线通过）：
 
 ```bash
-mkdir -p ~/.claude/skills && ln -sfn "$(pwd)/kline-structure-chart" ~/.claude/skills/kline-structure-chart
+uv run --directory kline-structure-chart python scripts/doctor.py
 ```
 
-**Claude Code（只对某个项目生效）**：把上面的 `~/.claude/skills` 换成那个项目里的 `.claude/skills`。
-
-**Codex、Cursor、Gemini CLI、Copilot CLI 等**：这类工具通常会扫描 `~/.agents/skills/`（具体以各工具文档为准）。
-
-```bash
-mkdir -p ~/.agents/skills && ln -sfn "$(pwd)/kline-structure-chart" ~/.agents/skills/kline-structure-chart
-```
-
-注册后**新开一个会话**，技能列表里应该能看到 `kline-structure-chart`。
-
-### 3.3 验证安装
-
-先跑离线测试。测试不访问网络，全部使用录制下来的真实行情回放：
+再跑离线测试（不访问网络，全部使用录制下来的真实行情回放）：
 
 ```bash
 uv run --directory kline-structure-chart pytest -q
 ```
 
-再联网跑一次真实分析：
+最后联网跑一次真实分析：
 
 ```bash
 uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py --market CN --symbol 600519.SH --output-dir artifacts/smoke
@@ -96,21 +169,22 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
 
 ## 4. 在 AI 助手里使用
 
-直接用自然语言提问即可，例如：
+直接用自然语言提问即可，名称、拼音、代码都可以：
 
-- "帮我分析一下贵州茅台 600519.SH 的 K 线结构和支撑压力。"
+- "帮我分析一下茅台的 K 线结构和支撑压力。"
 - "腾讯 00700.HK 未来两周大概的波动区间是多少？带上历史回测。"
 - "NVDA 现在的风控计划是什么？我的账户 10 万美元，单笔最多亏 1%。"
 - "看看上证指数和创业板指现在的结构。"
 
 助手按技能里的规则工作：
 
-1. 运行脚本。代码写不全时，会请你补充交易所后缀。
-2. 先检查数据质量：
-   - `UNAVAILABLE`：不给任何价位。
-   - `PARTIAL`：把告警放在回答最前面。
-3. 以生成的 `*_report.md` 为骨架回答，顺序固定为：大盘 → 结构与条件推演 → 风控计划 → 未来区间 → 回测 → 文件路径 → 免责声明。报告中的数字不得改动。
-4. 如果风控否决了做多，会把否决原因放在最前面。
+1. 只说了名称时，先用 `scripts/resolve_symbol.py` 通过腾讯证券搜索查代码；匹配到多个证券（比如"腾讯"）时会请你选择，不会凭记忆猜。
+2. 按问题类型选择参数并运行脚本（比如给了账户净值才计算股数，问回测才加 `--backtest`）。
+3. 先检查数据质量：`UNAVAILABLE` 不给任何价位；`PARTIAL` 把告警放在回答最前面。
+4. 以生成的 `*_report.md` 为骨架回答，顺序为：大盘 → 结构与条件推演 → 风控计划 → 未来区间 → 回测 → 文件路径 → 免责声明。报告中的数字不得改动。
+5. 风控否决了做多时，否决原因放在最前面。不会给出"上涨概率"之类的数字。
+
+完整示例（真实行情生成的报告、图和标准回复）见 [examples/](examples/README.md)。
 
 小提示：
 
@@ -168,6 +242,19 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
 - 本地文件没有大盘数据，所以数据质量为 `PARTIAL`，风控会否决做多确认。
 - 本地文件也没有除权除息事件，价格按原样使用。
 
+### 5.3 名称转代码与环境自检
+
+只知道名称或拼音时，先查代码（数据源为腾讯证券搜索接口）：
+
+```bash
+uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
+```
+
+- 唯一匹配时 `status` 为 `RESOLVED`，并给出可直接运行的分析命令；匹配到多个（如"腾讯"、"000001"）时为 `AMBIGUOUS`，列出候选；找不到时以 `[INVALID_ARGUMENT]` 退出。
+- 可用 `--market HK`、`--asset-type index` 缩小范围。北交所股票目前搜不到，请直接用 `.BJ` 代码。
+
+环境有问题时运行 `scripts/doctor.py`（见 3.5 节），加 `--offline` 可跳过数据源连通检查。
+
 ---
 
 ## 6. 输出文件
@@ -179,6 +266,10 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
 | `*_preview.png` | 1920×1160 结构推演图；数据有问题时带红色告警和水印 |
 | `*_dashboard.html` | 离线交互看板：7 个图层开关、悬停查看数值、相对强弱视图、历史回放滑块、导出 PNG |
 | `*_backtest.json` | 历史计划回放回测与无前视审计（传 `--backtest` 时生成） |
+
+每个字段的含义、单位和能否为空见 [references/output-fields.md](kline-structure-chart/references/output-fields.md)。下图是用真实行情生成的贵州茅台结构图（数据截至 2026-10-16，完整产物见 [examples/](examples/README.md)）：
+
+![贵州茅台结构推演图示例](examples/600519.SH/600519.SH_preview.png)
 
 ---
 
@@ -198,6 +289,7 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
   - 报告同时给出历史样本外覆盖率和约等于多少个独立样本。独立样本很少时，覆盖率本身也不稳定。
   - 只有约 20 个以上独立样本且覆盖率接近名义值时，状态才是"已达标"，否则是"校准观察期"。审计覆盖全部已取到的历史，默认 15 日区间约有 24～42 个独立样本（视历史长度而定），能否达标取决于覆盖率是否接近名义值。
 - **回测看样本量**：成交少于 30 笔时，胜率和收益统计参考价值很低，报告会明确提示。胜率后面括号里是 Wilson 95% 区间，样本越少区间越宽（例如 3 笔全亏时为 0%~56%）。
+- 形态、浪型、市场状态的解读要点与常见误读见 [references/interpretation-guide.md](kline-structure-chart/references/interpretation-guide.md)。
 
 ---
 
@@ -212,14 +304,42 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
 | `[INVALID_ARGUMENT] Ambiguous symbol '000001'` | 需要明确是 `000001.SH`（上证指数）还是 `000001.SZ`（平安银行） |
 | `[INVALID_ARGUMENT] --days must be between 60 and 500` | `--days` 超出范围；`--horizon-bars` 同理（1~60） |
 | `[DATA_UNAVAILABLE] ... 历史长度不足` | 上市时间太短，或 `--as-of` 太早 |
-| `no CJK font found` | 没有中文字体，按第 2 节安装 |
-| `uv: command not found` | 先安装 uv：<https://docs.astral.sh/uv/> |
+| `no CJK font found` | 没有中文字体，运行 `scripts/doctor.py` 查看对应发行版的安装命令 |
+| `uv: command not found` | 先安装 uv：<https://docs.astral.sh/uv/>，或重新执行安装脚本并加 `--install-uv` |
+| 新会话里看不到 `kline-structure-chart` | 运行 `scripts/doctor.py` 检查技能软链；确认注册到了正在使用的 agent 的目录（第 3.1 节表格），然后新开会话 |
+| 安装时提示"已存在且不是 Git 仓库" | `--dir` 指向的目录里已有别的文件，换一个目录或先手动清理 |
+| `resolve_symbol.py` 以 `[DATA_UNAVAILABLE]` 退出 | 腾讯证券搜索接口不可用，直接提供带后缀的完整代码 |
 | 报告提示"数据只到某日：最近已收盘的交易日……尚未提供" | 数据源收盘后入库有延迟，或该标的停牌；稍后重跑 |
 | 报告提示"港股每手股数未能获取" | 腾讯快照暂时不可用，股数按 100 股/手假设计算，下单前请向券商核对 |
 
 ---
 
-## 9. 已知限制
+## 9. 常见问题
+
+**Q：能告诉我上涨概率吗？**
+不能。规则分（0~100）是技术条件的加权打分，不是概率；未来区间只描述波动幅度。当前版本没有任何经过检验的情景概率，助手也不会编造。后续版本计划加入带样本数和 95% 区间的"历史条件频率"。
+
+**Q：数据从哪里来，会不会用假数据？**
+新浪、Yahoo、腾讯的公开行情接口。取不到就以 `[DATA_UNAVAILABLE]` 退出，绝不估算或生成数据；离线测试使用录制下来的真实行情。
+
+**Q：会把我的数据或问题发给第三方吗？**
+脚本只向行情接口请求标的代码对应的公开行情，不上传账户净值等任何个人信息。
+
+**Q：怎么更新？会不会覆盖我的修改？**
+重新执行安装命令即可，代码目录用 `git pull --ff-only` 更新；如果你在代码目录里改过文件导致无法快进合并，脚本会报错停止，不会覆盖。
+
+**Q：可以只给某个项目安装吗？**
+可以，加 `--project <项目目录>`，技能会注册到该项目的 `.claude/skills` 或 `.agents/skills`。
+
+**Q：能分析北交所股票、港股 ETF 吗？**
+可以，但北交所需要直接给 `.BJ` 代码（名称搜索不到），港股 ETF 需要加 `--asset-type etf`。
+
+**Q：能做空吗？**
+本技能不替你交易。港股、美股可以融券卖空但有严格限制，A 股融券受限更多，规则见 `references/` 下的三个市场手册。
+
+---
+
+## 10. 已知限制
 
 - 行情接口是新浪、Yahoo、腾讯的公开网页接口，不是官方付费数据。它们可能限流或调整格式，届时会以 `[DATA_UNAVAILABLE]` 报错，不会给出错误数据。
 - 交易日历：A 股覆盖到 2026-12-31（2027 年放假安排尚未公布），港股和美股覆盖到 2027-12-31。超出范围的未来日期按工作日估算，报告会注明。
@@ -227,11 +347,12 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
 - ST 状态按当前简称识别，回测和历史区间审计会把它沿用到全部历史日期。
 - 港股 ETF 无法从代码自动识别，请传 `--asset-type etf`（ETF 免印花税）。
 - 财报日数据暂无来源，财报窗口不会放大预测区间。
-- Windows 已加入微软雅黑字体路径，但整体流程未在 Windows 上实测；软链接需要管理员或开发者模式，也可以直接复制 `kline-structure-chart` 目录。
+- Windows：`install.ps1` 与整体流程都还没有在 Windows 上实测。创建软链需要开发者模式或管理员权限，失败时脚本会自动改为复制；已加入微软雅黑字体路径。
+- 名称转代码依赖腾讯证券搜索接口，搜不到北交所股票。
 
 ---
 
-## 10. 开发者
+## 11. 开发者
 
 - 工程规范、铁律和门禁命令见 [AGENTS.md](AGENTS.md)；审查记录见 [SKILL_REVIEW_CHECKLIST.md](SKILL_REVIEW_CHECKLIST.md)。
 - 修改代码后必须跑通以下两项门禁：
@@ -244,7 +365,15 @@ uv run --directory kline-structure-chart pytest -v
 uv run --directory kline-structure-chart python tests/check_days_invariance.py --data tests/fixtures/recorded/sina_daily --step 40
 ```
 
-- 测试数据需要更新时，联网重新录制。可以用 `--only quotes` 这类参数只录某一类：
+- 推送和 PR 时 [CI](.github/workflows/ci.yml) 会在 Ubuntu 上自动运行这两项门禁（只用录制数据，不联网）。
+- 版本变化记录在 [CHANGELOG.md](CHANGELOG.md)。
+- 从本地检出演练安装脚本时，务必使用临时 HOME，避免改动自己的技能目录：
+
+```bash
+HOME="$(mktemp -d)" bash install.sh --source "$(pwd)" --agents claude,codex
+```
+
+- 测试数据需要更新时，联网重新录制。可以用 `--only quotes`、`--only search` 这类参数只录某一类：
 
 ```bash
 uv run --directory kline-structure-chart python tests/record_fixtures.py
