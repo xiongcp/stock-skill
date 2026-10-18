@@ -5,7 +5,7 @@ license: MIT
 compatibility: "Requires Python 3.12+, uv, and network access to PyPI and to Sina / Yahoo / Tencent market-data endpoints. Without live data the scripts exit with [DATA_UNAVAILABLE] instead of fabricating prices."
 metadata:
   author: "承鹏 (chengpeng), Qoder Quant Engine"
-  version: "5.1.0"
+  version: "5.2.0"
 ---
 
 # K 线数学结构分析（A股 / 港股 / 美股）
@@ -99,17 +99,19 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 2. **大盘先行**：基准的 `market_benchmark.regime`、`regime_score`，以及个股的 `relative_strength_vs_index`。
 3. **结构与规则**：
    - `multi_timeframe_score.rule_score` 是 0~100 的确定性规则分，不是胜率或概率。
-   - `rule_scenarios` 按"触发条件 → 目标位 → 失效条件"转述。
+   - `rule_scenarios` 按"触发条件 → 目标位 → 失效条件"转述；报告里的"现价附近正在争夺的价位"（`contested_levels`）不作触发条件，路径时间尺度（`eta_bars`）只说时间量级，目标超出预测期时照实说明。
+   - 浪型先说主计数，再说 `wave_counts` 里的备选数法及各自的否定条件；备选数法不代表可能性大小。形态为"形态不明确"时不套用教科书形态。
    - 形态只引用 `algebraic_patterns_detected` 里的 `name_cn` 和 `formula_verified`。
 4. **风控**：
    - `debate_and_veto.risk_officer_veto` 为 `true` 时，**置顶**列出 `veto_reasons`，不得给出做多建议。
    - 否则给出 `triple_barrier_plan` 的入场区、止损、TP1/TP2 与时间屏障。
-   - 做空、融券、卖空限制只按对应市场的制度手册（`references/cn-market.md`、`references/hk-market.md`、`references/us-market.md`）说明，不得给出报告中没有的做空点位。
+   - 用户已持有该标的时，转述报告里的"持仓防守计划"（`holder_defense_plan.rules`）。
+   - 港股、美股报告带"破位做空计划"（`short_plan`）：转述时必须同时说明卖空限制（`constraints`）、`warnings`，以及盈亏比未计融券费用。A 股与指数没有做空计划，卖空限制只按制度手册（`references/cn-market.md`、`references/hk-market.md`、`references/us-market.md`）说明，不得给出报告中没有的做空点位。
 5. **未来 15 日区间**：
    - `future_projection_15d` 以最新收盘价为中心（`q50_method = MARTINGALE_LAST_CLOSE`），只描述波动幅度，不包含方向判断，不得把 q75/q25 说成看涨/看跌概率。
    - 必须同时给出 `calibration_audit` 的实测覆盖率与 `effective_independent_samples`。
    - `promotion_status` 为 `RESEARCH_CALIBRATION_WARMUP` 时称"校准观察期"，不得把覆盖率说成区间已验证可靠；有效独立样本低于 `min_effective_independent_samples`（20）时不会晋级（判定见 `references/math-patterns.md` 第 5 节）。
-6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率（带 95% 区间）、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。
+6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率（带 95% 区间）、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。规则分 IC 的结论（`rule_score_ic.verdict`）原文转述，`informative = false` 时说明规则分在该标的上只作描述。
 7. **文件**：给出 `result.json` 与 `dashboard.html` 的路径；客户端能显示图片时再内嵌 `preview.png`，否则只给路径。
 8. **免责声明**：结尾注明"以上为规则化技术分析，仅供研究参考，不构成投资建议"。
 
@@ -145,13 +147,13 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 
 > 风控已否决做多：大盘环境评分偏弱（沪深300 状态分 16.0 < 35），以下点位只用于观察，不构成做多建议。
 >
-> 数据为新浪日线，截至 2026-10-16，前复权含分红，数据质量 OK。规则分 81.0/100（多周期多头共振），这是规则加权分，不是胜率。结构上是对称三角形，10-16 起收盘站上上轨 1 个交易日：上攻需日线放量收盘站上 1329.88，目标 1351.22，收盘跌回 1321.31 下方视为假突破；下探以收盘跌破 1312.19 为触发，目标 1291.44。……（大盘、风控、区间、回测、文件、免责声明依次展开）
+> 数据为新浪日线，截至 2026-10-16，前复权含分红，数据质量 OK。规则分 81.0/100（多周期多头共振），这是规则加权分，不是胜率。结构上是扩散喇叭形，10-16 起收盘站上上轨 1 个交易日：上攻需日线放量收盘站上 1358.18，目标 1381.97，收盘跌回 1349.43 下方视为假突破；下探以收盘跌破 1314.37 为触发，目标 1291.44。现价附近的 1338.86、1329.88、1320.43 是正在争夺的价位，不作触发条件。浪型主计数为上涨 ABC（收盘跌破 1228.10 失效），备选为下跌 ABC（收盘站上 1363.35 失效）。……（大盘、风控与持仓防守、区间、回测与 IC、文件、免责声明依次展开）
 
 错误的回复（不得这样写）：
 
-> ~~茅台突破三角形，上涨概率约 70%，建议 1330 附近买入，目标 1400。~~
+> ~~茅台已经向上突破，上涨概率约 70%，建议 1330 附近买入，目标 1440。~~
 
-错在：没有置顶风控否决；编造了概率；1400 不在报告里；给出了个性化买入建议。
+错在：没有置顶风控否决；编造了概率；把浪型测算位 1440.44 说成目标价；给出了个性化买入建议。
 
 ## 八、参考文档（按需读取）
 

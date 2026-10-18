@@ -202,7 +202,13 @@ def render_report_markdown(report: dict[str, Any], backtest: dict[str, Any] | No
         lines += [f"- 注意：{rules['settlement_note']}。"]
     if rules.get("day_trading_rule"):
         lines += [f"- 日内交易：{rules['day_trading_rule']}。"]
-    if sizing.get("recommended_shares") is not None:
+    if sizing.get("recommended_shares") == 0:
+        lines += [
+            f"- 仓位：账户 {sizing['account_equity']:,.2f}、单笔风险 {sizing['max_risk_pct']:.2f}% 时，"
+            f"风险预算 {sizing['risk_budget_amount']:,.2f} 按止损距离折算不足最小申报 {sizing['min_order_shares']} 股，"
+            "**该计划在此账户与风险比例下没有可执行的股数**。"
+        ]
+    elif sizing.get("recommended_shares") is not None:
         lines += [
             f"- 仓位：账户 {sizing['account_equity']:,.2f}、单笔风险 {sizing['max_risk_pct']:.2f}% 时，"
             f"按止损距离计算为 **{sizing['recommended_shares']} 股**（约 {sizing['estimated_notional']:,.2f} {meta['currency']}）。"

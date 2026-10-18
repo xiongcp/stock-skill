@@ -393,7 +393,7 @@ def run_plan_backtest(
         cut_day = bars[t]["day"]
         pit_bars = rescale_bars_as_of(bars[: min(n, t + horizon_bars + 2)], t)
         sub_bundle = {
-            "schema_version": "5.1.0",
+            "schema_version": "5.2.0",
             "market": market,
             "target": {"instrument": inst, "bars": pit_bars[: t + 1], "intraday": None},
             "benchmark": {**bench, "bars": [b for b in bench["bars"] if b["day"] <= cut_day]} if bench else None,

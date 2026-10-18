@@ -72,7 +72,7 @@ kline-structure-chart/
 │   ├── contracts.py                  # TypedDict 契约、数据来源枚举与质量判定、NaN/分位单调校验、安全文件名
 │   ├── market_rules.py               # CN/HK/US 日历、涨跌停、价位表、印花税、收盘判定、代码映射与点位复权
 │   ├── data_gateway.py               # 新浪/Yahoo/腾讯取数、厂商数据校验、除权除息事件、腾讯快照补全简称/ST/港股每手股数、未收盘K线拆分、基准配对
-│   ├── structure.py                  # 结构层纯计算（拐点/轨道/ABC/斐波那契/阶梯/三条推演），JSON 与 PNG 共用
+│   ├── structure.py                  # 结构层纯计算（拐点/轨道打分拟合/主+备选浪型计数/斐波那契/阶梯/三条推演），JSON 与 PNG 共用
 │   ├── indicators.py                 # SMA/EMA/MACD/RSI/Stoch/ATR/ADX/Supertrend/BB/RVOL/VWAP + 量价因子
 │   ├── patterns.py                   # 因果核平滑、因果 ZigZag、蜡烛形态、双底/双顶/通道、RSI 背离、SMC、Volume Profile
 │   ├── strategies.py                 # 五类 Regime 分类、五个规则策略、多周期规则评分
@@ -167,7 +167,7 @@ uv run --directory kline-structure-chart python tests/record_fixtures.py --only 
 2. **数据真实性自查**：
    - 新增取数路径必须同时提供失败时报错的测试（`test_data_sources.py`），并走 `data_gateway._http_get`，以便测试统一断网（例如 `resolve_symbol.fetch_tencent_search_raw`）。
    - 测试一律断网（`conftest.py`），所有行情测试统一使用 `fixtures/recorded/` 真实录制数据回放，严禁在测试中生成或使用合成行情（`generate_deterministic_series` / `synthetic_daily`）。
-   - 四处版本号（`SKILL.md`、`pyproject.toml`、`assets/analysis.schema.json`、`analysis.py`）必须保持同步（当前 `5.1.0`）。
+   - 四处版本号（`SKILL.md`、`pyproject.toml`、`assets/analysis.schema.json`、`analysis.py`）必须保持同步（当前 `5.2.0`）。
 3. **契约与安全校验**：
    - 任何新增 JSON 字段不得包含 `NaN` 或 `Infinity`（`contracts.validate_report` 拦截）。
    - 写入 `<script>` 的 JSON 必须经过 `_safe_json_for_script` 转义；页面字串一律用 `textContent` 或 `html.escape`。

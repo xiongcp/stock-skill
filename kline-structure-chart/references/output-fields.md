@@ -11,7 +11,7 @@
 
 | 字段 | 含义 | 单位 / 取值 | 可空 | 对外怎么说 |
 | --- | --- | --- | --- | --- |
-| `schema_version` | 报告结构版本，与技能版本一致 | 如 `5.1.0` | 否 | 一般不需要提 |
+| `schema_version` | 报告结构版本，与技能版本一致 | 如 `5.2.0` | 否 | 一般不需要提 |
 | `meta.symbol` / `meta.name` | 标的代码与简称 | — | 否 | "贵州茅台（600519.SH）" |
 | `meta.market` / `meta.asset_type` | 市场（`CN`/`HK`/`US`）与品种（`index`/`equity`/`etf`） | 枚举 | 否 | — |
 | `meta.is_st` / `meta.is_ipo_no_limit` | A 股风险警示标识；新股无涨跌停期 | 布尔 | 否 | ST 时提醒涨跌幅与风险警示 |
@@ -56,7 +56,8 @@
 | `structure_levels.fib_levels` | 近 120 日高低点之间的回撤 / 反弹位 | 价格 | 是 | — |
 | `structure_levels.recent_gaps[]` | 近期未回补跳空缺口 | 价格区间 | 否（可为空数组） | — |
 | `structure_levels.abc_scenario` | ABC 浪型：方向 `direction`、A/B 端点、`b_retrace`（B 回撤 A 的比例）、`c_progress`（C 浪进度与所处阶段 `phase`）、测算位 `levels` | 价格 / 比例 | 是（无 ABC 时） | 只按 `phase` 原文描述，不自行数浪 |
-| `structure_levels.wedge_structure` | 轨道形态：`pattern`（如"对称三角形"）、`status`（`above`/`inside`/`below`）、`status_text`、上下轨今日值 `upper_today`/`lower_today`、顶点距今根数 `apex_bars_ahead` | 价格 / 根 | 是（拟合失败时 `fitted=false`） | 按 `status_text` 原文转述 |
+| `structure_levels.wave_counts[]` | 浪型计数列表：第一项 `role = "主计数"`（与 `abc_scenario` 相同），其后最多 2 个 `role = "备选计数"`（A 浪起点不同、终点或测算位也不同的另一种数法）；每项另有 `a_range_atr`（A 浪幅度，ATR 倍数）与 `count_invalidation`（`price` 为 B 浪终点，`text` 为"日线收盘越过即此计数失效"） | 价格 / 倍数 | 否（无 ABC 时为空数组） | 先说主计数，再说备选数法及各自的否定条件；**备选不代表可能性大小** |
+| `structure_levels.wedge_structure` | 轨道形态：`pattern`（如"上升通道""下降楔形"，轨道与拐点稳健回归方向相反时为"形态不明确（…）"）、`status`（`above`/`inside`/`below`）、`status_text`、上下轨今日值 `upper_today`/`lower_today`、顶点距今根数 `apex_bars_ahead`、`fit_check`（上/下轨斜率与 Theil-Sen 稳健斜率，%/根；`consistent`；走平阈值 `flat_pct_per_bar`） | 价格 / 根 | 是（拟合失败时 `fitted=false`） | 按 `status_text` 原文转述；"形态不明确"时不要套用任何教科书形态 |
 
 ## 4. 形态、SMC 与成交分布
 
@@ -78,7 +79,7 @@
 | `multi_timeframe_score.components` | 四组分项：`macro_trend_25`、`structure_pattern_25`、`strategy_trigger_25`、`volume_benchmark_25` | 0~25 | 否 | 追问时解释 |
 | `meta_labeling_decision.setup_type` / `setup_label_cn` | 计划类型：右侧突破、左侧回踩、等待确认等 | 枚举 | 否 | — |
 | `meta_labeling_decision.action` / `action_cn` | 动作标签：`LONG_CONFIRMED` 确认做多、`WATCH_LONG_SETUP` 条件观察、`NEUTRAL_HOLD_WAIT` 观望、`DEFENSIVE_AVOID` 防守回避 | 枚举 | 否 | 风控否决时只能说观察，不说买入 |
-| `meta_labeling_decision.risk_veto_applied` / `veto_reasons` | 是否被风控否决及原因 | 布尔 / 文本 | 否 | 否决时置顶 |
+| `meta_labeling_decision.risk_veto_applied` / `veto_reasons` / `veto_codes` | 是否被风控否决、原因文本及稳定编码（`BENCHMARK_MISSING`、`BENCHMARK_WEAK`、`RR_INSUFFICIENT`、`BELOW_LOWER_RAIL`、`BREAKOUT_LOW_VOLUME`，与原因一一对应） | 布尔 / 文本 / 枚举 | 否 | 否决时置顶转述原因文本，编码不需要对外说 |
 
 ## 6. 风控计划 `triple_barrier_plan` 与否决 `debate_and_veto`
 
@@ -91,9 +92,11 @@
 | `risk_reward_ratio` | 扣除佣金、印花税后的 TP1 净盈亏比 | 比值，低于 1.20 风控否决 | 否 | "扣费后盈亏比 X" |
 | `left_side_constraints` / `right_side_constraints` | 左侧（回踩）与右侧（突破）计划的必要证据、失效位、假突破规则 | 文本 / 价格 | 否 | 原文转述 |
 | `market_microstructure.*` | 交易制度：`settlement`、`can_intraday_roundtrip`、`daily_price_limit_pct`（A 股为小数，如 0.1；港美股为空）、`lot_size`/`min_order_shares`/`lot_step`、`tick_size`、`session_hours_local`、`commission_bps`、`stamp_duty_buy_bps`/`stamp_duty_sell_bps`、港股 `lot_size_source`、美股 `day_trading_rule` | — | 部分可空 | 按市场转述，规则来源见 `references/{cn,hk,us}-market.md` |
+| `holder_defense_plan` | 已持仓者的防守计划：`reduce_level`（收盘跌破减仓）、`exit_level`（硬止损离场）、`rebound_cap`（跌破后反抽上限）、`downside_reference`、`rules[]`（中文规则原文）、`note`（A 股 T+1 提示）；指数为 `available = false` | 价格 / 文本 | 否 | 用户说"已经持有"时转述 `rules`；不是卖出建议 |
+| `short_plan` | 破位做空计划，仅港股、美股的股票/ETF（A 股与指数 `available = false` 并给出 `reason`）：`trigger`、`entry_zone`、`stop_loss_barrier`、`take_profit_1/2`、`time_barrier_bars`、`risk_reward_ratio`（扣交易成本，**未计融券费**）、`invalidation`、`constraints`（卖空制度限制）、`warnings`（大盘偏强、盈亏比不足） | 价格 / 文本 | 否 | 必须同时转述 `constraints` 与 `warnings`；不得给出报告里没有的做空点位 |
 | `position_sizing.*` | 仓位：`tradable`、`account_equity`、`max_risk_pct`（%）、`risk_budget_amount`、`recommended_shares`、`estimated_notional` | 股 / 货币 | 未传账户净值或指数时不给股数 | "按止损距离计算为 X 股"，不是个性化建议 |
 | `debate_and_veto.bull_case` / `bear_case` | 多空两方的规则化证据句 | 文本 | 否 | 可作为证据列举 |
-| `debate_and_veto.risk_officer_veto` / `veto_reasons` | 风控否决开关与原因（大盘状态分 < 35、净盈亏比 < 1.20、收盘在结构下轨下方、突破缺量等） | 布尔 / 文本 | 否 | `true` 时置顶，不给做多建议 |
+| `debate_and_veto.risk_officer_veto` / `veto_reasons` / `veto_codes` | 风控否决开关与原因（大盘状态分 < 35、净盈亏比 < 1.20、收盘在结构下轨下方、突破缺量等） | 布尔 / 文本 | 否 | `true` 时置顶，不给做多建议 |
 | `debate_and_veto.final_verdict_cn` | 一句话结论 | 文本 | 否 | 可原文引用 |
 
 ## 7. 条件推演 `rule_scenarios`
@@ -102,7 +105,12 @@
 | --- | --- | --- | --- | --- |
 | `breakout_level` / `breakdown_level` | 上攻触发位与下探触发位，带来源 `source` | 价格 | 否 | — |
 | `bull` / `neutral` / `bear` | 三条路径：`name`、`trigger`（触发条件）、`target_price` 与 `target_source`、`invalidation`（失效条件）、`retest_hold` / `rebound_cap`、`range`（震荡区间）、`waypoints_offset` 与 `step_labels`（画图折点） | 价格 / 文本 | 否 | 按"触发 → 目标 → 失效"转述，**不给任何路径的概率** |
-| `atr_pct` | 计算时使用的 ATR 百分比 | % | 否 | — |
+| `atr_pct` / `sigma_1d_pct` | 计算时使用的 ATR 百分比；近 60 日日对数收益 RMS（折点时间用） | % | 否 | — |
+| `min_trigger_distance_atr` | 触发位距最新收盘价的最小距离（0.5 个 ATR） | ATR 倍数 | 否 | — |
+| `contested_levels[]` | 距现价不足最小距离、正在争夺的价位：`price`、`sources`、`side`（`above`/`below`） | 价格 | 否（可为空数组） | "现价附近正在争夺的价位"，不作触发条件 |
+| `horizon_bars` / `timing_method` | 折点时间所在的预测期与估计方法（扩散尺度 (距离/σ)²，截断在预测期内） | 根 | 否 | — |
+| `bull.eta_bars` / `bear.eta_bars` | 未截断的时间尺度估计：走到触发位、目标位约需多少根 | 根 | 否 | "按波动率估算约需 N 个交易日"，**只是时间量级，不是方向预测** |
+| `bull.target_within_horizon` / `bear.target_within_horizon` | 目标位时间估计是否落在预测期内 | 布尔 | 否 | 为 `false` 时说明"目标超出 N 日预测期" |
 
 ## 8. 未来区间 `future_projection_15d`
 
@@ -150,6 +158,10 @@
 | `backtest.no_fill_outside_entry_zone` | 次日开盘不在入场区、未成交的次数 | 次 | 否 | — |
 | `backtest.all_long_signals` / `long_confirmed` / `watch_long_setup` | 三个口径的成交统计：`trades`、`cumulative_return_pct`、`win_rate_pct` 与 `win_rate_95ci_pct`（Wilson）、`mean_return_95ci_pct`（Bootstrap）、`sharpe`、`max_drawdown_pct`、`profit_factor` | 笔 / % | 无成交时部分可空 | 胜率必须带 95% 区间与笔数；是历史成交统计，不是未来概率 |
 | `backtest.buy_and_hold_return_pct` | 同期买入持有收益 | % | 否 | 与策略累计收益对比 |
+| `backtest.rule_score_ic` | 规则分与未来 H 日收益的 Spearman 秩相关：`spearman`、`decisions`、`effective_independent_samples`（≈ 决策数 × 步长 / H）、`informative`（独立样本 ≥ 20 且 \|IC\| ≥ 0.05）、`verdict` | −1~1 / 个数 | `spearman` 可空 | 原文转述 `verdict`；`informative = false` 时说"规则分在该标的上只作描述" |
+| `backtest.rule_score_buckets[]` | 按规则分 [0,38)、[38,52)、[52,65)、[65,100] 分层的决策日数、未来 H 日平均/中位收益、上涨占比 | 个 / % | 无样本的层为空 | 是历史统计，不是未来概率 |
+| `backtest.action_forward_returns.*` | 各动作标签之后的未来 H 日平均/中位收益与上涨占比 | 个 / % | 无样本时为空 | 用来检验动作标签与后续走势是否一致 |
+| `backtest.veto_reason_counts` | 回放期间各否决编码出现次数 | 次 | 否（可为空对象） | — |
 | `backtest.sample_trades[]` | 成交样例：入场/出场日与价、`outcome`（`TP_BARRIER` / `SL_BARRIER` / `TIME_BARRIER` 等）、`net_return` | — | 否 | — |
 | `backtest.sample_size_warning` | 成交少于 30 笔时的提示 | 文本 | 是 | 有则原文转述 |
 | `backtest.conformal_forecast_oos.*` | 区间样本外覆盖：无重叠截面 `evaluated_cutoffs` 与覆盖率，以及与主报告一致的滚动全截面覆盖率 | 比例 | 否 | — |

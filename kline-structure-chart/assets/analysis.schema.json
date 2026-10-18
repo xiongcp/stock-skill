@@ -23,7 +23,7 @@
     "reproducibility"
   ],
   "properties": {
-    "schema_version": { "type": "string", "enum": ["5.1.0"] },
+    "schema_version": { "type": "string", "enum": ["5.2.0"] },
     "meta": {
       "type": "object",
       "required": ["symbol", "name", "market", "asset_type", "currency", "timeframe", "as_of", "color_scheme"],

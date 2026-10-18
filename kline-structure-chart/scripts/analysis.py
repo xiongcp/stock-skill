@@ -455,7 +455,7 @@ def analyze_bundle(
     }
 
     report: AnalysisReport = {
-        "schema_version": "5.1.0",
+        "schema_version": "5.2.0",
         "meta": meta,
         "request": request,
         "market_benchmark": benchmark_info,
@@ -497,7 +497,7 @@ def analyze_bundle(
             "forecast_promotion_status": future_proj["promotion_status"],
         },
         "reproducibility": {
-            "engine_version": "5.1.0",
+            "engine_version": "5.2.0",
             "bars_hash": compute_canonical_hash([(b["day"], b["close"]) for b in completed[-120:]]),
             "report_hash": "",
         },

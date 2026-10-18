@@ -24,89 +24,170 @@
     "decision_window": {
       "start_day": "2025-08-21",
       "end_day": "2026-09-17",
-      "decisions": 175,
+      "decisions": 261,
       "step_bars": 1
     },
     "entry_rule": "决策日收盘给出 LONG_CONFIRMED/WATCH_LONG_SETUP 时，次日开盘价落在计划入场区内才成交；出场 = 计划止损 / TP1 / 时间屏障（无移动止损）",
     "actions_seen": {
-      "NEUTRAL_HOLD_WAIT": 60,
-      "LONG_CONFIRMED": 13,
-      "DEFENSIVE_AVOID": 99,
-      "WATCH_LONG_SETUP": 3
+      "NEUTRAL_HOLD_WAIT": 95,
+      "LONG_CONFIRMED": 45,
+      "DEFENSIVE_AVOID": 106,
+      "WATCH_LONG_SETUP": 15
     },
-    "no_fill_outside_entry_zone": 6,
+    "no_fill_outside_entry_zone": 4,
     "all_long_signals": {
       "trades": 10,
-      "cumulative_return_pct": -8.08,
+      "cumulative_return_pct": -6.05,
       "win_rate_pct": 30.0,
       "win_rate_95ci_pct": [
         10.78,
         60.32
       ],
       "mean_return_95ci_pct": [
-        -2.85,
-        1.3
+        -3.06,
+        1.91
       ],
-      "sharpe": -0.68,
-      "max_drawdown_pct": 11.74,
-      "profit_factor": 0.61
+      "sharpe": -0.42,
+      "max_drawdown_pct": 11.97,
+      "profit_factor": 0.73
     },
     "long_confirmed": {
-      "trades": 8,
-      "cumulative_return_pct": -10.26,
-      "win_rate_pct": 25.0,
+      "trades": 6,
+      "cumulative_return_pct": -2.29,
+      "win_rate_pct": 33.33,
       "win_rate_95ci_pct": [
-        7.15,
-        59.07
+        9.68,
+        70.0
       ],
       "mean_return_95ci_pct": [
-        -3.4,
-        1.19
+        -3.43,
+        3.11
       ],
-      "sharpe": -1.03,
-      "max_drawdown_pct": 13.18,
-      "profit_factor": 0.44
+      "sharpe": -0.16,
+      "max_drawdown_pct": 7.68,
+      "profit_factor": 0.86
     },
     "watch_long_setup": {
-      "trades": 2,
-      "cumulative_return_pct": 2.43,
-      "win_rate_pct": 50.0,
+      "trades": 4,
+      "cumulative_return_pct": -3.85,
+      "win_rate_pct": 25.0,
       "win_rate_95ci_pct": [
-        9.45,
-        90.55
+        4.56,
+        69.94
       ],
       "mean_return_95ci_pct": [
-        -1.73,
-        4.23
+        -4.03,
+        2.62
       ],
-      "sharpe": 0.41,
-      "max_drawdown_pct": 1.73,
-      "profit_factor": 2.44
+      "sharpe": -0.48,
+      "max_drawdown_pct": 5.67,
+      "profit_factor": 0.53
     },
     "buy_and_hold_return_pct": -8.92,
+    "veto_reason_counts": {
+      "BELOW_LOWER_RAIL": 56,
+      "BENCHMARK_WEAK": 32,
+      "BREAKOUT_LOW_VOLUME": 31
+    },
+    "rule_score_ic": {
+      "spearman": -0.32,
+      "decisions": 261,
+      "effective_independent_samples": 17,
+      "forward_horizon_bars": 15,
+      "informative": false,
+      "verdict": "有效独立样本仅约 17 个（< 20），IC 不稳定，规则分只作描述"
+    },
+    "rule_score_buckets": [
+      {
+        "range": [
+          0.0,
+          38.0
+        ],
+        "decisions": 100,
+        "mean_forward_return_pct": 0.85,
+        "median_forward_return_pct": 0.24,
+        "up_share_pct": 54.0
+      },
+      {
+        "range": [
+          38.0,
+          52.0
+        ],
+        "decisions": 69,
+        "mean_forward_return_pct": 0.14,
+        "median_forward_return_pct": -0.56,
+        "up_share_pct": 44.9
+      },
+      {
+        "range": [
+          52.0,
+          65.0
+        ],
+        "decisions": 17,
+        "mean_forward_return_pct": -1.16,
+        "median_forward_return_pct": -0.99,
+        "up_share_pct": 29.4
+      },
+      {
+        "range": [
+          65.0,
+          100.0
+        ],
+        "decisions": 75,
+        "mean_forward_return_pct": -2.98,
+        "median_forward_return_pct": -3.16,
+        "up_share_pct": 14.7
+      }
+    ],
+    "action_forward_returns": {
+      "LONG_CONFIRMED": {
+        "decisions": 45,
+        "mean_forward_return_pct": -2.9,
+        "median_forward_return_pct": -2.94,
+        "up_share_pct": 13.3
+      },
+      "WATCH_LONG_SETUP": {
+        "decisions": 15,
+        "mean_forward_return_pct": -0.91,
+        "median_forward_return_pct": -0.9,
+        "up_share_pct": 33.3
+      },
+      "NEUTRAL_HOLD_WAIT": {
+        "decisions": 95,
+        "mean_forward_return_pct": -0.92,
+        "median_forward_return_pct": -1.11,
+        "up_share_pct": 36.8
+      },
+      "DEFENSIVE_AVOID": {
+        "decisions": 106,
+        "mean_forward_return_pct": 0.78,
+        "median_forward_return_pct": 0.14,
+        "up_share_pct": 51.9
+      }
+    },
     "sample_trades": [
       {
         "tradable": true,
-        "entry_idx": 618,
-        "entry_day": "2026-03-18",
-        "entry_price": 1489.0,
-        "exit_idx": 632,
-        "exit_day": "2026-04-08",
-        "exit_price": 1465.02,
+        "entry_idx": 629,
+        "entry_day": "2026-04-02",
+        "entry_price": 1459.44,
+        "exit_idx": 643,
+        "exit_day": "2026-04-23",
+        "exit_price": 1419.0,
         "holding_bars": 15,
         "outcome": "TIME_BARRIER",
         "barrier_label": -1,
-        "gross_return": -0.0161,
-        "net_return": -0.0173,
-        "signal_day": "2026-03-17",
-        "action": "WATCH_LONG_SETUP",
-        "setup_type": "WAIT_CONFIRMATION",
+        "gross_return": -0.02771,
+        "net_return": -0.02891,
+        "signal_day": "2026-04-01",
+        "action": "LONG_CONFIRMED",
+        "setup_type": "LEFT_SIDE_PULLBACK",
         "plan_entry_zone": [
-          1399.89,
-          1497.3
+          1444.91,
+          1459.44
         ],
-        "plan_stop_loss": 1376.54,
-        "plan_take_profit_1": 1556.68
+        "plan_stop_loss": 1379.62,
+        "plan_take_profit_1": 1561.01
       },
       {
         "tradable": true,
@@ -126,33 +207,33 @@
         "setup_type": "RIGHT_SIDE_BREAKOUT",
         "plan_entry_zone": [
           1251.06,
-          1262.88
+          1289.31
         ],
-        "plan_stop_loss": 1177.29,
-        "plan_take_profit_1": 1376.49
+        "plan_stop_loss": 1191.54,
+        "plan_take_profit_1": 1388.15
       },
       {
         "tradable": true,
-        "entry_idx": 719,
-        "entry_day": "2026-08-13",
-        "entry_price": 1338.0,
-        "exit_idx": 721,
-        "exit_day": "2026-08-17",
-        "exit_price": 1295.0,
-        "holding_bars": 3,
-        "outcome": "SL_BARRIER",
+        "entry_idx": 716,
+        "entry_day": "2026-08-10",
+        "entry_price": 1325.0,
+        "exit_idx": 730,
+        "exit_day": "2026-08-28",
+        "exit_price": 1297.4,
+        "holding_bars": 15,
+        "outcome": "TIME_BARRIER",
         "barrier_label": -1,
-        "gross_return": -0.03214,
-        "net_return": -0.03334,
-        "signal_day": "2026-08-12",
-        "action": "LONG_CONFIRMED",
-        "setup_type": "LEFT_SIDE_PULLBACK",
+        "gross_return": -0.02083,
+        "net_return": -0.02203,
+        "signal_day": "2026-08-07",
+        "action": "WATCH_LONG_SETUP",
+        "setup_type": "WAIT_CONFIRMATION",
         "plan_entry_zone": [
-          1328.57,
-          1343.0
+          1254.5,
+          1327.19
         ],
-        "plan_stop_loss": 1296.84,
-        "plan_take_profit_1": 1394.2
+        "plan_stop_loss": 1231.5,
+        "plan_take_profit_1": 1379.86
       }
     ],
     "sample_size_warning": "成交仅 10 笔（少于 30），胜率/夏普等统计量置信度很低，仅供参考",

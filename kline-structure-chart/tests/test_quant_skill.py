@@ -268,7 +268,7 @@ def test_multi_market_pipeline_and_backtest(
     assert Path(paths["backtest_json"]).exists()
 
     # T-04：强语义与数值断言
-    assert report["schema_version"] == "5.1.0"
+    assert report["schema_version"] == "5.2.0"
     assert report["quality"]["status"] == "OK"
     assert report["quality"]["data_source_class"] == "LIVE"
     assert report["meta"]["color_scheme"] == expected_scheme
@@ -1166,3 +1166,13 @@ def test_o3_report_md_shows_wave_counts_defense_and_short_plans(replay_recorded,
     if rep["mathematical_indicators"]["structure_levels"]["wave_counts"]:
         assert "| 浪型计数 |" in md and "此计数失效" in md
     assert "只是时间量级，不是方向预测" in md
+    # 风险预算折算不足一手时明确说明，不只显示"0 股"
+    from render_report_md import render_report_markdown
+
+    zero = copy.deepcopy(rep)
+    zero["triple_barrier_plan"]["position_sizing"].update(
+        {"tradable": True, "account_equity": 500000.0, "max_risk_pct": 1.0, "risk_budget_amount": 5000.0,
+         "lot_size": 100, "min_order_shares": 100, "lot_step": 100, "recommended_shares": 0, "estimated_notional": 0.0}
+    )
+    zero_md = render_report_markdown(zero)
+    assert "没有可执行的股数" in zero_md and "**0 股**" not in zero_md
