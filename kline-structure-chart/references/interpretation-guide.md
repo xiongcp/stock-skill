@@ -35,8 +35,8 @@
 
 ## 4. 条件推演的时间与"正在争夺的价位"
 
-- 触发位距现价至少 0.5 个 ATR。更近的价位列在 `contested_levels`，报告写成"现价附近正在争夺的价位"，它们落在日常波动范围内，不作触发条件，也不要说"已经突破/跌破"。
-- 每条路径的折点时间按 (距离 / 日波动)² 估算，并压在预测期以内；`eta_bars` 是未截断的估计。`target_within_horizon = false` 时要说"目标位按当前波动估算超出 N 日预测期"，不要说"N 日内到达"。
+- 触发位距现价至少 0.5 个 ATR。距离不足 0.5 个 ATR 的情景在 `rule_scenarios.scenarios` 中归为 `status = ACTIVE`（"已在进行中"），不再作为待触发条件；更近的阶梯价位列在 `contested_levels`（"现价附近正在争夺的价位"）。
+- 多情景引擎从 `references/scenario-playbook.md` 的 8 类标准情景中筛出当前前提成立的 2~5 个情景，每个情景的时间窗 `time_window_bars` 取历史触发样本"到达目标用时"的 25%/50%/75% 分位数并截断在 `horizon_bars` 内；`eta_bars` 是扩散尺度估计。`target_within_horizon = false` 时要说"目标位按当前波动估算超出 N 日预测期"，不要说"N 日内到达"。
 - 时间估计只是时间量级，不含方向判断。
 
 ## 5. 支撑压力阶梯（`key_levels`）
@@ -86,5 +86,6 @@
 
 ## 11. 概率与频率怎么说
 
-- 当前版本**没有**任何情景概率字段。用户问"上涨概率多少"时回答：本技能目前不输出方向概率；可以给出的是条件推演（触发 → 目标 → 失效）、波动区间和历史回测成交统计。
-- 后续版本加入"历史条件频率"字段后，写法为"历史条件频率 X%（n = …，95% 区间 a%~b%）"；加入 LLM 研判后，必须标注"主观研判，已记录待检验"。规则详见 `SKILL.md` 的"对外表述与概率规则"一节。
+- `rule_scenarios.scenarios[*].historical_frequency` 给出该情景在本标的自身历史上逐日无前视统计的"触发后先到目标 / 先到失效 / 到期"频率。转述时直接引用 `display_cn`（含样本数 `n`、95% Wilson 置信区间，以及 `n < 30` 时向市场基准同情景频率的 Beta-Binomial 收缩说明），统一称"历史条件频率"，**不得**改称为胜率或上涨概率。
+- 回测 `scenario_frequency_brier` 用样本外 Brier 分数与全样本基准率（climatology）对比：只有 `brier_skill_score > 0` 时才允许说"历史频率具有区分度"；否则应按 `verdict` 说明"历史频率尚未优于全样本基准率，仅作历史统计参考"。
+- 在按 `references/llm-judgment-protocol.md` 生成 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验前，不得输出任何超出 `historical_frequency` 的主观概率数字。规则详见 `SKILL.md` 的"对外表述与概率规则"一节。

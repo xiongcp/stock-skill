@@ -105,7 +105,7 @@ skills_dir_for() {
     gemini) printf '%s\n' "$HOME/.gemini/skills" ;;
     cursor) printf '%s\n' "$HOME/.cursor/skills" ;;
     opencode) printf '%s\n' "$HOME/.config/opencode/skills" ;;
-    *) die "不支持的 agent: $agent（可选 $ALL_AGENTS）" ;;
+    *) die "不支持的 agent: ${agent}（可选 ${ALL_AGENTS}）" ;;
   esac
 }
 
@@ -158,7 +158,7 @@ is_ours() {
 # 卸载
 # ---------------------------------------------------------------------------
 uninstall() {
-  say "卸载 $SKILL_NAME（只删除本脚本创建的内容）"
+  say "卸载 ${SKILL_NAME}（只删除本脚本创建的内容）"
   local a d target removed=0
   if [ -n "$AGENTS" ]; then resolve_agents; else AGENTS="$ALL_AGENTS"; fi
   while IFS= read -r d; do
@@ -168,18 +168,18 @@ uninstall() {
         run rm -rf "$target"
         removed=$((removed + 1))
       else
-        warn "跳过 $target：不是本脚本创建的（未删除）"
+        warn "跳过 ${target}：不是本脚本创建的（未删除）"
       fi
     fi
     for a in "$d/$SKILL_NAME".bak.*; do
-      if [ -e "$a" ]; then warn "保留了安装时的备份 $a，如不需要请手动删除"; fi
+      if [ -e "$a" ]; then warn "保留了安装时的备份 ${a}，如不需要请手动删除"; fi
     done
   done < <(unique_skill_dirs)
   if [ -d "$INSTALL_DIR" ]; then
-    if [ -f "$INSTALL_DIR/.git/$MARKER_NAME" ]; then
+    if [ -f "$INSTALL_DIR/.git/$MARKER_NAME" ] || [ -f "$INSTALL_DIR/$MARKER_NAME" ]; then
       run rm -rf "$INSTALL_DIR"
     else
-      warn "跳过 $INSTALL_DIR：不是本脚本克隆的代码目录（未删除）"
+      warn "跳过 ${INSTALL_DIR}：不是本脚本克隆的代码目录（未删除）"
     fi
   fi
   say "卸载完成，删除技能入口 $removed 个"
@@ -213,9 +213,26 @@ ensure_uv() {
 }
 
 fetch_code() {
-  if [ -d "$INSTALL_DIR/.git" ]; then
+  if [ -d "$SOURCE" ] && [ "$INSTALL_DIR" = "$SOURCE" ]; then
+    say "使用原地代码目录：$INSTALL_DIR"
+  elif [ -d "$SOURCE" ] && [ ! -d "$SOURCE/.git" ]; then
+    say "从本地归档目录复制代码：$SOURCE -> $INSTALL_DIR"
+    run mkdir -p "$INSTALL_DIR"
+    if [ "$DRY_RUN" -eq 0 ]; then
+      (cd "$SOURCE" && tar --exclude .venv --exclude artifacts --exclude __pycache__ --exclude .pytest_cache -cf - .) | (cd "$INSTALL_DIR" && tar -xf -)
+      printf 'installed-by=install.sh\nsource=%s\n' "$SOURCE" >"$INSTALL_DIR/$MARKER_NAME"
+    fi
+  elif [ -d "$INSTALL_DIR/.git" ]; then
     say "更新代码：$INSTALL_DIR"
+    if [ -d "$SOURCE/.git" ]; then
+      run git -C "$INSTALL_DIR" remote set-url origin "$SOURCE"
+    fi
     run git -C "$INSTALL_DIR" pull --ff-only
+    if [ -d "$SOURCE/$SKILL_NAME" ] && [ "$DRY_RUN" -eq 0 ]; then
+      (cd "$SOURCE/$SKILL_NAME" && tar --exclude .venv --exclude artifacts --exclude __pycache__ --exclude .pytest_cache -cf - .) | (cd "$SKILL_SRC" && tar -xf -)
+      cp -f "$SOURCE/install.sh" "$INSTALL_DIR/install.sh" 2>/dev/null || true
+      cp -f "$SOURCE/install.ps1" "$INSTALL_DIR/install.ps1" 2>/dev/null || true
+    fi
   elif [ -e "$INSTALL_DIR" ] && [ -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
     die "$INSTALL_DIR 已存在且不是 Git 仓库；请换一个 --dir 或手动处理"
   else
@@ -224,6 +241,11 @@ fetch_code() {
     run git clone --depth 1 "$SOURCE" "$INSTALL_DIR"
     if [ "$DRY_RUN" -eq 0 ]; then
       printf 'installed-by=install.sh\nsource=%s\n' "$SOURCE" >"$INSTALL_DIR/.git/$MARKER_NAME"
+      if [ -d "$SOURCE/$SKILL_NAME" ]; then
+        (cd "$SOURCE/$SKILL_NAME" && tar --exclude .venv --exclude artifacts --exclude __pycache__ --exclude .pytest_cache -cf - .) | (cd "$SKILL_SRC" && tar -xf -)
+        cp -f "$SOURCE/install.sh" "$INSTALL_DIR/install.sh" 2>/dev/null || true
+        cp -f "$SOURCE/install.ps1" "$INSTALL_DIR/install.ps1" 2>/dev/null || true
+      fi
     fi
   fi
   if [ "$DRY_RUN" -eq 0 ] && [ ! -f "$SKILL_SRC/SKILL.md" ]; then
@@ -298,6 +320,13 @@ register_agents() {
 
 self_test() {
   [ "$RUN_TEST" -eq 1 ] || { say "跳过自检（--no-test）"; return 0; }
+  say "检查核心脚本完整性（L1 结构 / L2 历史频率 / L3 研判校验 / 回复校验）"
+  if [ "$DRY_RUN" -eq 0 ]; then
+    local s
+    for s in analyze_and_forecast.py resolve_symbol.py scenarios.py base_rates.py judgment.py validate_judgment.py score_judgments.py lint_response.py doctor.py; do
+      [ -f "$SKILL_SRC/scripts/$s" ] || die "缺少核心脚本: $SKILL_SRC/scripts/$s"
+    done
+  fi
   say "离线快速自检（文档契约 + 工具测试，不访问网络）"
   run uv run --frozen --directory "$SKILL_SRC" pytest -q tests/test_docs_contract.py tests/test_tools.py
   say "环境自检 doctor（数据源连通项需要联网，失败不影响安装）"

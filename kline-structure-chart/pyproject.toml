@@ -1,6 +1,6 @@
 [project]
 name = "kline-structure-chart"
-version = "5.2.0"
+version = "5.3.0"
 description = "Multi-market (CN/HK/US) deterministic K-line structure, algebraic pattern, triple-barrier risk, conformal forecast, and dual PNG+HTML rendering skill"
 requires-python = ">=3.12"
 dependencies = [

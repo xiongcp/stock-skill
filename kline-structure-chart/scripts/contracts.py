@@ -111,6 +111,7 @@ class AnalysisReport(TypedDict, total=False):
     rule_scenarios: dict[str, Any]
     future_projection_15d: dict[str, Any]
     debate_and_veto: dict[str, Any]
+    judgment_pack: dict[str, Any]
     replay_snapshots: list[dict[str, Any]]
     series_export: dict[str, Any]
     legacy_summary: dict[str, Any]
@@ -201,6 +202,14 @@ def _check_schema_contract(report: AnalysisReport) -> None:
             raise ValueError(f"Invalid meta.{key}: {value!r} not in {rule['enum']}")
         if "minLength" in rule and len(str(value)) < rule["minLength"]:
             raise ValueError(f"Invalid meta.{key}: shorter than {rule['minLength']}")
+    for section_key, section_schema in props.items():
+        if section_key in ("schema_version", "meta") or section_key not in report:
+            continue
+        sec_val = report[section_key]
+        if section_schema.get("type") == "object" and isinstance(sec_val, dict):
+            for req_k in section_schema.get("required", []):
+                if req_k not in sec_val:
+                    raise ValueError(f"Missing required {section_key} key: {req_k}")
 
 
 def validate_report(report: AnalysisReport) -> None:

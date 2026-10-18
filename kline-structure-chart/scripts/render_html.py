@@ -264,6 +264,8 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   <div class="layer-group" id="layerControls">
     <label class="layer-pill"><input type="checkbox" data-layer="conformal" checked /> 未来15日保形预测扇形(50%/80%)</label>
     <label class="layer-pill"><input type="checkbox" data-layer="quantiles" checked /> 三情景分位数路径(q75/q50/q25)</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="scenarios" checked /> 多情景路径(线宽/深浅按频率·虚线=n&lt;30)</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="scenario_fan" /> 情景混合（非校准区间）</label>
     <label class="layer-pill"><input type="checkbox" data-layer="barriers" checked /> Triple-Barrier 止盈止损框</label>
     <label class="layer-pill"><input type="checkbox" data-layer="structure" checked /> 核平滑与楔形/波段轨道</label>
     <label class="layer-pill"><input type="checkbox" data-layer="poc" checked /> 成交分布近似 POC</label>
@@ -297,11 +299,15 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       <div class="kv-grid" id="barrierGrid"></div>
     </div>
     <div class="side-card">
-      <h3>3. 多空双向证伪 & 独立风控否决权</h3>
+      <h3>3. 多情景推演与历史条件频率 (L1/L2)</h3>
+      <ul class="evidence-list" id="scenarioList"></ul>
+    </div>
+    <div class="side-card">
+      <h3>4. 多空双向证伪 & 独立风控否决权</h3>
       <ul class="evidence-list" id="debateList"></ul>
     </div>
     <div class="side-card">
-      <h3>4. 100% 数学形态与 SMC 公式证据</h3>
+      <h3>5. 100% 数学形态与 SMC 公式证据</h3>
       <ul class="evidence-list" id="patternList"></ul>
     </div>
   </div>
@@ -372,12 +378,38 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     ' (n=' + fp.calibration_audit.evaluation_samples + ', ' + fp.promotion_status + ')');
 
   const barGrid = document.getElementById('barrierGrid');
+  const SETTLEMENT_CN = {{
+    'T+1': 'T+1 交易（次日可卖）',
+    'T+0_TRADING_T+2_CLEARING': 'T+0 回转 / T+2 交收',
+    'T+1_SEC_SETTLEMENT': 'T+0 回转 / T+1 交收',
+    'INDEX_NON_TRADABLE': '指数不可直接交易'
+  }};
+  const settleRaw = tb.market_microstructure.settlement;
+  const settleLabel = SETTLEMENT_CN[settleRaw] || settleRaw;
   addKv(barGrid, '计划类型', dec.setup_label_cn);
   addKv(barGrid, '建议入场区', tb.entry_zone[0] + ' ~ ' + tb.entry_zone[1]);
   addKv(barGrid, '下屏障 (硬止损 SL)', tb.stop_loss_barrier);
   addKv(barGrid, '上屏障 (TP1 / TP2)', tb.take_profit_1 + ' / ' + tb.take_profit_2);
   addKv(barGrid, '时间屏障 / 净盈亏比', tb.time_barrier_bars + ' bars / ' + tb.risk_reward_ratio + ' R');
-  addKv(barGrid, '制度 / 建议股数', tb.market_microstructure.settlement + ' / ' + (tb.position_sizing.recommended_shares !== null ? tb.position_sizing.recommended_shares + '股' : '需账户净值'));
+  addKv(barGrid, '制度 / 建议股数', settleLabel + ' / ' + (tb.position_sizing.recommended_shares !== null ? tb.position_sizing.recommended_shares + '股' : '需账户净值'));
+
+  const scenList = document.getElementById('scenarioList');
+  const activeScenarios = (REPORT.rule_scenarios && REPORT.rule_scenarios.scenarios) ? REPORT.rule_scenarios.scenarios : [];
+  activeScenarios.forEach(function(sc) {{
+    const li = document.createElement('li');
+    const hf = sc.historical_frequency || {{}};
+    const tw = sc.time_window_bars || {{}};
+    const head = document.createElement('strong');
+    head.textContent = '[' + (sc.status_cn || sc.status) + '] ' + sc.name + ' → 目标 ' + fmtPrice(sc.target_price);
+    const detail = document.createElement('span');
+    detail.className = 'formula-code';
+    detail.textContent =
+      '触发: ' + sc.trigger + ' | 失效: ' + sc.invalidation +
+      ' | 预计用时中位数: ' + (tw.median || '--') + '日 | ' + (hf.display_cn || '');
+    li.appendChild(head);
+    li.appendChild(detail);
+    scenList.appendChild(li);
+  }});
 
   const debList = document.getElementById('debateList');
   (debate.bull_case || []).forEach(function(item) {{
@@ -433,6 +465,8 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   const layers = {{
     conformal: true,
     quantiles: true,
+    scenarios: true,
+    scenario_fan: false,
     barriers: true,
     structure: true,
     poc: true,
@@ -539,6 +573,15 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     if (layers.conformal) {{
       activeFp.q10.forEach(function(p) {{ prices.push(p); }});
       activeFp.q90.forEach(function(p) {{ prices.push(p); }});
+    }}
+    if (layers.scenario_fan && fp.scenario_conditional_fan && activeReplayIdx === replays.length) {{
+      (fp.scenario_conditional_fan.q10 || []).forEach(function(p) {{ prices.push(p); }});
+      (fp.scenario_conditional_fan.q90 || []).forEach(function(p) {{ prices.push(p); }});
+    }}
+    if (layers.scenarios && activeScenarios.length > 0 && activeReplayIdx === replays.length) {{
+      activeScenarios.forEach(function(sc) {{
+        (sc.waypoints_offset || []).forEach(function(wp) {{ prices.push(wp[1]); }});
+      }});
     }}
     if (layers.barriers) {{
       prices.push(tb.stop_loss_barrier, tb.take_profit_1, tb.take_profit_2);
@@ -765,6 +808,38 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       ctx.fill();
     }}
 
+    // Layer: Scenario Conditional Fan (display-only, uncalibrated)
+    if (layers.scenario_fan && fp.scenario_conditional_fan && activeReplayIdx === replays.length) {{
+      const scf = fp.scenario_conditional_fan;
+      ctx.fillStyle = 'rgba(192, 132, 252, 0.14)';
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      for (let i = 0; i < hBars; i++) ctx.lineTo(xOfFut(i), yOfPrice(scf.q90[i]));
+      for (let i = hBars - 1; i >= 0; i--) ctx.lineTo(xOfFut(i), yOfPrice(scf.q10[i]));
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = 'rgba(192, 132, 252, 0.24)';
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      for (let i = 0; i < hBars; i++) ctx.lineTo(xOfFut(i), yOfPrice(scf.q75[i]));
+      for (let i = hBars - 1; i >= 0; i--) ctx.lineTo(xOfFut(i), yOfPrice(scf.q25[i]));
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = 'rgba(192, 132, 252, 0.9)';
+      ctx.lineWidth = 1.8;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      for (let i = 0; i < hBars; i++) ctx.lineTo(xOfFut(i), yOfPrice(scf.center_q50[i]));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#c084fc';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText(scf.legend_label_cn || '情景混合（非校准区间）', divX + 10, padT + 34);
+    }}
+
     // Layer: 3 Quantile Scenario Paths (q75, q50, q25)
     if (layers.quantiles) {{
       function drawFutureCurve(arr, col, labelPrefix) {{
@@ -785,6 +860,44 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       drawFutureCurve(activeFp.optimistic_q75, UP_COL, '乐观q75');
       drawFutureCurve(activeFp.base_median_q50, '#facc15', '基准q50');
       drawFutureCurve(activeFp.q25, DN_COL, '悲观q25');
+    }}
+
+    // Layer: Multi-Scenario Playbook Paths (width & alpha scaled by historical_frequency, dashed if n < 30)
+    if (layers.scenarios && activeScenarios.length > 0 && activeReplayIdx === replays.length) {{
+      activeScenarios.forEach(function(sc, idxSc) {{
+        const hf = sc.historical_frequency || {{}};
+        const freq = typeof hf.target_freq === 'number' ? Math.max(0, Math.min(1, hf.target_freq)) : 0.35;
+        const nSamp = typeof hf.sample_size === 'number' ? hf.sample_size : 0;
+        const lowSample = Boolean(hf.low_sample || nSamp < 30);
+        const alpha = Math.min(1.0, (lowSample ? 0.52 : 0.68) + 0.30 * freq);
+        const lw = 1.6 + 2.4 * freq;
+        const rgb = sc.direction === 'BULLISH'
+          ? (isCnColor ? '248, 113, 113' : '52, 211, 153')
+          : (sc.direction === 'BEARISH' ? (isCnColor ? '52, 211, 153' : '248, 113, 113') : '250, 204, 21');
+        ctx.save();
+        ctx.strokeStyle = 'rgba(' + rgb + ', ' + alpha.toFixed(2) + ')';
+        ctx.lineWidth = lw;
+        if (lowSample) ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        const wps = sc.waypoints_offset || [];
+        wps.forEach(function(wp, wi) {{
+          const dx = wp[0], p = wp[1];
+          const x = dx <= 0 ? startX : xOfFut(Math.min(hBars - 1, Math.max(0, Math.round(dx) - 1)));
+          const y = yOfPrice(p);
+          if (wi === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }});
+        ctx.stroke();
+        if (wps.length > 0) {{
+          const lastWp = wps[wps.length - 1];
+          const endX = xOfFut(Math.min(hBars - 1, Math.max(0, Math.round(lastWp[0]) - 1)));
+          const endY = yOfPrice(lastWp[1]);
+          ctx.fillStyle = 'rgba(' + rgb + ', ' + Math.min(1, alpha + 0.1).toFixed(2) + ')';
+          ctx.font = 'bold 11px sans-serif';
+          const tag = sc.name + ' ' + Math.round(freq * 100) + '%(n=' + nSamp + (lowSample ? ',低样本' : '') + ')';
+          ctx.fillText(tag, Math.max(divX + 6, endX - 110), endY - 6 - (idxSc % 2) * 12);
+        }}
+        ctx.restore();
+      }});
     }}
 
     // Realized path overlay when scrubbing replay slider

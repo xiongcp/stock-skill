@@ -10,6 +10,8 @@ import math
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Callable
 
+from scenarios import build_scenarios_with_base_rates
+
 REVERSAL = 0.05             # ABC：B 浪至少反向 5%
 B_MIN_RETRACE = 0.382       # ABC：B 浪至少收回 A 浪的 0.382
 B_MAX_RETRACE = 0.9         # ABC：B 浪收回超过 A 浪的 0.9 就是双顶/双底或区间，不再按 ABC 划分
@@ -882,6 +884,7 @@ def compute_structure_layer(
     show: int,
     price_decimals: Callable[[float, str], int] | None = None,
     horizon_bars: int = 15,
+    benchmark_bars: list[dict] | None = None,
 ) -> dict[str, Any]:
     """一次性计算结构层全部结果，供 JSON 报告与 PNG 渲染共用。
 
@@ -940,6 +943,32 @@ def compute_structure_layer(
         live_price=float(ref_p) if active_intra else None,
         decimals=decimals,
     )
+    scen_bundle = build_scenarios_with_base_rates(
+        hist=hist,
+        sview=sview,
+        ref=float(last_c),
+        live_price=float(ref_p) if active_intra else None,
+        struct=wedge,
+        ladder=ladder,
+        pivots=pivots,
+        scenario_abc=scenario,
+        wave_counts=counts,
+        fibs=fibs,
+        ma_last=ma_last,
+        atr=atr,
+        sigma=sigma,
+        horizon_bars=horizon_bars,
+        base_projections=projections,
+        decimals=decimals,
+        benchmark_bars=benchmark_bars,
+    )
+    projections["bull"]["historical_frequency"] = scen_bundle["bull_frequency"]
+    projections["neutral"]["historical_frequency"] = scen_bundle["neutral_frequency"]
+    projections["bear"]["historical_frequency"] = scen_bundle["bear_frequency"]
+    projections["scenarios"] = scen_bundle["scenarios"]
+    projections["scenario_count"] = scen_bundle["scenario_count"]
+    projections["scenario_signature"] = scen_bundle["scenario_signature"]
+    projections["impulse_wave"] = scen_bundle["impulse_wave"]
     # 展示用波段骨架：同一阈值在全部已收盘K线上的 ZigZag，下标换算到主图
     display_pivots = [dict(p, idx=p["idx"] - view_start) for p in zigzag(completed, zz_thr) if p["idx"] >= view_start]
     return {

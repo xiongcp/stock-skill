@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+## [5.3.0] - 2026-10-18
+
+### 新增（阶段 2：多情景引擎与历史条件频率，O3-20~O3-24）
+
+- `scripts/scenarios.py` 与 `references/scenario-playbook.md`（`O3-20`）：8 类标准情景库（趋势延续、突破回踩、假突破回落、区间震荡、破位下行、C 浪末端反转、超跌反弹、收敛末端变盘），代码 `SCENARIO_PLAYBOOK` 与文档表格逐字一一对应；新增推动 5 浪硬规则识别（浪 2 不破浪 1 起点、浪 3 非最短、浪 4 不进入浪 1 区间）；每个截面动态输出 `2~5` 个前提成立的情景，触发位距现价不足 0.5 ATR 时归为「已在进行中」（`status = "ACTIVE"`），时间窗取历史到达目标用时分位数并截断在预测期内。
+- `scripts/base_rates.py`（`O3-21`）：在标的自身历史上对每个情景规则做逐点无前视事件研究（只消费结果期已完全成熟的样本 `t + H <= t_now`），输出先到目标 / 先到失效 / 到期的频率、样本数 `n`、95% Wilson 置信区间、到达目标用时分位数与 MAE/MFE；当 `n < 30` 时通过 Beta-Binomial 向市场基准指数同情景频率收缩并标注「低样本」。
+- `scripts/evaluation.py`（`O3-22`）：回测新增 `scenario_frequency_brier`，输出历史条件频率的样本外 Brier 分数、对照全样本基准率（climatology）的 Brier 分数、技能分 `BSS` 与 5 档可靠性分桶表；仅当 `brier_skill_score > 0` 时才输出「历史频率具有区分度」。无前视审计同步覆盖多情景与历史条件频率。
+- `scripts/render_structure_chart.py`、`scripts/render_html.py`、`scripts/render_report_md.py`（`O3-23`）：PNG 与 HTML 按历史频率区分推演折线线宽与透明度，图例与标签写出频率与样本数 `n`，低样本（`n < 30`）强制使用虚线；报告第 3 节与第 7 节同步输出多情景历史频率表与 Brier 检验。
+- `scripts/forecast.py`（`O3-24`）：新增仅供展示的情景条件扇形 `scenario_conditional_fan`（`display_only = True, calibrated = False`，图例标明「情景混合（非校准区间）」），默认鞅中心分期限保形区间保持不变。
+
+### 新增（阶段 3：受约束的 LLM 情景研判与工程增强，O3-30~O3-35）
+
+- `scripts/judgment.py`（`O3-30`）：每次运行自动生成结构化证据包 `*_judgment_pack.json`（同步写入 `report["judgment_pack"]`），包含每条带精确 `json_path` 可在 `result.json` 溯源的证据 `E1…En`、冲突信号 `C1…Cm`、各情景 L2 历史条件频率与归一化互斥基准概率，以及合法价格白名单。
+- `references/llm-judgment-protocol.md` 与 `SKILL.md`（`O3-31`）：定义受约束的 LLM 情景研判协议，要求先分别引用支持与反对证据、以 L2 历史条件频率为锚点做有界调整、明确标注「主观研判」并写出证伪条件。
+- `scripts/validate_judgment.py`（`O3-32`）：校验 `*_judgment.json` 的 JSON 结构、互斥情景概率之和等于 `100.0%`、单情景调整幅度上限（`n >= 30` 最多 `±15%`，`n < 30` 最多 `±10%`）、证据编号存在性、正文与关键价位白名单校验及「主观研判」标注；支持 `--append-log` 追加至 `judgment_log.jsonl` 与 `--update-report` 合入报告。
+- `scripts/render_report_md.py`（`O3-33`）：新增「LLM 情景研判（主观判断，已记录待检验）」独立章节，与确定性指标章节严格隔离，展示各情景基准概率、调整后主观研判概率、调整幅度、证据编号与证伪条件。
+- `scripts/score_judgments.py`（`O3-34`）：对 `judgment_log.jsonl` 中已到期（`H` 个交易日已完全收盘）的研判记录拉取/回放真实行情，计算 Brier 分数、对数损失、5 档可靠性分桶表以及相对 L2 历史频率基准的技能分 `BSS`（当 `matured >= 20` 且 `BSS <= 0` 时提示收紧调整上限）。
+- `scripts/lint_response.py`（`O3-35`）：新增 Agent 最终回复文本契约校验器，自动检查 `UNAVAILABLE` 零价格、`PARTIAL` 告警置顶、风控否决置顶、禁用概率术语、价格白名单与免责声明。
+- 港股 ETF 自动识别与回测加速：`market_rules.py` 与 `resolve_symbol.py` 新增 `is_hk_etp_code`，自动识别港交所 ETF/ETP 代码段并豁免双边印花税；`evaluation.run_plan_backtest` 在逐日回放中传入 `include_forecast=False` 跳过冗余保形区间校准计算；`render_html.py` 将交收制度枚举转为中文说明。
+
 ## [5.2.0] - 2026-10-18
 
 ### 修正（推演失真，O3-01~O3-05）

@@ -22,7 +22,7 @@
 | 2 | 漏写形态轨道、ABC 测算位或三条推演路径 | 完整粘贴 `3_wedge_and_levels`、`4_three_projections`、`5_structure_verdict`。 |
 | 3 | 把不同指数的点位串在一起 | 上证只看上证的 JSON，创业板只看创业板的 JSON，每个指数单独成段。 |
 | 4 | 把 ABC 的 A 浪低点当成窗口最低点 | 主图窗口最低点只看 `legacy_summary.window_low`，A 浪终点只看 `legacy_summary.scenario.a_end`，C 浪最远位置只看 `legacy_summary.scenario.c_progress`。 |
-| 5 | 编造概率（如"上涨概率 60%"、"大概率突破"），或把 `rule_score`、状态分说成胜率 | 推演路径只写「触发条件 → 目标价 → 失效条件」。只有 JSON 中存在对应字段时才能给概率：脚本算出的"历史条件频率"必须带样本数 n 与 95% 区间；LLM 的"主观研判概率"必须锚定历史条件频率、调整不超过上限、写入研判 JSON 并标注"主观研判，已记录待检验"。当前版本两类字段都还没有，因此不得出现任何概率数字（规则见 `SKILL.md`"对外表述与概率规则"）。 |
+| 5 | 编造概率（如"上涨概率 60%"、"大概率突破"），或把 `rule_score`、状态分说成胜率 | 推演路径按「触发条件 → 目标价 → 失效条件」转述；历史频率只能引用 `rule_scenarios` 中的 `historical_frequency.display_cn`（必须带样本数 n 与 95% Wilson 区间，n < 30 注明低样本向基准收缩，且统一称"历史条件频率"，不叫胜率或上涨概率）。LLM 的"主观研判概率"必须严格按 `references/llm-judgment-protocol.md` 锚定基准概率、引用 `E1…En` 证据编号、写出 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验后才能输出，且必须标注"主观研判，已记录待检验"。 |
 | 6 | 把成交量写成"成交额 XX 万亿" | 只抄 `1_completed_summary` 里的"为5日均量的 X 倍、20日均量的 Y 倍"。 |
 | 7 | 收盘后还写"盘中未收盘"，或沿用早盘的旧低点 | 每次回答都重新运行脚本，直接粘贴 `2_intraday_summary`。 |
 | 8 | 按教科书改判形态（如"下降楔形，所以必然上涨"） | 形态和突破方向以 `5_structure_verdict` 为准。比如脚本写的是"收盘跌破下轨（向下突破）"，就不能说成"看涨楔形"。 |

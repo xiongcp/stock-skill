@@ -8,7 +8,8 @@
       "structure_layer_pivots",
       "candlestick_patterns",
       "smc_structures",
-      "conformal_forecast"
+      "conformal_forecast",
+      "multi_scenarios_base_rates"
     ],
     "mismatches_count": 0,
     "mismatches": [],
@@ -164,6 +165,122 @@
         "median_forward_return_pct": 0.14,
         "up_share_pct": 51.9
       }
+    },
+    "scenario_frequency_brier": {
+      "samples": 741,
+      "brier_score": 0.2234,
+      "climatology_base_rate": 0.3711,
+      "climatology_brier_score": 0.2334,
+      "brier_skill_score": 0.0429,
+      "discriminative": true,
+      "reliability_buckets": [
+        {
+          "bucket": [
+            0.0,
+            0.2
+          ],
+          "bucket_pct": "0%~20%",
+          "count": 143,
+          "mean_predicted_freq": 0.1552,
+          "empirical_hit_rate": 0.0839,
+          "calibration_gap": -0.0713
+        },
+        {
+          "bucket": [
+            0.2,
+            0.4
+          ],
+          "bucket_pct": "20%~40%",
+          "count": 235,
+          "mean_predicted_freq": 0.3548,
+          "empirical_hit_rate": 0.4894,
+          "calibration_gap": 0.1346
+        },
+        {
+          "bucket": [
+            0.4,
+            0.6
+          ],
+          "bucket_pct": "40%~60%",
+          "count": 278,
+          "mean_predicted_freq": 0.4592,
+          "empirical_hit_rate": 0.3633,
+          "calibration_gap": -0.0959
+        },
+        {
+          "bucket": [
+            0.6,
+            0.8
+          ],
+          "bucket_pct": "60%~80%",
+          "count": 51,
+          "mean_predicted_freq": 0.6233,
+          "empirical_hit_rate": 0.4118,
+          "calibration_gap": -0.2115
+        },
+        {
+          "bucket": [
+            0.8,
+            1.0
+          ],
+          "bucket_pct": "80%~100%",
+          "count": 34,
+          "mean_predicted_freq": 0.8506,
+          "empirical_hit_rate": 0.7647,
+          "calibration_gap": -0.0859
+        }
+      ],
+      "per_scenario": {
+        "APEX_BREAKOUT": {
+          "samples": 34,
+          "mean_predicted_freq": 0.8506,
+          "empirical_hit_rate": 0.7647,
+          "brier_score": 0.189
+        },
+        "BREAKDOWN_DECLINE": {
+          "samples": 184,
+          "mean_predicted_freq": 0.3929,
+          "empirical_hit_rate": 0.462,
+          "brier_score": 0.2667
+        },
+        "BREAKOUT_RETEST": {
+          "samples": 154,
+          "mean_predicted_freq": 0.374,
+          "empirical_hit_rate": 0.3766,
+          "brier_score": 0.2403
+        },
+        "C_WAVE_REVERSAL": {
+          "samples": 76,
+          "mean_predicted_freq": 0.475,
+          "empirical_hit_rate": 0.3947,
+          "brier_score": 0.2936
+        },
+        "FALSE_BREAKOUT_REVERSAL": {
+          "samples": 71,
+          "mean_predicted_freq": 0.537,
+          "empirical_hit_rate": 0.4789,
+          "brier_score": 0.2599
+        },
+        "OVERSOLD_BOUNCE": {
+          "samples": 47,
+          "mean_predicted_freq": 0.5713,
+          "empirical_hit_rate": 0.4894,
+          "brier_score": 0.2917
+        },
+        "RANGE_OSCILLATION": {
+          "samples": 147,
+          "mean_predicted_freq": 0.1564,
+          "empirical_hit_rate": 0.0816,
+          "brier_score": 0.0842
+        },
+        "TREND_CONTINUATION": {
+          "samples": 28,
+          "mean_predicted_freq": 0.3954,
+          "empirical_hit_rate": 0.25,
+          "brier_score": 0.22
+        }
+      },
+      "verdict": "样本外 Brier = 0.2234，优于全样本基准率 Brier = 0.2334（技能分 BSS = +0.043 > 0，历史频率具有区分度）"
     },
     "sample_trades": [
       {

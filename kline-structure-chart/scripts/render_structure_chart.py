@@ -292,22 +292,26 @@ def draw_arrow_polyline(
     fill: tuple[int, int, int],
     width: float = 3,
     dashed: bool = False,
+    alpha: int = 255,
 ) -> None:
     if len(pts) < 2:
         return
-    glow_col = (*fill[:3], 42 if not dashed else 28)
+    a_clamped = max(60, min(255, int(alpha)))
+    line_col = (*fill[:3], a_clamped) if a_clamped < 255 else fill[:3]
+    glow_alpha = max(10, int(round((42 if not dashed else 28) * (a_clamped / 255.0))))
+    glow_col = (*fill[:3], glow_alpha)
     for i in range(len(pts) - 1):
         if dashed:
             dashed_line(draw, pts[i], pts[i + 1], fill=glow_col, width=width + 3, dash=8, gap=5)
-            dashed_line(draw, pts[i], pts[i + 1], fill=fill, width=width, dash=8, gap=5)
+            dashed_line(draw, pts[i], pts[i + 1], fill=line_col, width=width, dash=8, gap=5)
         else:
             draw.line([pts[i], pts[i + 1]], fill=glow_col, width=width + 4.5, joint="curve")
     if not dashed:
-        draw.line(pts, fill=fill, width=width, joint="curve")
+        draw.line(pts, fill=line_col, width=width, joint="curve")
     # 绘出中间转折圆点（外发光 + 深色内芯）
     for px, py in pts[1:-1]:
-        draw.ellipse((px - 6.5, py - 6.5, px + 6.5, py + 6.5), fill=(*fill[:3], 55))
-        draw.ellipse((px - 4.2, py - 4.2, px + 4.2, py + 4.2), fill=PANEL_BG, outline=fill, width=2)
+        draw.ellipse((px - 6.5, py - 6.5, px + 6.5, py + 6.5), fill=(*fill[:3], max(15, int(round(55 * a_clamped / 255.0)))))
+        draw.ellipse((px - 4.2, py - 4.2, px + 4.2, py + 4.2), fill=PANEL_BG, outline=line_col, width=2)
     # 末端流线型燕尾箭头
     x1, y1 = pts[-2]
     x2, y2 = pts[-1]
@@ -318,7 +322,7 @@ def draw_arrow_polyline(
     p_left = (x2 + head_len * math.cos(a1), y2 + head_len * math.sin(a1))
     p_right = (x2 + head_len * math.cos(a2), y2 + head_len * math.sin(a2))
     p_notch = (x2 - head_len * 0.68 * math.cos(angle), y2 - head_len * 0.68 * math.sin(angle))
-    draw.polygon([pts[-1], p_left, p_notch, p_right], fill=fill)
+    draw.polygon([pts[-1], p_left, p_notch, p_right], fill=line_col)
 
 
 def draw_pivot_dot(draw: _ScaledDraw | ImageDraw.ImageDraw, x: float, y: float, color: tuple[int, int, int]) -> None:
@@ -618,6 +622,22 @@ def render(
     )
     draw.text((left, 50), subtitle, font=f_sub, fill=MUTED)
 
+    def _branch_freq_style(branch_key: str, default_dashed: bool) -> tuple[str, float, int, bool]:
+        hf = (projections.get(branch_key) or {}).get("historical_frequency") or {}
+        if not hf or hf.get("target_freq") is None:
+            return "", 2.8, 255, default_dashed
+        freq = max(0.0, min(1.0, float(hf["target_freq"])))
+        n_samp = int(hf.get("sample_size") or 0)
+        low_s = bool(hf.get("low_sample", n_samp < 30))
+        pct = int(round(freq * 100))
+        w_val = round(1.8 + 2.2 * freq, 2)
+        a_val = max(135, min(255, int(round((145 if low_s else 175) + 80 * freq))))
+        return f" {pct}%(n={n_samp})", w_val, a_val, (True if low_s else default_dashed)
+
+    bull_ftag, bull_w, bull_a, bull_dash = _branch_freq_style("bull", False)
+    neut_ftag, neut_w, neut_a, neut_dash = _branch_freq_style("neutral", True)
+    bear_ftag, bear_w, bear_a, bear_dash = _branch_freq_style("bear", False)
+
     legend = [
         ("阳线", UP, "box"),
         ("阴线", DOWN, "box"),
@@ -629,13 +649,20 @@ def render(
         ("波段", ZIGZAG, "dash"),
         ("上轨", WEDGE_UPPER, "line"),
         ("下轨", WEDGE_LOWER, "line"),
-        ("上攻", PROJ_BULL, "line"),
-        ("震荡", PROJ_NEUTRAL, "dash"),
-        ("下探", PROJ_BEAR, "line"),
+        (f"上攻{bull_ftag}", PROJ_BULL, "dash" if bull_dash else "line"),
+        (f"震荡{neut_ftag}", PROJ_NEUTRAL, "dash" if neut_dash else "line"),
+        (f"下探{bear_ftag}", PROJ_BEAR, "dash" if bear_dash else "line"),
     ]
-    leg_widths = [18 + text_size(draw, name, f_tiny)[0] for name, _, _ in legend]
-    leg_gap = 12
+    leg_face = f_tiny
+    leg_gap = 10
+    leg_widths = [18 + text_size(draw, name, leg_face)[0] for name, _, _ in legend]
     total_leg_w = sum(leg_widths) + leg_gap * (len(legend) - 1) + 24
+    title_w = text_size(draw, title, f_title)[0]
+    if width - 24 - total_leg_w < left + title_w + 16:
+        leg_face = f_tiny_sm
+        leg_gap = 8
+        leg_widths = [18 + text_size(draw, name, leg_face)[0] for name, _, _ in legend]
+        total_leg_w = sum(leg_widths) + leg_gap * (len(legend) - 1) + 24
     leg_x1 = width - 24 - total_leg_w
     draw.rounded_rectangle((leg_x1, 16, width - 24, 44), radius=7, fill=CARD_BG, outline=CARD_BORDER, width=1)
     lx = leg_x1 + 12
@@ -648,7 +675,7 @@ def render(
         else:
             draw.line((lx, 30, lx + 13, 30), fill=color, width=2.8)
             draw.ellipse((lx + 4, 27.5, lx + 9, 32.5), fill=color)
-        draw.text((lx + 17, 22), name, font=f_tiny, fill=TEXT)
+        draw.text((lx + 17, 22), name, font=leg_face, fill=TEXT)
         lx += item_w + leg_gap
 
     # ---------------- 顶部 5 卡片 KPI 仪表盘 (Y: 76 ~ 142) ----------------
@@ -786,7 +813,12 @@ def render(
         draw.text((sx + 12, main_bottom - fth - 9), fit_txt, font=f_tiny, fill=MUTED)
 
     dashed_line(draw, (div_x, top), (div_x, main_bottom), fill=(96, 165, 250, 220), width=1.8, dash=8, gap=6)
-    zone_txt = f"规则推演区 · {up_word}:上攻 / 黄:震荡 / {down_word}:下探（非预测）"
+    scen_cnt = len(projections.get("scenarios") or [])
+    zone_txt = (
+        f"规则推演区({scen_cnt}情景) · 线宽/深浅按历史频率 · 虚线=低样本(n<30)"
+        if scen_cnt
+        else f"规则推演区 · {up_word}:上攻 / 黄:震荡 / {down_word}:下探（非预测）"
+    )
     ztw, _ = text_size(draw, zone_txt, f_tiny)
     z_right = min(chart_right - 8, div_x + 34 + ztw)
     draw.rounded_rectangle(
@@ -907,9 +939,9 @@ def render(
         draw.text((div_x + 14, top + 41), v_banner, font=f_tiny_sm, fill=(254, 226, 226))
 
     proj_configs = [
-        ("bull", PROJ_BULL, False, f"上攻目标  {fp(projections['bull']['target_price'])}"),
-        ("neutral", PROJ_NEUTRAL, True, f"震荡中枢  {fp(projections['neutral']['target_price'])}"),
-        ("bear", PROJ_BEAR, False, f"下探目标  {fp(projections['bear']['target_price'])}"),
+        ("bull", PROJ_BULL, bull_dash, bull_w, bull_a, f"上攻 {fp(projections['bull']['target_price'])}{bull_ftag}"),
+        ("neutral", PROJ_NEUTRAL, neut_dash, neut_w, neut_a, f"震荡 {fp(projections['neutral']['target_price'])}{neut_ftag}"),
+        ("bear", PROJ_BEAR, bear_dash, bear_w, bear_a, f"下探 {fp(projections['bear']['target_price'])}{bear_ftag}"),
     ]
     dup_tol = float(ref_p) * 0.003
     skip_labels = set()
@@ -920,17 +952,17 @@ def render(
 
     all_proj_pts: dict[str, list[tuple[int, int]]] = {}
     all_proj_segs: list[tuple[tuple[int, int], tuple[int, int]]] = []
-    for key, col, is_dashed, tag_text in proj_configs:
+    for key, col, is_dashed, w_val, a_val, tag_text in proj_configs:
         waypoints = projections[key]["waypoints_offset"]
         pts = [(x_of(last_bar_idx + dx), yp(p)) for dx, p in waypoints]
         all_proj_pts[key] = pts
         for i in range(len(pts) - 1):
             all_proj_segs.append((pts[i], pts[i + 1]))
-        draw_arrow_polyline(draw, pts, fill=col, width=2.8, dashed=is_dashed)
+        draw_arrow_polyline(draw, pts, fill=col, width=w_val, dashed=is_dashed, alpha=a_val)
         right_gutter_tags.append((pts[-1][1], tag_text, col))
 
     step_boxes: list[tuple[int, int, int, int]] = []
-    for key, col, _, _ in proj_configs:
+    for key, col, _, _, _, _ in proj_configs:
         waypoints = projections[key]["waypoints_offset"]
         pts = all_proj_pts[key]
         for dx, step_txt in projections[key]["step_labels"]:

@@ -13,6 +13,7 @@ from contracts import (
 )
 from forecast import compute_conformal_forecast
 from indicators import compute_all_indicators
+from judgment import build_judgment_pack
 from market_rules import (
     DEFAULT_BENCHMARKS,
     get_market_microstructure_rules,
@@ -206,6 +207,7 @@ def analyze_bundle(
     request: AnalysisRequest,
     include_replay: bool = True,
     structure: dict[str, Any] | None = None,
+    include_forecast: bool = True,
 ) -> AnalysisReport:
     """100% 纯数学计算核心：从 OHLCV 矩阵计算全部指标、形态证据、SMC、多周期共振分、三重屏障与保形预测。"""
     target = bundle["target"]
@@ -217,6 +219,7 @@ def analyze_bundle(
     show = int(request.get("display_bars") or 120)
     struct_days = int(request.get("structure_bars") or STRUCT_DAYS)
     horizon_bars = int(request.get("horizon_bars") or 15)
+    bench_bars_raw = (bundle.get("benchmark") or {}).get("bars")
 
     # 1. 结构层：由 structure.compute_structure_layer 统一计算（与 PNG 共用同一份结果，窗口与 --days 无关）
     layer = (
@@ -228,6 +231,7 @@ def analyze_bundle(
             show,
             price_decimals=lambda price, day: price_decimals(price, inst["market"], inst["asset_type"], day),
             horizon_bars=horizon_bars,
+            benchmark_bars=bench_bars_raw,
         )
     )
     completed, active_intra, data_note = layer["completed"], layer["active_intra"], layer["data_note"]
@@ -244,7 +248,7 @@ def analyze_bundle(
     # 2. 全量数学指标与 Qlib 风格量价因子计算：在固定 HISTORY_BARS 历史上预热（EMA200/SMA250 需要足够样本，且与 --days 无关），
     #    再把序列截到结构窗口长度，保持与 sview 下标对齐
     ind_all = _indicators_on_window(hist, len(sview))
-    ind_full = compute_all_indicators(completed)
+    ind_full = compute_all_indicators(completed) if include_forecast else ind_all
     causal_pivs = causal_swing_pivots(sview, zz_thr)
 
     # 3. 100% 代数形态、背离、SMC 与 Volume Profile
@@ -376,46 +380,63 @@ def analyze_bundle(
     )
 
     # 7. 未来 H 步（默认 15 日）分位数预测 + 序列保形预测校准
-    future_proj = compute_conformal_forecast(
-        completed,
-        meta=meta,
-        horizon_bars=horizon_bars,
-        extra_context=extra_ctx,
-    )
+    if include_forecast:
+        future_proj = compute_conformal_forecast(
+            completed,
+            meta=meta,
+            horizon_bars=horizon_bars,
+            extra_context=extra_ctx,
+            scenarios=projections.get("scenarios"),
+        )
+    else:
+        base_p = round(float(last_c), p_dec)
+        future_proj = {
+            "horizon_bars": horizon_bars,
+            "horizon_dates": [],
+            "q10": [base_p] * horizon_bars,
+            "q25": [base_p] * horizon_bars,
+            "base_median_q50": [base_p] * horizon_bars,
+            "optimistic_q75": [base_p] * horizon_bars,
+            "q90": [base_p] * horizon_bars,
+            "conformal_80pct_band": [[base_p, base_p]] * horizon_bars,
+            "promotion_status": "RESEARCH_CALIBRATION_WARMUP",
+            "calendar_coverage": {"covered": True, "coverage_end": "2026-12-31", "estimated_dates": []},
+        }
 
     # 8. 导出用于交互式 HTML 看板的完整时间序列（按品种最小价位保留小数，避免 ETF 0.001 价位被截成 2 位小数）
     p_dec = price_decimals(float(last_c), inst["market"], inst["asset_type"], view[-1]["day"])
-    nw_smooth = causal_nadaraya_watson([float(b["close"]) for b in view], bandwidth=3.0)
     disp_offset = len(completed) - len(view)
     view_bars_export: list[dict[str, Any]] = []
-    for i, b in enumerate(view):
-        full_i = disp_offset + i
-        view_bars_export.append(
-            {
-                "idx": i,
-                "day": b["day"],
-                "open": round(float(b["open"]), p_dec),
-                "high": round(float(b["high"]), p_dec),
-                "low": round(float(b["low"]), p_dec),
-                "close": round(float(b["close"]), p_dec),
-                "volume": round(float(b.get("volume") or 0.0), 2),
-                "complete": True,
-                "ma20": round(float(ma_series[20][full_i]), p_dec) if ma_series[20][full_i] is not None else None,
-                "ma60": round(float(ma_series[60][full_i]), p_dec) if ma_series[60][full_i] is not None else None,
-                "ma120": round(float(ma_series[120][full_i]), p_dec) if ma_series[120][full_i] is not None else None,
-                "ma250": round(float(ma_series[250][full_i]), p_dec) if ma_series[250][full_i] is not None else None,
-                "kernel_smooth": round(nw_smooth[i], p_dec),
-                "rsi14": round(float(ind_full["series"]["rsi14"][full_i]), 2)
-                if ind_full["series"]["rsi14"][full_i] is not None
-                else None,
-                "macd_hist": round(float(ind_full["series"]["macd"]["hist"][full_i]), 3)
-                if ind_full["series"]["macd"]["hist"][full_i] is not None
-                else None,
-                "rvol20": round(float(ind_full["series"]["rvol20"][full_i]), 2)
-                if ind_full["series"]["rvol20"][full_i] is not None
-                else None,
-            }
-        )
+    if include_forecast:
+        nw_smooth = causal_nadaraya_watson([float(b["close"]) for b in view], bandwidth=3.0)
+        for i, b in enumerate(view):
+            full_i = disp_offset + i
+            view_bars_export.append(
+                {
+                    "idx": i,
+                    "day": b["day"],
+                    "open": round(float(b["open"]), p_dec),
+                    "high": round(float(b["high"]), p_dec),
+                    "low": round(float(b["low"]), p_dec),
+                    "close": round(float(b["close"]), p_dec),
+                    "volume": round(float(b.get("volume") or 0.0), 2),
+                    "complete": True,
+                    "ma20": round(float(ma_series[20][full_i]), p_dec) if ma_series[20][full_i] is not None else None,
+                    "ma60": round(float(ma_series[60][full_i]), p_dec) if ma_series[60][full_i] is not None else None,
+                    "ma120": round(float(ma_series[120][full_i]), p_dec) if ma_series[120][full_i] is not None else None,
+                    "ma250": round(float(ma_series[250][full_i]), p_dec) if ma_series[250][full_i] is not None else None,
+                    "kernel_smooth": round(nw_smooth[i], p_dec),
+                    "rsi14": round(float(ind_full["series"]["rsi14"][full_i]), 2)
+                    if ind_full["series"]["rsi14"][full_i] is not None
+                    else None,
+                    "macd_hist": round(float(ind_full["series"]["macd"]["hist"][full_i]), 3)
+                    if ind_full["series"]["macd"]["hist"][full_i] is not None
+                    else None,
+                    "rvol20": round(float(ind_full["series"]["rvol20"][full_i]), 2)
+                    if ind_full["series"]["rvol20"][full_i] is not None
+                    else None,
+                }
+            )
 
     replay_snapshots = (
         _build_replay_snapshots(completed, meta=meta, benchmark_info=benchmark_info, horizon_bars=horizon_bars, num_snapshots=5)
@@ -455,7 +476,7 @@ def analyze_bundle(
     }
 
     report: AnalysisReport = {
-        "schema_version": "5.2.0",
+        "schema_version": "5.3.0",
         "meta": meta,
         "request": request,
         "market_benchmark": benchmark_info,
@@ -497,7 +518,7 @@ def analyze_bundle(
             "forecast_promotion_status": future_proj["promotion_status"],
         },
         "reproducibility": {
-            "engine_version": "5.2.0",
+            "engine_version": "5.3.0",
             "bars_hash": compute_canonical_hash([(b["day"], b["close"]) for b in completed[-120:]]),
             "report_hash": "",
         },
@@ -537,5 +558,9 @@ def analyze_bundle(
             "q50": report["future_projection_15d"]["base_median_q50"],
         }
     )
-    validate_report(report)
+    if include_forecast:
+        report["judgment_pack"] = build_judgment_pack(report)
+        validate_report(report)
+    else:
+        report["judgment_pack"] = {}
     return report

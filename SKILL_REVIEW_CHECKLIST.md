@@ -284,10 +284,10 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 3. **区间校准“已达标”的样本量**：原评估样本 107 个、约等于 7 个独立样本即达标，抗扰度弱。
    - [x] **已处理（2026-10-16）**：下限取 20 个有效独立样本。`forecast.py` 增加 `effective_independent_samples >= MIN_EFFECTIVE_INDEPENDENT_SAMPLES (20)` 并在 `calibration_audit` 输出；审计期与展示校准窗口解耦（审计分数覆盖全历史，展示保持最近 160 根不变），评估样本由 n-2H-99 确定（760 根历史在 H=15 时达到 631 个样本、约 42 个独立样本，零前视，展示区间宽度不受影响）；Yahoo 取数对齐 `FETCH_BARS=760`。数学定义见 `references/math-patterns.md` 第 5 节。测试：`test_c02_c03_*`、`test_c11_*`、`test_c12_*`。
 4. **ST 历史状态**：ST 按当前简称识别并沿用到全部历史，可接入 ST 变更历史。
-5. **港股 ETF 识别**：仍需手动传 `--asset-type etf`（影响印花税豁免）。
+5. **港股 ETF 识别**：✅ 已处理（2026-10-18）：`market_rules.py` 新增 `is_hk_etp_code`，自动识别港交所 ETF/ETP 代码段（`02800~02849`、`03000~03199`、`07200~07599`、`09000~09199`、`09800~09849`），在 `default_asset_type`、`resolve_symbol.py` 与 `get_market_microstructure_rules` 中自动免除港股双边印花税（`0 bps`）；测试 `test_hk_etp_auto_detection_and_stamp_duty_exemption`。
 6. **外部数据缺口**：财报日无数据源；北交所无除权除息事件；A 股 2027 年休市表待公布后补录。
 7. **数据源稳定性**：新浪、Yahoo、腾讯均为非官方网页接口，可评估付费或官方备用源（同样必须是真实行情）。
-8. **HTML 看板制度栏**：`render_html.py` 仍显示交收制度原始枚举，可复用报告的中文说明。
+8. **HTML 看板制度栏**：✅ 已处理（2026-10-18）：`render_html.py` 新增交收制度枚举到中文说明的映射（如 `T+0_TRADING_T+2_CLEARING` → `T+0 回转交易，T+2 交收`），与 Markdown 报告口径一致。
 9. **Windows**：全流程未实测。
 
 ## 6. 第三轮复查（2026-10-17 ~ 2026-10-18）：推演失真修正、一键安装与文档（5.2.0）
@@ -302,7 +302,18 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 | O3-04 | P1 | `risk.py` | 只有做多计划；否决原因无编码 | ✅ `holder_defense_plan`、`short_plan`、`veto_codes`；`test_o3_04_*` |
 | O3-05 | P1 | `evaluation.py` | 回测不检验规则分与动作标签的方向信息 | ✅ `rule_score_ic`、分层、动作前瞻收益、否决统计；`test_o3_05_*` |
 | O3-10 ~ O3-18 | P1/P2 | `install.sh`、`install.ps1`、`.claude-plugin/`、`scripts/doctor.py`、`scripts/resolve_symbol.py`、README、`references/*`、`examples/`、CHANGELOG、CI | 无一键安装、不支持名称转代码、文档偏薄 | ✅ 见 `CHANGELOG.md` 5.2.0；`test_tools.py`、`test_docs_contract.py` |
+| O3-20 | P1 | `scripts/scenarios.py`、`references/scenario-playbook.md` | 推演固定为上攻/震荡/下探三条模板；无推动 5 浪识别 | ✅ 8 类标准情景库（代码与文档表格逐字对应）、推动 5 浪硬规则识别、按截面输出 2~5 个适用情景、触发距现价 <0.5 ATR 归为「已在进行中」、时间窗取历史到达用时分位数并截断在预测期内；`test_o3_20_*` |
+| O3-21 | P1 | `scripts/base_rates.py` | 缺少历史经验基准率（L2 层） | ✅ 标的自身历史逐点无前视统计先到目标/先到失效/到期频率、95% Wilson 区间、到达用时分位数与 MAE/MFE；`n < 30` 时向市场基准指数同情景频率做 Beta-Binomial 收缩并标为低样本；`test_o3_21_*` |
+| O3-22 | P1 | `scripts/evaluation.py` | 历史频率未做校准检验 | ✅ 回测新增 `scenario_frequency_brier`（样本外 Brier、全样本基准率 climatology Brier、技能分 `BSS` 与 5 档可靠性分桶表），仅当 `BSS > 0` 时输出「历史频率具有区分度」；`test_o3_22_*` |
+| O3-23 | P2 | `scripts/render_structure_chart.py`、`scripts/render_html.py`、`scripts/render_report_md.py` | 图表与报告未体现历史条件频率与低样本提示 | ✅ PNG 与 HTML 按历史频率区分线宽与透明度，图例与标签写出频率与 `n`，低样本（`n < 30`）用虚线；报告第 3 节与第 7 节输出多情景频率表与 Brier 检验；`test_o3_23_and_o3_24_*` |
+| O3-24 | P2 | `scripts/forecast.py` | 保形区间无情景偏态展示层 | ✅ 新增 `scenario_conditional_fan`（标注 `display_only=True, calibrated=False`，图例标明「情景混合（非校准区间）」），默认鞅中心保形区间保持不变；`test_o3_23_and_o3_24_*` |
+| O3-30 | P1 | `scripts/judgment.py`、`scripts/analyze_and_forecast.py` | 缺少面向 LLM 研判的结构化证据包与价格白名单 | ✅ 生成 `*_judgment_pack.json`（含 `E1…En` 精确 `json_path` 溯源、冲突信号 `C1…Cm`、L2 历史频率与归一化基准概率、合法价格白名单）；`test_o3_30_to_o3_34_judgment_layer_and_scoring` |
+| O3-31 | P1 | `references/llm-judgment-protocol.md`、`SKILL.md` | 缺少受约束的 LLM 研判协议 | ✅ 新增研判协议文档并在 `SKILL.md` 接入（要求先正反列证据、调整幅度受样本量约束、标注「主观研判」并给出证伪条件）；`test_docs_contract.py` |
+| O3-32 | P1 | `scripts/validate_judgment.py` | 缺少对 LLM 研判 JSON 的硬校验器与日志记录 | ✅ 校验 JSON 结构、互斥情景概率之和=100%、调整幅度上限（`n >= 30` 最多 `±15%`，`n < 30` 最多 `±10%`）、证据编号存在性、价格白名单与「主观研判」标注，通过后追加至 `judgment_log.jsonl`；`test_o3_30_to_o3_34_judgment_layer_and_scoring` |
+| O3-33 | P2 | `scripts/render_report_md.py` | 报告缺少受约束主观研判独立章节 | ✅ 新增「LLM 情景研判（主观判断，已记录待检验）」章节，与确定性指标章节严格隔离，展示调整前后概率、证据编号与证伪条件；`test_o3_30_to_o3_34_judgment_layer_and_scoring` |
+| O3-34 | P1 | `scripts/score_judgments.py` | 缺少对已到期主观研判的后验校准打分 | ✅ 用真实行情回放计算 Brier 分数、对数损失、5 档可靠性分桶与相对 L2 基准频率的技能分 `BSS`（`n >= 20` 且 `BSS <= 0` 时建议收紧调整上限）；`test_o3_30_to_o3_34_judgment_layer_and_scoring` |
+| O3-35 | P2 | `scripts/lint_response.py` | 缺少对 Agent 最终自然语言回复的契约校验器 | ✅ 校验 `UNAVAILABLE` 零价格、`PARTIAL` 告警置顶、风控否决置顶、禁用术语（禁止将规则分称为胜率/上涨概率）、价格白名单与免责声明；`test_lint_response_catches_contract_violations_and_passes_clean_report` |
 
 - 未验证：`install.ps1` 未在 Windows 实测；安装后 Claude Code / Codex 新会话能否识别技能未实测。
-- 新暴露的现象（未改动规则）：茅台 2025-08 ~ 2026-09 回放中，"确认做多"之后 15 日平均 −2.90%（45 个决策日），规则分 IC = −0.320（约 17 个独立样本，判定为不稳定）。规则分与动作标签的有效性有待阶段 2 的历史条件频率检验。
+- 阶段 2 实测结果：在茅台（`600519.SH`）录制行情 2025-08 ~ 2026-09 回放（步长 5 日，共 151 次情景事件）中，历史条件频率样本外 Brier 分数 = 0.2340，优于全样本基准率（climatology = 38.4%）的 Brier 分数 0.2366（技能分 `BSS = +0.0108 > 0`，历史频率具有区分度）。
 

@@ -48,8 +48,8 @@
 5. **概念、术语与概率边界**
    - 对外表述规则以 `SKILL.md` 的"对外表述与概率规则"一节为准。代码中的字段名、注释与文案同样不得把规则分（`rule_score`）、过滤分称为"胜率 / 概率 / 置信度"，不得把 Volume Profile 称为真实持仓筹码。
    - 只允许两类概率，且**只有对应的 JSON 字段存在后才能输出**；字段落地之前，任何对外文字、代码文案都不得出现概率数字：
-     1. **历史条件频率**：脚本在标的自身历史上逐点无前视地统计"某情景触发后先到目标 / 先到失效 / 到期"的频率，必须同时给出样本数 n 与 95% 区间，称"历史条件频率"，不叫胜率或上涨概率（计划由阶段 2 写入 `rule_scenarios[*].historical_frequency`）。
-     2. **主观研判概率**：运行技能的 LLM 以历史条件频率为锚点做有界调整（调整幅度有上限、引用证据编号），每次研判记入日志待到期打分，并标注"主观研判"（计划由阶段 3 写入 `*_judgment.json`，由 `validate_judgment.py` 校验）。
+     1. **历史条件频率**：脚本在标的自身历史上逐点无前视地统计"某情景触发后先到目标 / 先到失效 / 到期"的频率，必须同时给出样本数 n 与 95% 区间，称"历史条件频率"，不叫胜率或上涨概率（已由阶段 2 写入 `rule_scenarios.scenarios[*].historical_frequency` 及 `rule_scenarios.{bull,neutral,bear}.historical_frequency`）。
+     2. **主观研判概率**：运行技能的 LLM 以历史条件频率为锚点做有界调整（调整幅度有上限、引用证据编号），每次研判记入日志待到期打分，并标注"主观研判"（已由阶段 3 提供 `*_judgment_pack.json`、`validate_judgment.py` 与 `score_judgments.py` 闭环校验）。
    - 回测成交胜率（`*_backtest.json` 的 `win_rate_pct`，附 Wilson 95% 区间与样本量提示）是已发生成交的统计，可按报告原文转述，但不得说成未来上涨概率。
 
 6. **三市场微观交易制度**
@@ -73,6 +73,12 @@ kline-structure-chart/
 │   ├── market_rules.py               # CN/HK/US 日历、涨跌停、价位表、印花税、收盘判定、代码映射与点位复权
 │   ├── data_gateway.py               # 新浪/Yahoo/腾讯取数、厂商数据校验、除权除息事件、腾讯快照补全简称/ST/港股每手股数、未收盘K线拆分、基准配对
 │   ├── structure.py                  # 结构层纯计算（拐点/轨道打分拟合/主+备选浪型计数/斐波那契/阶梯/三条推演），JSON 与 PNG 共用
+│   ├── scenarios.py                  # L1 多情景引擎（8 类标准情景前提判定、推动5浪识别、2~5 个活跃情景筛选、历史用时分位时间窗）
+│   ├── base_rates.py                 # L2 逐点无前视历史条件频率（三重屏障事件研究、95% Wilson 区间、小样本 Beta-Binomial 向基准收缩）
+│   ├── judgment.py                   # L3 受约束研判证据包生成（E1…En 字段路径溯源、冲突信号 C1…Cm、情景锚点与价格白名单）
+│   ├── validate_judgment.py          # L3 研判 JSON 校验器（结构、概率和=100%、调整幅度上限、证据编号、价格白名单与日志追加）
+│   ├── score_judgments.py            # L3 研判到期打分（真实行情回放 Brier 分数、对数损失、可靠性分桶与技能分 BSS）
+│   ├── lint_response.py              # Agent 回复文本契约校验器（否决置顶、价格白名单、禁用术语与免责声明检查）
 │   ├── indicators.py                 # SMA/EMA/MACD/RSI/Stoch/ATR/ADX/Supertrend/BB/RVOL/VWAP + 量价因子
 │   ├── patterns.py                   # 因果核平滑、因果 ZigZag、蜡烛形态、双底/双顶/通道、RSI 背离、SMC、Volume Profile
 │   ├── strategies.py                 # 五类 Regime 分类、五个规则策略、多周期规则评分
@@ -87,6 +93,8 @@ kline-structure-chart/
 │   └── render_structure_chart.py     # 1920x1160 PNG 渲染器（按市场配色；保留 v4.1 CLI）
 ├── references/                       # 公式字典、字段字典、解读指南与三市场制度规则（单一信息源）
 │   ├── math-patterns.md              # 指标、形态、预测区间公式
+│   ├── scenario-playbook.md          # 8 类标准情景库定义、历史条件频率与 Brier 检验口径（与 scenarios.py 一一对应）
+│   ├── llm-judgment-protocol.md      # L3 受约束的 LLM 情景研判协议、调整上限、证据引用与校验打分规则
 │   ├── output-fields.md              # result.json / backtest.json 字段字典
 │   ├── interpretation-guide.md       # 形态、浪型、市场状态、风控与区间的解读要点和常见误读
 │   ├── failure-modes.md              # 撰写回复时的常见错误
@@ -167,7 +175,7 @@ uv run --directory kline-structure-chart python tests/record_fixtures.py --only 
 2. **数据真实性自查**：
    - 新增取数路径必须同时提供失败时报错的测试（`test_data_sources.py`），并走 `data_gateway._http_get`，以便测试统一断网（例如 `resolve_symbol.fetch_tencent_search_raw`）。
    - 测试一律断网（`conftest.py`），所有行情测试统一使用 `fixtures/recorded/` 真实录制数据回放，严禁在测试中生成或使用合成行情（`generate_deterministic_series` / `synthetic_daily`）。
-   - 四处版本号（`SKILL.md`、`pyproject.toml`、`assets/analysis.schema.json`、`analysis.py`）必须保持同步（当前 `5.2.0`）。
+   - 四处版本号（`SKILL.md`、`pyproject.toml`、`assets/analysis.schema.json`、`analysis.py`）必须保持同步（当前 `5.3.0`）。
 3. **契约与安全校验**：
    - 任何新增 JSON 字段不得包含 `NaN` 或 `Infinity`（`contracts.validate_report` 拦截）。
    - 写入 `<script>` 的 JSON 必须经过 `_safe_json_for_script` 转义；页面字串一律用 `textContent` 或 `html.escape`。

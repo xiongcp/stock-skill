@@ -268,7 +268,7 @@ def test_multi_market_pipeline_and_backtest(
     assert Path(paths["backtest_json"]).exists()
 
     # T-04：强语义与数值断言
-    assert report["schema_version"] == "5.2.0"
+    assert report["schema_version"] == "5.3.0"
     assert report["quality"]["status"] == "OK"
     assert report["quality"]["data_source_class"] == "LIVE"
     assert report["meta"]["color_scheme"] == expected_scheme
@@ -1176,3 +1176,345 @@ def test_o3_report_md_shows_wave_counts_defense_and_short_plans(replay_recorded,
     )
     zero_md = render_report_markdown(zero)
     assert "没有可执行的股数" in zero_md and "**0 股**" not in zero_md
+
+
+# ---------------------------------------------------------------------------
+# 阶段 2（O3-20 ~ O3-24）：多情景引擎、无前视历史条件频率、Brier 检验与条件扇形
+# ---------------------------------------------------------------------------
+
+
+def test_o3_20_multi_scenario_engine_diversity_active_trigger_and_impulse_rules(replay_recorded) -> None:
+    from scenarios import PLAYBOOK_BY_ID, SCENARIO_PLAYBOOK, detect_impulse_wave
+    from structure import compute_structure_layer
+
+    assert len(SCENARIO_PLAYBOOK) == 8
+    valid_ids = set(PLAYBOOK_BY_ID)
+
+    signatures: set[tuple[str, ...]] = set()
+    scenarios_seen: set[str] = set()
+    impulse_found = False
+    active_found = False
+
+    for sym, market, asset_type in (
+        ("600519.SH", "CN", "equity"),
+        ("000300.SH", "CN", "index"),
+        ("00700.HK", "HK", "equity"),
+        ("NVDA.US", "US", "equity"),
+    ):
+        req = {"symbol": sym, "market": market, "asset_type": asset_type, "display_bars": 120, "horizon_bars": 15}
+        bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+        bars = bundle["target"]["bars"]
+        bench_bars = (bundle.get("benchmark") or {}).get("bars")
+        for cut in range(220, len(bars), 20):
+            sub = bars[:cut]
+            layer = compute_structure_layer(sub, None, 120, horizon_bars=15, benchmark_bars=bench_bars)
+            proj = layer["projections"]
+            scs = proj["scenarios"]
+            assert 2 <= len(scs) <= 5
+            sig = tuple(s["id"] for s in scs)
+            assert set(sig) <= valid_ids
+            signatures.add(sig)
+            scenarios_seen.update(sig)
+            for s in scs:
+                assert s["precondition_met"] is True
+                tw = s["time_window_bars"]
+                assert 1.0 <= tw["q25"] <= tw["median"] <= tw["q75"] <= 15.0
+                if s["trigger_distance_atr"] < 0.5:
+                    assert s["status"] == "ACTIVE" and s["status_cn"] == "已在进行中"
+                    assert s["trigger_price"] is None
+                    active_found = True
+            imp = proj.get("impulse_wave")
+            if imp is not None:
+                impulse_found = True
+                rules = imp["hard_rules"]
+                assert rules["wave2_above_wave1_start"] is True
+                assert rules["wave3_not_shortest"] is True
+                assert rules["wave4_outside_wave1"] is True
+
+    # 不同标的和截面不能总是同一套三剧本，必须产生多种情景组合
+    assert len(signatures) >= 10, f"情景组合过于单一: {signatures}"
+    assert len(scenarios_seen) >= 6, f"覆盖的标准情景种类过少: {scenarios_seen}"
+    assert impulse_found is True
+    assert active_found is True
+
+    # 验证推动 5 浪硬规则违反时自动拒绝（不返回违规推动浪）
+    req_cn = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    b_cn = load_bundle(req_cn, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))["target"]["bars"][:300]
+    layer_cn = compute_structure_layer(b_cn, None, 120, horizon_bars=15)
+    pivs = copy.deepcopy(layer_cn["pivots"])
+    if len(pivs) >= 6:
+        # 构造浪 2 跌破浪 1 起点的违规拐点，验证 detect_impulse_wave 返回 None
+        bad_pivs = pivs[-6:]
+        bad_pivs[0]["kind"], bad_pivs[0]["price"] = "L", 1500.0
+        bad_pivs[1]["kind"], bad_pivs[1]["price"] = "H", 1600.0
+        bad_pivs[2]["kind"], bad_pivs[2]["price"] = "L", 1480.0  # 跌破浪1起点 1500
+        bad_pivs[3]["kind"], bad_pivs[3]["price"] = "H", 1750.0
+        bad_pivs[4]["kind"], bad_pivs[4]["price"] = "L", 1620.0
+        bad_pivs[5]["kind"], bad_pivs[5]["price"] = "H", 1800.0
+        assert detect_impulse_wave(layer_cn["sview"], bad_pivs, 0.015) is None
+
+
+def test_o3_21_base_rates_point_in_time_no_lookahead_and_beta_binomial_shrinkage(replay_recorded) -> None:
+    from base_rates import (
+        MIN_RELIABLE_SAMPLES,
+        PRIOR_STRENGTH,
+        _build_causal_features,
+        compute_scenario_frequency,
+    )
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    bars = bundle["target"]["bars"]
+    bench_bars = bundle["benchmark"]["bars"]
+    cutoff = 300
+    horizon = 15
+
+    # 1. 严格无前视：在全序列上指定 max_cutoff_idx=cutoff 与直接截断 bars[:cutoff+1] 完全一致，
+    #    即使把 cutoff 之后的未来价格篡改为极端值，只要不超过 cutoff，历史条件频率也分毫不差
+    feat_trunc = _build_causal_features(bars[: cutoff + 1])
+    altered_bars = copy.deepcopy(bars)
+    for k in range(cutoff + 1, len(altered_bars)):
+        altered_bars[k]["close"] = float(altered_bars[k]["close"]) * 2.5
+        altered_bars[k]["high"] = float(altered_bars[k]["high"]) * 2.6
+        altered_bars[k]["low"] = float(altered_bars[k]["low"]) * 2.4
+    feat_altered = _build_causal_features(altered_bars[: cutoff + 1])
+
+    for sc_id in ("TREND_CONTINUATION", "BREAKOUT_RETEST", "RANGE_OSCILLATION", "BREAKDOWN_DECLINE", "OVERSOLD_BOUNCE"):
+        f1 = compute_scenario_frequency(feat_trunc, sc_id, horizon_bars=horizon)
+        f2 = compute_scenario_frequency(feat_altered, sc_id, horizon_bars=horizon)
+        assert f1 == f2
+        assert f1["sample_size"] == f1["target_hits"] + f1["invalidation_hits"] + f1["expired_count"]
+        lo_ci, hi_ci = f1["target_ci_95"]
+        assert 0.0 <= lo_ci <= hi_ci <= 1.0
+        if f1["sample_size"] > 0:
+            assert lo_ci <= f1["raw_target_freq"] <= hi_ci
+        assert abs(f1["target_freq"] + f1["invalidation_freq"] + f1["expired_freq"] - 1.0) <= 1e-3
+
+    # 2. 低样本 (n < 30) Beta-Binomial 向市场基准收缩校验
+    short_feat = _build_causal_features(bars[:140])
+    bench_feat = _build_causal_features(bench_bars[:300])
+    f_low = compute_scenario_frequency(
+        short_feat, "OVERSOLD_BOUNCE", horizon_bars=horizon, direction="BULLISH", bench_feat=bench_feat
+    )
+    assert f_low["sample_size"] < MIN_RELIABLE_SAMPLES
+    assert f_low["low_sample"] is True
+    assert f_low["shrinkage"]["applied"] is True
+    assert f_low["shrinkage"]["prior_source"] == "BENCHMARK_INDEX"
+    assert "低样本" in f_low["display_cn"] and "Beta-Binomial" in f_low["display_cn"]
+    expected_post = (
+        f_low["target_hits"] + PRIOR_STRENGTH * f_low["shrinkage"]["prior_target_freq"]
+    ) / (f_low["sample_size"] + PRIOR_STRENGTH)
+    assert f_low["shrunk_target_freq"] == pytest.approx(round(expected_post, 4), abs=1e-4)
+
+
+def test_o3_22_backtest_scenario_frequency_brier_and_reliability_buckets(replay_recorded) -> None:
+    from evaluation import _evaluate_scenario_brier
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    bt = run_plan_backtest(bundle, req, horizon_bars=15, step=15)
+    sfb = bt["scenario_frequency_brier"]
+    assert sfb["samples"] > 0
+    assert 0.0 <= sfb["brier_score"] <= 1.0
+    assert 0.0 <= sfb["climatology_base_rate"] <= 1.0
+    assert 0.0 <= sfb["climatology_brier_score"] <= 1.0
+    assert len(sfb["reliability_buckets"]) == 5
+    assert sum(b["count"] for b in sfb["reliability_buckets"]) == sfb["samples"]
+    if sfb["brier_skill_score"] <= 0:
+        assert sfb["discriminative"] is False
+        assert "历史频率具有区分度" not in sfb["verdict"]
+    else:
+        assert sfb["discriminative"] is True
+        assert "历史频率具有区分度" in sfb["verdict"]
+
+    # 验证 BSS > 0 与 BSS <= 0 时的判定边界
+    good_records = [("TREND_CONTINUATION", 0.8, 1)] * 12 + [("BREAKDOWN_DECLINE", 0.2, 0)] * 12
+    res_good = _evaluate_scenario_brier(good_records)
+    assert res_good["brier_skill_score"] > 0 and res_good["discriminative"] is True
+    assert "历史频率具有区分度" in res_good["verdict"]
+
+    bad_records = [("TREND_CONTINUATION", 0.8, 0)] * 12 + [("BREAKDOWN_DECLINE", 0.2, 1)] * 12
+    res_bad = _evaluate_scenario_brier(bad_records)
+    assert res_bad["brier_skill_score"] <= 0 and res_bad["discriminative"] is False
+    assert "历史频率具有区分度" not in res_bad["verdict"]
+
+
+def test_o3_23_and_o3_24_renderers_and_scenario_conditional_fan(replay_recorded, tmp_path: Path) -> None:
+    rep = run_pipeline(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        output_dir=tmp_path,
+        run_backtest=False,
+    )
+    # O3-24：情景条件扇形必须显式标注非校准区间，且不篡改默认保形区间（q50 恒等于最新收盘价）
+    fp = rep["future_projection_15d"]
+    last_close = rep["series_export"]["bars"][-1]["close"]
+    assert all(abs(v - last_close) < 1e-6 for v in fp["base_median_q50"])
+    scf = fp["scenario_conditional_fan"]
+    assert scf["display_only"] is True
+    assert scf["calibrated"] is False
+    assert scf["legend_label_cn"] == "情景混合（非校准区间）"
+    assert len(scf["center_q50"]) == 15
+    for i in range(15):
+        assert scf["q10"][i] <= scf["q25"][i] <= scf["center_q50"][i] <= scf["q75"][i] <= scf["q90"][i]
+
+    # O3-23：HTML 与 Markdown 包含历史条件频率、样本数 n、情景混合（非校准区间）图层与说明
+    html_text = Path(rep["rendered_paths"]["dashboard_html"]).read_text(encoding="utf-8")
+    md_text = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    png_path = Path(rep["rendered_paths"]["preview_png"])
+    assert png_path.exists() and png_path.stat().st_size > 20_000
+    assert "情景混合（非校准区间）" in html_text
+    assert "多情景推演与历史条件频率" in html_text
+    assert "多情景推演与无前视历史条件频率" in md_text
+    assert "情景混合（非校准区间）" in md_text
+    for sc_item in rep["rule_scenarios"]["scenarios"]:
+        assert sc_item["name"] in md_text
+        assert f"n = {sc_item['historical_frequency']['sample_size']}" in md_text
+
+
+def test_o3_30_to_o3_34_judgment_layer_and_scoring(replay_recorded, tmp_path: Path) -> None:
+    from judgment import build_judgment_pack, generate_constrained_judgment, resolve_json_path
+    from render_report_md import render_report_markdown
+    from score_judgments import score_judgment_entries
+    from validate_judgment import append_judgment_log, validate_judgment_data
+
+    rep = run_pipeline(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        output_dir=tmp_path,
+        run_backtest=False,
+    )
+    # O3-30: 证据包已生成并落盘，且所有 E1..En 的 json_path 均可在 result.json 中精确定位
+    jp_path = Path(rep["rendered_paths"]["judgment_pack_json"])
+    assert jp_path.exists()
+    pack = json.loads(jp_path.read_text(encoding="utf-8"))
+    assert pack == rep["judgment_pack"]
+    assert len(pack["evidence_items"]) >= 8
+    for ev in pack["evidence_items"]:
+        ok, val = resolve_json_path(rep, ev["json_path"])
+        assert ok is True, f"Unresolved json_path: {ev['json_path']}"
+        assert val == ev["value"]
+    assert len(pack["conflicting_signals"]) >= 1
+    anchors = pack["scenario_anchors"]
+    assert len(anchors) == len(rep["rule_scenarios"]["scenarios"])
+    assert abs(sum(a["baseline_probability_pct"] for a in anchors) - 100.0) <= 0.1
+    assert pack["price_whitelist"]["count"] > 10
+
+    # O3-32: 默认受约束研判通过校验；各项越界/捏造价格/缺失标注均被拦截
+    valid_judgment = generate_constrained_judgment(rep)
+    errs_ok = validate_judgment_data(valid_judgment, rep, pack)
+    assert errs_ok == [], errs_ok
+
+    # 1) 互斥概率之和 != 100% 必须拦截
+    bad_sum = copy.deepcopy(valid_judgment)
+    bad_sum["scenario_judgments"][0]["subjective_probability_pct"] += 5.0
+    errs_bad_sum = validate_judgment_data(bad_sum, rep, pack)
+    assert any("100.0%" in e for e in errs_bad_sum)
+
+    # 2) 单情景调整幅度超过上限（±15% 或低样本 ±10%）必须拦截
+    bad_adj = copy.deepcopy(valid_judgment)
+    if len(bad_adj["scenario_judgments"]) >= 2:
+        bad_adj["scenario_judgments"][0]["subjective_probability_pct"] = round(
+            bad_adj["scenario_judgments"][0]["baseline_probability_pct"] + 18.0, 2
+        )
+        bad_adj["scenario_judgments"][0]["adjustment_pct"] = 18.0
+        bad_adj["scenario_judgments"][1]["subjective_probability_pct"] = round(
+            bad_adj["scenario_judgments"][1]["baseline_probability_pct"] - 18.0, 2
+        )
+        bad_adj["scenario_judgments"][1]["adjustment_pct"] = -18.0
+        errs_bad_adj = validate_judgment_data(bad_adj, rep, pack)
+        assert any("超出上限" in e or "上限" in e for e in errs_bad_adj)
+
+    # 3) 引用不存在的证据编号 E999 必须拦截
+    bad_ev = copy.deepcopy(valid_judgment)
+    bad_ev["scenario_judgments"][0]["supporting_evidence_ids"].append("E999")
+    errs_bad_ev = validate_judgment_data(bad_ev, rep, pack)
+    assert any("E999" in e for e in errs_bad_ev)
+
+    # 4) 在研判理由中捏造不在白名单中的价格数字（如 9876.54）必须拦截
+    bad_price = copy.deepcopy(valid_judgment)
+    bad_price["summary_cn"] += "，预计明天冲高至 9876.54 元。"
+    errs_bad_price = validate_judgment_data(bad_price, rep, pack)
+    assert any("9876.54" in e for e in errs_bad_price)
+
+    # 5) 缺少「主观研判」显式标注必须拦截
+    bad_label = copy.deepcopy(valid_judgment)
+    bad_label["judgment_type"] = "客观概率"
+    errs_bad_label = validate_judgment_data(bad_label, rep, pack)
+    assert any("主观研判" in e for e in errs_bad_label)
+
+    # O3-33: Markdown 报告合入「七、LLM 情景研判（主观判断，已记录待检验）」章节
+    md_with_j = render_report_markdown(rep, None, valid_judgment)
+    assert "LLM 情景研判（主观判断，已记录待检验）" in md_with_j
+    assert "证伪条件" in md_with_j
+    for sj in valid_judgment["scenario_judgments"]:
+        assert sj["scenario_name"] in md_with_j
+
+    # O3-34: 将历史截面研判写入日志并用真实录制行情回放打分（Brier + 对数损失 + 可靠性分桶 + BSS）
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle_full = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    hist_bundle = copy.deepcopy(bundle_full)
+    hist_bundle["target"]["bars"] = bundle_full["target"]["bars"][:-25]
+    if hist_bundle.get("benchmark") and hist_bundle["benchmark"].get("bars"):
+        hist_bundle["benchmark"]["bars"] = bundle_full["benchmark"]["bars"][:-25]
+    from analysis import analyze_bundle
+
+    hist_rep = analyze_bundle(hist_bundle, req, include_replay=False)
+    hist_judg = generate_constrained_judgment(hist_rep)
+    log_file = tmp_path / "judgment_log.jsonl"
+    append_judgment_log(hist_judg, hist_rep, log_file)
+    entries = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    score_res = score_judgment_entries(
+        entries,
+        bars_by_symbol={"600519.SH": bundle_full["target"]["bars"]},
+    )
+    assert score_res["matured_judgments"] == 1
+    assert score_res["pending_judgments"] == 0
+    assert score_res["evaluated_scenario_pairs"] >= 2
+    assert 0.0 <= score_res["llm_brier_score"] <= 1.0
+    assert 0.0 <= score_res["baseline_brier_score"] <= 1.0
+    assert score_res["llm_log_loss"] > 0.0
+    assert len(score_res["reliability_buckets"]) == 5
+
+
+def test_hk_etp_auto_detection_and_stamp_duty_exemption() -> None:
+    from market_rules import get_market_microstructure_rules, is_hk_etp_code
+    from resolve_symbol import parse_search_response, to_candidate
+
+    assert is_hk_etp_code("02800.HK") is True
+    assert is_hk_etp_code("03033.HK") is True
+    assert is_hk_etp_code("09067.HK") is True
+    assert is_hk_etp_code("00700.HK") is False
+
+    # 即使调用方传入 asset_type="equity"，港交所 ETF 代码段也自动享受印花税豁免 (0 bps)
+    rules_2800 = get_market_microstructure_rules("HK", "equity", "02800.HK")
+    assert rules_2800["stamp_duty_buy_bps"] == 0.0 and rules_2800["stamp_duty_sell_bps"] == 0.0
+    rules_700 = get_market_microstructure_rules("HK", "equity", "00700.HK")
+    assert rules_700["stamp_duty_buy_bps"] == 10.0 and rules_700["stamp_duty_sell_bps"] == 10.0
+
+    # resolve_symbol 解析腾讯搜索结果时，02800 自动识别为 etf
+    rows = parse_search_response('v_hint="hk~02800~盈富基金~yffj~GP";')
+    assert len(rows) == 1
+    rec = to_candidate(rows[0])
+    assert rec is not None
+    assert rec["symbol"] == "02800.HK"
+    assert rec["asset_type"] == "etf"
+
+
+def test_lint_response_catches_contract_violations_and_passes_clean_report(replay_recorded, tmp_path: Path) -> None:
+    from lint_response import lint_agent_response
+
+    rep = run_pipeline(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        output_dir=tmp_path,
+        run_backtest=False,
+    )
+    clean_md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    errs_clean = lint_agent_response(clean_md, rep)
+    assert errs_clean == [], errs_clean
+
+    # 违规：把规则分说成「胜率 75%」，且捏造白名单外价格 9123.45，且删去免责声明
+    bad_text = "本报告规则分对应的上涨概率为 75%，建议在目标位 9123.45 元附近离场。"
+    errs_bad = lint_agent_response(bad_text, rep)
+    assert len(errs_bad) >= 2
+    assert any("上涨概率" in e or "规则分" in e for e in errs_bad)
+    assert any("9123.45" in e for e in errs_bad)
+    assert any("免责声明" in e for e in errs_bad)

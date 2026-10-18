@@ -51,9 +51,42 @@ jobs:
           for d in .claude/skills .agents/skills .gemini/skills; do
             test -L "$FAKE_HOME/$d/kline-structure-chart"
             test -f "$FAKE_HOME/$d/kline-structure-chart/SKILL.md"
+            test -f "$FAKE_HOME/$d/kline-structure-chart/scripts/scenarios.py"
+            test -f "$FAKE_HOME/$d/kline-structure-chart/scripts/base_rates.py"
+            test -f "$FAKE_HOME/$d/kline-structure-chart/scripts/judgment.py"
+            test -f "$FAKE_HOME/$d/kline-structure-chart/scripts/validate_judgment.py"
+            test -f "$FAKE_HOME/$d/kline-structure-chart/scripts/score_judgments.py"
+            test -f "$FAKE_HOME/$d/kline-structure-chart/scripts/lint_response.py"
           done
           HOME="$FAKE_HOME" bash install.sh --source "$PWD" --agents claude,codex,gemini --no-test
           HOME="$FAKE_HOME" bash "$FAKE_HOME/.local/share/stock-skill/install.sh" --uninstall
           test ! -e "$FAKE_HOME/.claude/skills/kline-structure-chart"
           test ! -e "$FAKE_HOME/.agents/skills/kline-structure-chart"
           test ! -e "$FAKE_HOME/.local/share/stock-skill"
+          # 验证 --copy 模式安装与卸载
+          HOME="$FAKE_HOME" bash install.sh --source "$PWD" --agents claude,codex --copy --no-test
+          test -d "$FAKE_HOME/.claude/skills/kline-structure-chart"
+          test ! -L "$FAKE_HOME/.claude/skills/kline-structure-chart"
+          test -f "$FAKE_HOME/.claude/skills/kline-structure-chart/scripts/validate_judgment.py"
+          HOME="$FAKE_HOME" bash "$FAKE_HOME/.local/share/stock-skill/install.sh" --uninstall
+          test ! -e "$FAKE_HOME/.claude/skills/kline-structure-chart"
+
+  install-windows:
+    name: install.ps1 Windows 安装 / 卸载演练
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: PowerShell 安装与卸载演练
+        shell: pwsh
+        run: |
+          $FakeDir = Join-Path $env:RUNNER_TEMP "stock-skill-win"
+          $FakeProj = Join-Path $env:RUNNER_TEMP "proj-win"
+          New-Item -ItemType Directory -Path $FakeProj -Force | Out-Null
+          ./install.ps1 -Source $PWD -Dir $FakeDir -Project $FakeProj -Agents claude,codex -Copy -NoTest
+          if (-not (Test-Path (Join-Path $FakeProj ".claude/skills/kline-structure-chart/SKILL.md"))) { throw "claude skill missing" }
+          if (-not (Test-Path (Join-Path $FakeProj ".agents/skills/kline-structure-chart/scripts/validate_judgment.py"))) { throw "codex skill script missing" }
+          ./install.ps1 -Dir $FakeDir -Project $FakeProj -Agents claude,codex -Uninstall
+          if (Test-Path (Join-Path $FakeProj ".claude/skills/kline-structure-chart")) { throw "uninstall failed" }

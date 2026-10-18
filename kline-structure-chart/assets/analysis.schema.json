@@ -19,11 +19,12 @@
     "rule_scenarios",
     "future_projection_15d",
     "debate_and_veto",
+    "judgment_pack",
     "quality",
     "reproducibility"
   ],
   "properties": {
-    "schema_version": { "type": "string", "enum": ["5.2.0"] },
+    "schema_version": { "type": "string", "enum": ["5.3.0"] },
     "meta": {
       "type": "object",
       "required": ["symbol", "name", "market", "asset_type", "currency", "timeframe", "as_of", "color_scheme"],
@@ -39,6 +40,34 @@
         "color_scheme": { "type": "string", "enum": ["cn_red_up", "us_green_up"] },
         "price_decimals": { "type": "integer" }
       }
+    },
+    "triple_barrier_plan": {
+      "type": "object",
+      "required": ["entry_zone", "stop_loss_barrier", "take_profit_1", "take_profit_2", "time_barrier_bars", "risk_reward_ratio", "market_microstructure", "position_sizing"]
+    },
+    "rule_scenarios": {
+      "type": "object",
+      "required": ["bull", "neutral", "bear", "scenarios"]
+    },
+    "future_projection_15d": {
+      "type": "object",
+      "required": ["horizon_bars", "horizon_dates", "q10", "q25", "base_median_q50", "optimistic_q75", "q90", "conformal_80pct_band", "promotion_status"]
+    },
+    "debate_and_veto": {
+      "type": "object",
+      "required": ["risk_officer_veto", "final_verdict_cn"]
+    },
+    "judgment_pack": {
+      "type": "object",
+      "required": ["symbol", "as_of", "evidence_items", "conflicting_signals", "scenario_anchors", "constraints", "price_whitelist"]
+    },
+    "quality": {
+      "type": "object",
+      "required": ["status", "data_source_class", "warnings", "notes"]
+    },
+    "reproducibility": {
+      "type": "object",
+      "required": ["engine_version", "bars_hash", "report_hash"]
     }
   }
 }

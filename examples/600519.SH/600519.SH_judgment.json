@@ -1,0 +1,117 @@
+{
+  "schema_version": "5.3.0",
+  "symbol": "600519.SH",
+  "name": "贵州茅台",
+  "market": "CN",
+  "as_of": "2026-10-16",
+  "horizon_bars": 15,
+  "judgment_type": "主观研判",
+  "summary_cn": "【风控已否决做多，以下仅作结构观察】主观研判（基于 L2 历史条件频率锚点与证据 E1, E2, E3, E4, E5, E6 的有界调整）：主情景为「破位下行」（基准 38.56% → 主观研判 39.16%，目标位 1291.44），备选情景为「假突破回落」（基准 34.41% → 主观研判 35.01%，目标位 1314.37）。",
+  "primary_scenario_id": "BREAKDOWN_DECLINE",
+  "alternate_scenario_id": "FALSE_BREAKOUT_REVERSAL",
+  "scenario_judgments": [
+    {
+      "scenario_id": "BREAKOUT_RETEST",
+      "scenario_name": "突破回踩",
+      "direction": "BULLISH",
+      "sample_size_n": 49,
+      "low_sample": false,
+      "l2_historical_frequency_pct": 30.61,
+      "l2_display_cn": "历史条件频率 30.6%（n = 49，95% 区间 19.5%~44.5%）",
+      "baseline_probability_pct": 27.03,
+      "subjective_probability_pct": 25.83,
+      "adjustment_pct": -1.2,
+      "max_adjustment_pct": 15.0,
+      "supporting_evidence_ids": [
+        "E2",
+        "E3",
+        "E5"
+      ],
+      "opposing_evidence_ids": [
+        "E1",
+        "E10"
+      ],
+      "rationale_cn": "主观研判：L2 先到目标有效历史频率为 30.6%（样本 n=49），归一化互斥基准概率为 27.03%；结合支持证据 E2, E3, E5 与反向约束 E1, E10（引用 E2, E3, E5, E1, E10），将该情景主观研判概率调整 -1.20 个百分点至 25.83%（未超 ±15% 上限）。",
+      "target_price": 1418.46,
+      "invalidation_price": 1347.47
+    },
+    {
+      "scenario_id": "BREAKDOWN_DECLINE",
+      "scenario_name": "破位下行",
+      "direction": "BEARISH",
+      "sample_size_n": 71,
+      "low_sample": false,
+      "l2_historical_frequency_pct": 43.66,
+      "l2_display_cn": "历史条件频率 43.7%（n = 71，95% 区间 32.8%~55.2%）",
+      "baseline_probability_pct": 38.56,
+      "subjective_probability_pct": 39.16,
+      "adjustment_pct": 0.6,
+      "max_adjustment_pct": 15.0,
+      "supporting_evidence_ids": [
+        "E1",
+        "E10"
+      ],
+      "opposing_evidence_ids": [
+        "E2",
+        "E3",
+        "E5"
+      ],
+      "rationale_cn": "主观研判：L2 先到目标有效历史频率为 43.7%（样本 n=71），归一化互斥基准概率为 38.56%；结合支持证据 E1, E10 与反向约束 E2, E3, E5（引用 E1, E10, E2, E3, E5），将该情景主观研判概率调整 +0.60 个百分点至 39.16%（未超 ±15% 上限）。",
+      "target_price": 1291.44,
+      "invalidation_price": 1322.94
+    },
+    {
+      "scenario_id": "FALSE_BREAKOUT_REVERSAL",
+      "scenario_name": "假突破回落",
+      "direction": "BEARISH",
+      "sample_size_n": 28,
+      "low_sample": true,
+      "l2_historical_frequency_pct": 38.97,
+      "l2_display_cn": "历史条件频率 39.0%（原始 50.0%，n = 28 低样本，已做 Beta-Binomial 收缩；95% 区间 32.6%~67.4%）",
+      "baseline_probability_pct": 34.41,
+      "subjective_probability_pct": 35.01,
+      "adjustment_pct": 0.6,
+      "max_adjustment_pct": 10.0,
+      "supporting_evidence_ids": [
+        "E1",
+        "E10"
+      ],
+      "opposing_evidence_ids": [
+        "E2",
+        "E3",
+        "E5"
+      ],
+      "rationale_cn": "主观研判：L2 先到目标有效历史频率为 39.0%（样本 n=28），归一化互斥基准概率为 34.41%；结合支持证据 E1, E10 与反向约束 E2, E3, E5（引用 E1, E10, E2, E3, E5），将该情景主观研判概率调整 +0.60 个百分点至 35.01%（未超 ±10% 上限）。",
+      "target_price": 1314.37,
+      "invalidation_price": 1358.18
+    }
+  ],
+  "conflicting_signals_reviewed": [
+    "C1",
+    "C2"
+  ],
+  "key_levels_to_watch": [
+    {
+      "label": "三重屏障止损位",
+      "price": 1295.6,
+      "role": "STOP_LOSS"
+    },
+    {
+      "label": "三重屏障第一目标位 TP1",
+      "price": 1424.06,
+      "role": "TARGET_1"
+    },
+    {
+      "label": "成交量密集区 POC",
+      "price": 1293.79,
+      "role": "PIVOT_POC"
+    },
+    {
+      "label": "主情景（破位下行）目标位",
+      "price": 1291.44,
+      "role": "PRIMARY_TARGET"
+    }
+  ],
+  "falsification_condition": "主观研判证伪条件：若日线收盘触及主情景「破位下行」失效位 1322.94 或跌破三重屏障止损位 1295.60（见 E10），则主情景判断证伪，应切换至备选情景「假突破回落」（目标位 1314.37）。",
+  "disclaimer_cn": "本节为锚定 L2 历史条件频率的受约束主观研判，已记入日志待到期按 Brier 分数与 BSS 检验，不构成投资建议。"
+}

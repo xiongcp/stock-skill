@@ -19,7 +19,7 @@ import urllib.parse
 from typing import Any
 
 import data_gateway
-from market_rules import US_TICKER_PATTERN, resolve_instrument
+from market_rules import US_TICKER_PATTERN, is_hk_etp_code, resolve_instrument
 
 SOURCE = "TENCENT_SMARTBOX"
 MAX_QUERY_LEN = 32
@@ -94,7 +94,7 @@ def to_candidate(row: dict[str, str]) -> dict[str, Any] | None:
         elif re.fullmatch(r"\d{5}", code) and not code.startswith("8"):
             # 80000~89999 为人民币柜台，与港币柜台是同一只股票，只保留港币柜台
             symbol = f"{code}.HK"
-            if "etf" in row["name"].lower():
+            if "etf" in row["name"].lower() or is_hk_etp_code(code):
                 asset_type = "etf"
         else:
             return None

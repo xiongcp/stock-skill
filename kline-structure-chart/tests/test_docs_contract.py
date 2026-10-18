@@ -243,3 +243,35 @@ def test_market_rules_have_effective_date_and_source(market: str) -> None:
             assert cells[3] != "—", f"{market}: 缺少来源 {row}"
     for topic in ("交易时段", "空"):
         assert topic in text, f"{market}-market.md 缺少 {topic} 相关章节"
+
+
+def test_o3_20_scenario_playbook_doc_matches_code_verbatim() -> None:
+    import sys
+
+    scripts_dir = str(SKILL_DIR / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from scenarios import SCENARIO_PLAYBOOK
+
+    playbook_md = (SKILL_DIR / "references" / "scenario-playbook.md").read_text(encoding="utf-8")
+    m = re.search(
+        r"^\| 情景ID \| 情景 \| 适用前提（由 L1 状态判定） \| 目标位来源 \| 失效条件 \|\n\| --- .*\n((?:\|.*\n?)+)",
+        playbook_md,
+        re.M,
+    )
+    assert m is not None, "scenario-playbook.md 缺少 8 类标准情景定义表"
+    rows = []
+    for line in m.group(1).strip().splitlines():
+        cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
+        assert len(cells) == 5, f"scenario-playbook.md 表格列数异常: {line}"
+        rows.append(
+            {
+                "id": cells[0],
+                "name": cells[1],
+                "precondition": cells[2],
+                "target_source": cells[3],
+                "invalidation": cells[4],
+            }
+        )
+    assert len(rows) == 8
+    assert tuple(rows) == SCENARIO_PLAYBOOK

@@ -28,6 +28,7 @@ MARKET_HOLIDAYS: dict[str, set[str]] = {
         "2026-01-01", "2026-01-02", "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-23",
         "2026-04-06", "2026-05-01", "2026-05-04", "2026-05-05", "2026-06-19", "2026-09-25",
         "2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07",
+        "2027-01-01",
     },
     "HK": {
         "2021-01-01", "2021-02-12", "2021-02-15", "2021-04-02", "2021-04-05", "2021-04-06",
@@ -309,7 +310,7 @@ def resolve_instrument(
 
     if inferred_market == "CN":
         lot_size, min_order_shares, lot_step = _cn_lot_rules(resolved_type, board)
-    elif inferred_market == "HK" and resolved_type == "equity":
+    elif inferred_market == "HK" and resolved_type in ("equity", "etf"):
         lot_size, min_order_shares, lot_step = 100, 100, 100
     else:
         lot_size, min_order_shares, lot_step = 1, 1, 1
@@ -330,13 +331,35 @@ def resolve_instrument(
     }
 
 
+def is_hk_etp_code(code: str) -> bool:
+    """按港交所《证券代号分配计划》判断 5 位港股代码是否属于交易所买卖产品（ETF / 杠杆及反向产品）：
+    2800-2849、3000-3199、3400-3499（港元柜台 ETF），7200-7399、7500-7599（杠杆及反向产品），
+    9000-9199、9800-9849（美元柜台 ETF）。
+    """
+    raw = code.strip().upper().split(".")[0]
+    if not raw.isdigit():
+        return False
+    n = int(raw)
+    return (
+        2800 <= n <= 2849
+        or 3000 <= n <= 3199
+        or 3400 <= n <= 3499
+        or 7200 <= n <= 7399
+        or 7500 <= n <= 7599
+        or 9000 <= n <= 9199
+        or 9800 <= n <= 9849
+    )
+
+
 def _infer_asset_type(upper: str) -> str:
     """按"交易所 + 代码段"推断资产类型：000xxx.SH / 399xxx.SZ 为指数（000xxx.SZ 是深市主板股票），
-    沪市 51/56/58、深市 15 开头为 ETF，恒指系列为指数，其余为个股。"""
+    沪市 51/56/58、深市 15 开头及港交所 ETF/ETP 代码段为 ETF，恒指系列为指数，其余为个股。"""
     code, _, suffix = upper.partition(".")
     if (suffix == "SH" and code.startswith("000")) or (suffix == "SZ" and code.startswith("399")):
         return "index"
     if (suffix == "SH" and code.startswith(("51", "56", "58"))) or (suffix == "SZ" and code.startswith("15")):
+        return "etf"
+    if suffix == "HK" and is_hk_etp_code(code):
         return "etf"
     if suffix == "HK" and code.startswith(("HSI", "HSTECH", "HSCEI")):
         return "index"
@@ -530,7 +553,8 @@ def get_market_microstructure_rules(
         }
     if market == "HK":
         # 港股印花税自 2023-11-17 起买卖双方各 0.1%；ETF 豁免
-        hk_stamp = 10.0 if asset_type == "equity" else 0.0
+        is_hk_etp = asset_type == "etf" or is_hk_etp_code(symbol)
+        hk_stamp = 0.0 if is_hk_etp or not tradable else 10.0
         if not tradable:
             lot, lot_source = 1, "NOT_TRADABLE"
         elif board_lot and int(board_lot) > 0:

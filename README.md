@@ -211,7 +211,7 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
 | `--symbol`（必填） | 标的代码，格式见第 1 节 |
 | `--output-dir`（必填） | 产物目录，相对于 `kline-structure-chart/` |
 | `--market` | `CN` / `HK` / `US`；代码带后缀时可以省略 |
-| `--asset-type` | `index` / `equity` / `etf`。默认按代码段推断：A 股 51/56/58（沪）、15（深）开头识别为 ETF；**港股 ETF 需要手动传 `etf`** |
+| `--asset-type` | `index` / `equity` / `etf`。默认按代码段推断：A 股 51/56/58（沪）、15（深）开头及港交所 ETF/ETP 代码段（02800~02849、03000~03199 等）自动识别为 ETF |
 | `--days` | 主图显示多少根 K 线，取值 60~500，默认 120。只影响显示，不影响任何计算结果 |
 | `--horizon-bars` | 预测天数，1~60，默认 15 |
 | `--as-of` | 只用截至某日（`YYYY-MM-DD`）的数据，用于复盘历史 |
@@ -263,6 +263,7 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 | --- | --- |
 | `*_report.md` | 中文分析报告，依次为：数据说明、风控否决、结论、大盘、结构与条件推演、风控计划、形态证据、未来区间、回测、文件路径、免责声明。数字全部取自 `*_result.json` |
 | `*_result.json` | 全部计算结果（通过 `assets/analysis.schema.json` 契约校验） |
+| `*_judgment_pack.json` | L3 受约束研判证据包（含可溯源证据编号 `E1…En`、冲突信号 `C1…Cm`、L2 情景基准频率与价格白名单） |
 | `*_preview.png` | 1920×1160 结构推演图；数据有问题时带红色告警和水印 |
 | `*_dashboard.html` | 离线交互看板：7 个图层开关、悬停查看数值、相对强弱视图、历史回放滑块、导出 PNG |
 | `*_backtest.json` | 历史计划回放回测与无前视审计（传 `--backtest` 时生成） |
@@ -317,7 +318,7 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 ## 9. 常见问题
 
 **Q：能告诉我上涨概率吗？**
-不能。规则分（0~100）是技术条件的加权打分，不是概率；未来区间只描述波动幅度。当前版本没有任何经过检验的情景概率，助手也不会编造。后续版本计划加入带样本数和 95% 区间的"历史条件频率"。
+规则分（0~100）是技术条件的加权打分，不是概率；未来区间只描述波动幅度。本技能只提供两类受严格约束的频率/概率：(1) 脚本在标的自身历史上逐点无前视统计的「历史条件频率」（附样本数 n 与 95% Wilson 区间，n < 30 向市场基准收缩）；(2) 助手以历史条件频率为锚点、引用证据编号 `E1…En` 并通过 `validate_judgment.py` 校验的「主观研判概率」（已记入日志待到期按 Brier 分数检验）。
 
 **Q：数据从哪里来，会不会用假数据？**
 新浪、Yahoo、腾讯的公开行情接口。取不到就以 `[DATA_UNAVAILABLE]` 退出，绝不估算或生成数据；离线测试使用录制下来的真实行情。
@@ -332,7 +333,7 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 可以，加 `--project <项目目录>`，技能会注册到该项目的 `.claude/skills` 或 `.agents/skills`。
 
 **Q：能分析北交所股票、港股 ETF 吗？**
-可以，但北交所需要直接给 `.BJ` 代码（名称搜索不到），港股 ETF 需要加 `--asset-type etf`。
+可以。北交所需要直接给 `.BJ` 代码（名称搜索不到）；常见港交所 ETF/ETP 代码段（如 `02800.HK`、`03033.HK`）会自动识别为 `etf` 并免除印花税。
 
 **Q：能做空吗？**
 本技能不替你交易。港股、美股可以融券卖空但有严格限制，A 股融券受限更多，规则见 `references/` 下的三个市场手册。
@@ -345,7 +346,6 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 - 交易日历：A 股覆盖到 2026-12-31（2027 年放假安排尚未公布），港股和美股覆盖到 2027-12-31。超出范围的未来日期按工作日估算，报告会注明。
 - 北交所没有除权除息事件数据，按不复权价格计算并在报告中注明。
 - ST 状态按当前简称识别，回测和历史区间审计会把它沿用到全部历史日期。
-- 港股 ETF 无法从代码自动识别，请传 `--asset-type etf`（ETF 免印花税）。
 - 财报日数据暂无来源，财报窗口不会放大预测区间。
 - Windows：`install.ps1` 与整体流程都还没有在 Windows 上实测。创建软链需要开发者模式或管理员权限，失败时脚本会自动改为复制；已加入微软雅黑字体路径。
 - 名称转代码依赖腾讯证券搜索接口，搜不到北交所股票。

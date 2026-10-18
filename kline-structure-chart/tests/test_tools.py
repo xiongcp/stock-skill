@@ -145,3 +145,37 @@ def test_install_sh_syntax_and_help() -> None:
         assert flag in out, flag
     for rel in ("~/.claude/skills", "~/.agents/skills", "~/.gemini/skills", "~/.cursor/skills", "~/.config/opencode/skills"):
         assert rel in out, rel
+
+
+def test_install_scripts_brace_variables_before_non_ascii_and_dry_run(tmp_path: Path) -> None:
+    import re
+
+    for fname in ("install.sh", "install.ps1"):
+        script = REPO_DIR / fname
+        if not script.exists():
+            pytest.skip(f"{fname} 不随 skill 分发")
+        text = script.read_text(encoding="utf-8")
+        # 防止 macOS Bash 3.2 (set -u) 或 PowerShell 将紧邻中文全角字符的 $VAR 误解析为未定义变量
+        bad = [
+            f"{fname}:{i}: {m.group(0)}"
+            for i, line in enumerate(text.splitlines(), 1)
+            if not line.lstrip().startswith("#")
+            for m in re.finditer(r"\$([A-Za-z_][A-Za-z0-9_]*)([^\x00-\x7F])", line)
+        ]
+        assert not bad, f"安装脚本中存在未加花括号的紧邻非 ASCII 变量引用: {bad}"
+
+    sh_script = REPO_DIR / "install.sh"
+    dry_install = subprocess.run(
+        ["bash", str(sh_script), "--source", str(REPO_DIR), "--dir", str(tmp_path / "repo"), "--agents", "claude,codex", "--dry-run"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "演练模式" in dry_install and "检查核心脚本完整性" in dry_install
+    dry_uninst = subprocess.run(
+        ["bash", str(sh_script), "--dir", str(tmp_path / "repo"), "--agents", "claude,codex", "--uninstall", "--dry-run"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "卸载 kline-structure-chart" in dry_uninst

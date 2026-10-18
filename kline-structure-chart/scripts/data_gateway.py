@@ -453,7 +453,7 @@ def load_bundle(
                 "error": "本地文件未附带除权除息数据，按原始价格使用",
             }
             return {
-                "schema_version": "5.2.0",
+                "schema_version": "5.3.0",
                 "market": inst["market"],
                 "target": {"instrument": inst, "bars": bars, "intraday": intraday},
                 "benchmark": None,
@@ -533,7 +533,7 @@ def load_bundle(
         vix_value, vix_source = _fetch_vix(as_of or target_bars[-1]["day"], allow_network)
 
     return {
-        "schema_version": "5.2.0",
+        "schema_version": "5.3.0",
         "market": market,
         "target": {
             "instrument": inst,

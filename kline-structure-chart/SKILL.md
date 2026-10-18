@@ -5,7 +5,7 @@ license: MIT
 compatibility: "Requires Python 3.12+, uv, and network access to PyPI and to Sina / Yahoo / Tencent market-data endpoints. Without live data the scripts exit with [DATA_UNAVAILABLE] instead of fabricating prices."
 metadata:
   author: "承鹏 (chengpeng), Qoder Quant Engine"
-  version: "5.2.0"
+  version: "5.3.0"
 ---
 
 # K 线数学结构分析（A股 / 港股 / 美股）
@@ -36,7 +36,7 @@ uv run python scripts/resolve_symbol.py 腾讯 --market HK   # 可用 --market /
 | `[DATA_UNAVAILABLE]` 退出 | 腾讯证券搜索接口不可用，请用户直接提供完整代码 |
 
 - 数据源为腾讯证券搜索接口，已过滤港股人民币柜台、美股场外粉单、权证牛熊证和场外基金。
-- 北交所股票目前搜不到，请用户提供 `.BJ` 代码；港股 ETF 按名称含"ETF"识别，其余按股票处理。
+- 北交所股票目前搜不到，请用户提供 `.BJ` 代码；港股 ETF 按名称含"ETF"或港交所 ETF/ETP 代码段（`02800~02849`、`03000~03199`、`07200~07599`、`09000~09199`、`09800~09849`）自动识别，其余按股票处理。
 
 ## 二、问题类型 → 命令参数
 
@@ -51,7 +51,7 @@ uv run python scripts/resolve_symbol.py 腾讯 --market HK   # 可用 --market /
 | 未来几天的波动区间 | `--horizon-bars <N>`（1~60，默认 15） | 只描述幅度，不含方向 |
 | 想看更长或更短的图 | `--days <N>`（60~500，默认 120） | 只影响显示，不影响任何计算结果 |
 | 复盘某个历史日期 | `--as-of YYYY-MM-DD` | 只用截至该日已收盘的数据 |
-| 港股 ETF | `--asset-type etf` | 港股 ETF 无法从代码识别（ETF 免印花税） |
+| 港股 ETF | 可选 `--asset-type etf` | 常见港交所 ETF/ETP 代码段（02800~02849、03000~03199 等）已自动识别为 ETF 免印花税 |
 | 看不复权的原始价 | `--adjustment raw` | 默认个股/ETF 前复权含分红，指数不复权 |
 | 换一个对比基准 | `--benchmark <代码>` | 默认 A 股沪深300、港股恒生指数、美股 SPY |
 | 用户提供了本地真实行情文件 | `--input <文件> --offline` | 本地文件无大盘数据，质量为 `PARTIAL` |
@@ -74,6 +74,7 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 产物（文件名以标的代码开头）：
 - `*_report.md`：按下文"回复契约"组织好的中文分析报告，数字全部取自 `*_result.json`，**回答用户时以它为骨架**。
 - `*_result.json`：全部计算结果，已通过 `assets/analysis.schema.json` 顶层契约校验。字段含义见 `references/output-fields.md`。
+- `*_judgment_pack.json`：L3 受约束研判证据包（含可溯源证据编号 `E1…En`、冲突信号 `C1…Cm`、情景基准频率与价格白名单）。
 - `*_preview.png`：结构推演图，配色随市场（A股/港股红涨绿跌，美股绿涨红跌）。
 - `*_dashboard.html`：离线交互看板，提供 7 个图层开关、悬停查看 OHLC/均线/RSI/预测分位、相对强弱切换、历史回放滑块和导出 PNG。
 - `*_backtest.json`（传 `--backtest` 时生成）：线上计划逐日回放的成交统计，以及区间样本外覆盖率。
@@ -99,7 +100,7 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 2. **大盘先行**：基准的 `market_benchmark.regime`、`regime_score`，以及个股的 `relative_strength_vs_index`。
 3. **结构与规则**：
    - `multi_timeframe_score.rule_score` 是 0~100 的确定性规则分，不是胜率或概率。
-   - `rule_scenarios` 按"触发条件 → 目标位 → 失效条件"转述；报告里的"现价附近正在争夺的价位"（`contested_levels`）不作触发条件，路径时间尺度（`eta_bars`）只说时间量级，目标超出预测期时照实说明。
+   - `rule_scenarios` 按"触发条件 → 目标位 → 失效条件"转述，同时转述 `rule_scenarios.scenarios` 中 2~5 个适用情景的状态（`已在进行中` / `待触发`）、到达目标用时中位数（`time_window_bars.median`）和历史条件频率（`historical_frequency.display_cn`）；报告里的"现价附近正在争夺的价位"（`contested_levels`）不作触发条件，路径时间尺度只说时间量级，目标超出预测期时照实说明。
    - 浪型先说主计数，再说 `wave_counts` 里的备选数法及各自的否定条件；备选数法不代表可能性大小。形态为"形态不明确"时不套用教科书形态。
    - 形态只引用 `algebraic_patterns_detected` 里的 `name_cn` 和 `formula_verified`。
 4. **风控**：
@@ -109,19 +110,21 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
    - 港股、美股报告带"破位做空计划"（`short_plan`）：转述时必须同时说明卖空限制（`constraints`）、`warnings`，以及盈亏比未计融券费用。A 股与指数没有做空计划，卖空限制只按制度手册（`references/cn-market.md`、`references/hk-market.md`、`references/us-market.md`）说明，不得给出报告中没有的做空点位。
 5. **未来 15 日区间**：
    - `future_projection_15d` 以最新收盘价为中心（`q50_method = MARTINGALE_LAST_CLOSE`），只描述波动幅度，不包含方向判断，不得把 q75/q25 说成看涨/看跌概率。
+   - `scenario_conditional_fan` 为按历史条件频率混合的展示扇形，必须注明"情景混合（非校准区间）"，不得替代默认分期限保形区间。
    - 必须同时给出 `calibration_audit` 的实测覆盖率与 `effective_independent_samples`。
    - `promotion_status` 为 `RESEARCH_CALIBRATION_WARMUP` 时称"校准观察期"，不得把覆盖率说成区间已验证可靠；有效独立样本低于 `min_effective_independent_samples`（20）时不会晋级（判定见 `references/math-patterns.md` 第 5 节）。
-6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率（带 95% 区间）、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。规则分 IC 的结论（`rule_score_ic.verdict`）原文转述，`informative = false` 时说明规则分在该标的上只作描述。
-7. **文件**：给出 `result.json` 与 `dashboard.html` 的路径；客户端能显示图片时再内嵌 `preview.png`，否则只给路径。
-8. **免责声明**：结尾注明"以上为规则化技术分析，仅供研究参考，不构成投资建议"。
+6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率（带 95% 区间）、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。规则分 IC 的结论（`rule_score_ic.verdict`）原文转述，`informative = false` 时说明规则分在该标的上只作描述。同时转述 `scenario_frequency_brier` 的样本外 Brier 分数、全样本基准率 Brier 分数与技能分 `brier_skill_score`（仅当 `brier_skill_score > 0` 时才说"历史频率具有区分度"）。
+7. **L3 受约束情景研判（可选，按 `references/llm-judgment-protocol.md` 执行）**：读取 `*_judgment_pack.json`，以 L2 基准概率为起点、引用 `E1…En` 证据编号做有界调整（`n>=30` 最多 ±15%，`n<30` 最多 ±10%，互斥情景概率和 = 100%），写出 `*_judgment.json` 并运行 `uv run python scripts/validate_judgment.py --result <..._result.json> --judgment <..._judgment.json>` 校验通过后，在「LLM 情景研判（主观判断，已记录待检验）」章节同时展示调整前后数值、证据编号与证伪条件。可用 `scripts/lint_response.py` 校验最终回复文本，用 `scripts/score_judgments.py` 对到期研判打分。
+8. **文件**：给出 `result.json` 与 `dashboard.html` 的路径；客户端能显示图片时再内嵌 `preview.png`，否则只给路径。
+9. **免责声明**：结尾注明"以上为规则化技术分析，仅供研究参考，不构成投资建议"。
 
 ## 五、对外表述与概率规则
 
 - `rule_score`、`regime_score`、过滤分都是确定性规则打分，**不是**胜率、概率或置信度；Volume Profile 是成交分布近似，不是真实持仓筹码。
 - 只允许两类概率，而且**只有 JSON 中存在对应字段时才能说出数字**：
-  1. **历史条件频率**：脚本在该标的自身历史上无前视统计的"情景触发后先到目标 / 先到失效 / 到期"频率。必须写成"历史条件频率 X%（n = …，95% 区间 a%~b%）"，不叫胜率、不叫上涨概率。字段为 `rule_scenarios[*].historical_frequency`（尚未提供）。
-  2. **主观研判概率**：由你（运行技能的 agent）以历史条件频率为锚点做有界调整，引用证据编号、不超过调整上限、写入研判 JSON 并通过校验脚本后才能给出，必须标注"主观研判，已记录待检验"。字段为 `*_judgment.json`（尚未提供）。
-- **当前版本没有上述任何字段**：回答中不得出现"上涨概率 60%""胜算七成""大概率突破"这类概率数字或等价说法。唯一可以转述的百分比统计是报告里已有的回测成交胜率（附 95% 区间与样本量提示）和区间覆盖率，且不得说成未来概率。
+  1. **历史条件频率**：脚本在该标的自身历史上无前视统计的"情景触发后先到目标 / 先到失效 / 到期"频率（字段 `rule_scenarios.scenarios[*].historical_frequency` 及 `rule_scenarios.{bull,neutral,bear}.historical_frequency`，已提供）。必须直接引用 `display_cn` 或写成"历史条件频率 X%（n = …，95% 区间 a%~b%）"，样本数 n < 30 时带"低样本，已向市场基准收缩"说明，不叫胜率、不叫上涨概率。
+  2. **主观研判概率**：由你（运行技能的 agent）按 `references/llm-judgment-protocol.md` 以 `*_judgment_pack.json` 中的基准概率为锚点做有界调整，引用证据编号 `E1…En`、不超过调整上限、写入 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验后才能给出，必须标注"主观研判，已记录待检验"。
+- **严禁无依据概率**：除上述 `historical_frequency`、回测成交胜率（附 95% 区间与样本量提示）和区间覆盖率外，回答中不得出现"上涨概率 60%""胜算七成""大概率突破"等未经校验的概率数字或等价说法。
 - 推演路径只写"触发条件 → 目标位 → 失效条件"；15 个交易日的方向本身接近随机，不得承诺涨跌。
 
 ## 六、失败处理
@@ -158,6 +161,8 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 ## 八、参考文档（按需读取）
 
 - `references/output-fields.md`：`result.json` / `backtest.json` 每个字段的含义、单位、取值范围、能否为空和对外怎么说。用户追问某个字段时阅读。
+- `references/scenario-playbook.md`：8 类标准情景库的前提、触发、目标、失效、历史到达用时分位数与无前视历史条件频率计算口径。
+- `references/llm-judgment-protocol.md`：L3 受约束的 LLM 情景研判协议、调整幅度上限、证据引用格式、`validate_judgment.py` 校验规则与 `score_judgments.py` 到期打分说明。
 - `references/interpretation-guide.md`：形态、浪型、市场状态、风控计划、未来区间和回测的解读要点与常见误读。
 - `references/math-patterns.md`：用户追问某个指标、形态或预测区间如何计算时阅读。
 - `references/cn-market.md`：A股交易时段与集合竞价、涨跌停（主板 ±10%、双创 ±20%、北交所 ±30%，ST 按板块与日期区分）、科创板与北交所申报细则、T+1、融券限制、代码识别、复权与交易日历。

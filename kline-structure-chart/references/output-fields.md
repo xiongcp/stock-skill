@@ -11,7 +11,7 @@
 
 | 字段 | 含义 | 单位 / 取值 | 可空 | 对外怎么说 |
 | --- | --- | --- | --- | --- |
-| `schema_version` | 报告结构版本，与技能版本一致 | 如 `5.2.0` | 否 | 一般不需要提 |
+| `schema_version` | 报告结构版本，与技能版本一致 | 如 `5.3.0` | 否 | 一般不需要提 |
 | `meta.symbol` / `meta.name` | 标的代码与简称 | — | 否 | "贵州茅台（600519.SH）" |
 | `meta.market` / `meta.asset_type` | 市场（`CN`/`HK`/`US`）与品种（`index`/`equity`/`etf`） | 枚举 | 否 | — |
 | `meta.is_st` / `meta.is_ipo_no_limit` | A 股风险警示标识；新股无涨跌停期 | 布尔 | 否 | ST 时提醒涨跌幅与风险警示 |
@@ -104,7 +104,11 @@
 | 字段 | 含义 | 单位 / 取值 | 可空 | 对外怎么说 |
 | --- | --- | --- | --- | --- |
 | `breakout_level` / `breakdown_level` | 上攻触发位与下探触发位，带来源 `source` | 价格 | 否 | — |
-| `bull` / `neutral` / `bear` | 三条路径：`name`、`trigger`（触发条件）、`target_price` 与 `target_source`、`invalidation`（失效条件）、`retest_hold` / `rebound_cap`、`range`（震荡区间）、`waypoints_offset` 与 `step_labels`（画图折点） | 价格 / 文本 | 否 | 按"触发 → 目标 → 失效"转述，**不给任何路径的概率** |
+| `bull` / `neutral` / `bear` | 三条主路径：`name`、`trigger`（触发条件）、`target_price` 与 `target_source`、`invalidation`（失效条件）、`retest_hold` / `rebound_cap`、`range`（震荡区间）、`waypoints_offset` 与 `step_labels`（画图折点）、`historical_frequency`（历史条件频率） | 价格 / 文本 | 否 | 按"触发 → 目标 → 失效"转述；频率只能按 `historical_frequency.display_cn` 称"历史条件频率" |
+| `scenarios[]` | L1 多情景引擎从 8 类标准情景库（见 `references/scenario-playbook.md`）中筛出的 2~5 个适用情景：`id`、`name`、`direction`、`status`（`ACTIVE` 已在进行中 / `PENDING_TRIGGER` 待触发）、`trigger`、`target_price`、`target_source`、`invalidation`、`time_window_bars`（历史到达目标用时 `q25`/`median`/`q75`，截断在 `horizon_bars` 内）、`historical_frequency` | 价格 / 根 / 比例 | 否 | 按表格转述状态、触发、目标、失效、中位用时与 `historical_frequency.display_cn` |
+| `scenarios[*].historical_frequency` | L2 逐点无前视事件研究结果：`sample_size`（样本数 n）、`low_sample`（n < 30）、`target_freq`/`invalidated_freq`/`expired_freq`、`target_ci_95`（Wilson 95% 区间）、`raw_target_freq`/`shrunk_target_freq`（Beta-Binomial 向基准收缩值）、`bars_to_target`、`mae_pct`/`mfe_pct`、`display_cn` | 比例 / 根 / % | 否 | 原文引用 `display_cn`，称"历史条件频率"，不叫胜率或上涨概率 |
+| `scenario_count` / `scenario_signature` | 当前截面适用情景个数（2~5）与情景 ID 组合签名 | 整数 / 字符串 | 否 | — |
+| `impulse_wave` | 推动 5 浪识别结果（满足浪 2 不破浪 1 起点、浪 3 非最短、浪 4 不进入浪 1 区间时返回，含 `wave3_1618_target`） | 价格 / 文本 | 是（未形成推动浪时为空） | 有则说明推动浪进度与 1.618×浪 1 测算位 |
 | `atr_pct` / `sigma_1d_pct` | 计算时使用的 ATR 百分比；近 60 日日对数收益 RMS（折点时间用） | % | 否 | — |
 | `min_trigger_distance_atr` | 触发位距最新收盘价的最小距离（0.5 个 ATR） | ATR 倍数 | 否 | — |
 | `contested_levels[]` | 距现价不足最小距离、正在争夺的价位：`price`、`sources`、`side`（`above`/`below`） | 价格 | 否（可为空数组） | "现价附近正在争夺的价位"，不作触发条件 |
@@ -125,6 +129,7 @@
 | `volatility_scaling.*` | `sigma_1d`（近 60 日日波动）、`overnight_gap_ratio`（仅披露）、`vol_scale_multiplier`、`vix` 与 `vix_source`、`earnings_date` | 比值 | `vix`、`earnings_date` 可空 | 为空时说明没有数据，不补数 |
 | `promotion_status` | `PROMOTED`（已达标）或 `RESEARCH_CALIBRATION_WARMUP`（校准观察期） | 枚举 | 否 | 观察期不得说"已验证可靠" |
 | `calibration_audit.*` | 滚动样本外审计：`evaluation_samples`、`effective_independent_samples`、`min_effective_independent_samples`（20）、`nominal_50pct_empirical_coverage` / `nominal_80pct_empirical_coverage`、`q50_mae_pct` 与 `random_walk_mae_pct`、`per_horizon_coverage[]`、`uncalibrated_overlays` | 比例（0~1）/ 个数 / % | 否 | 必须同时给出覆盖率与独立样本数 |
+| `scenario_conditional_fan` | 仅供展示的情景条件扇形（`display_only = true`、`calibrated = false`、`legend_label_cn = "情景混合（非校准区间）"`）：按各情景 `historical_frequency` 权重混合得到的 `center_q50` 与 `q10..q90` | 价格 | 是 | 必须注明"情景混合（非校准区间），仅供展示"，不得替代默认保形区间 |
 | `historical_analogues.*` | 历史相似片段（`matches[]` 带相似度与后续收益），`used_in_quantiles = false` | — | 否 | 只作参考，不说成预测 |
 
 ## 9. 数据质量与可复现
@@ -137,6 +142,7 @@
 | `quality.provenance_errors[]` | 来源判定错误 | 文本 | 否 | 非空时不解读 |
 | `quality.completed_bars_total` / `display_bars` / `structure_bars` | 参与计算的已收盘根数、显示根数、结构窗口根数 | 根 | 否 | — |
 | `reproducibility.engine_version` / `bars_hash` / `report_hash` | 引擎版本与输入、结果哈希 | — | 否 | 复现时使用 |
+| `judgment_pack` | L3 受约束研判证据包（同 `*_judgment_pack.json`）：`evidence_items[]`（`id` 为 `E1…En`、`json_path` 为 `result.json` 内精确路径、`value`、`direction`、`summary_cn`）、`conflicting_signals[]`（`C1…Cm` 多空分歧）、`scenario_anchors[]`（各适用情景的 L2 频率、样本数 `sample_size_n`、归一化互斥基准概率 `baseline_probability_pct` 与最大调整上限 `max_adjustment_pct`）、`constraints`、`price_whitelist` | 列表 / 对象 | 否 | 供 L3 研判按协议引用证据编号与基准概率 |
 
 ## 10. 展示与兼容字段（不在顶层契约内）
 
@@ -164,4 +170,15 @@
 | `backtest.veto_reason_counts` | 回放期间各否决编码出现次数 | 次 | 否（可为空对象） | — |
 | `backtest.sample_trades[]` | 成交样例：入场/出场日与价、`outcome`（`TP_BARRIER` / `SL_BARRIER` / `TIME_BARRIER` 等）、`net_return` | — | 否 | — |
 | `backtest.sample_size_warning` | 成交少于 30 笔时的提示 | 文本 | 是 | 有则原文转述 |
+| `backtest.scenario_frequency_brier` | 历史条件频率的样本外 Brier 检验：`evaluated_events`、`brier_score`、`climatology_base_rate`、`climatology_brier_score`（全样本基准率 Brier）、`brier_skill_score`（BSS）、`discriminative`（BSS > 0）、`reliability_buckets[]`（5 档分桶表）、`per_scenario`、`verdict` | 分数 / 比例 | `brier_score` 在无事件时可空 | 原文转述 `verdict`；只有 `brier_skill_score > 0` 时才能说"历史频率具有区分度" |
 | `backtest.conformal_forecast_oos.*` | 区间样本外覆盖：无重叠截面 `evaluated_cutoffs` 与覆盖率，以及与主报告一致的滚动全截面覆盖率 | 比例 | 否 | — |
+
+## 12. `*_judgment.json` 与 `judgment_log.jsonl`（L3 受约束主观研判）
+
+| 字段 | 含义 | 单位 / 取值 | 可空 | 对外怎么说 |
+| --- | --- | --- | --- | --- |
+| `judgment_type` / `summary_cn` | 固定含「主观研判」标识与一句话研判综述 | 文本 | 否 | 必须与确定性计算分开，明确说「主观研判，已记录待检验」 |
+| `primary_scenario_id` / `alternate_scenario_id` | 主情景与备选情景 ID | 情景枚举 | 否 | 说明主情景、备选情景及切换条件 |
+| `scenario_judgments[]` | 各互斥情景的 `l2_historical_frequency_pct`、`baseline_probability_pct`（调整前）、`subjective_probability_pct`（调整后，总和=100%）、`adjustment_pct`（`n>=30` 不超 ±15%，`n<30` 不超 ±10%）、`supporting_evidence_ids`、`opposing_evidence_ids`、`rationale_cn` | % / 证据编号 | 否 | 同时展示调整前后数值与所引用的 `E1…En` 编号 |
+| `key_levels_to_watch[]` | 关键观察价位（`label`、`price`、`role`），价格必须来自 `price_whitelist` | 价格 | 否 | 只报白名单内的价格 |
+| `falsification_condition` | 什么价格或收盘条件发生时说明主情景判断错了 | 文本 | 否 | 必报证伪条件 |

@@ -206,11 +206,106 @@ def _build_bands_from_multipliers(
     return q10_arr, q25_arr, q50_arr, q75_arr, q90_arr, band_50_arr, band_80_arr
 
 
+def _build_scenario_conditional_fan(
+    base_c: float,
+    base_day: str,
+    sigma_val: float,
+    horizon_bars: int,
+    market: str,
+    asset_type: str,
+    daily_limit_pct: float | None,
+    scenarios: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """按各适用情景的 L2 历史条件频率加权合成条件分布扇形（仅用于展示，非校准区间）。"""
+    items = list(scenarios or [])
+    raw_weights: list[float] = []
+    for s in items:
+        hf = s.get("historical_frequency") or {}
+        w = float(hf.get("target_freq") or hf.get("shrunk_target_freq") or 0.25)
+        raw_weights.append(max(0.05, w))
+    w_sum = sum(raw_weights) or 1.0
+    norm_weights = [w / w_sum for w in raw_weights]
+
+    mix_q10: list[float] = []
+    mix_q25: list[float] = []
+    mix_q50: list[float] = []
+    mix_q75: list[float] = []
+    mix_q90: list[float] = []
+    prev = {"q10": base_c, "q25": base_c, "q50": base_c, "q75": base_c, "q90": base_c}
+
+    for h in range(1, horizon_bars + 1):
+        scale = sigma_val * math.sqrt(h)
+        if items:
+            center_h = 0.0
+            up_disp = 0.0
+            dn_disp = 0.0
+            for s, w in zip(items, norm_weights):
+                tgt = float(s.get("target_price") or base_c)
+                tw = s.get("time_window_bars") or {}
+                t_med = max(1.0, float(tw.get("median") or horizon_bars))
+                prog = min(1.0, h / t_med)
+                c_s = base_c + (tgt - base_c) * prog * 0.55
+                center_h += w * c_s
+                if tgt >= base_c:
+                    up_disp += w * abs(tgt - base_c) * prog * 0.45
+                else:
+                    dn_disp += w * abs(base_c - tgt) * prog * 0.45
+        else:
+            center_h = base_c
+            up_disp = 0.0
+            dn_disp = 0.0
+
+        raw = {
+            "q10": center_h - 1.2816 * scale - dn_disp * 0.90,
+            "q25": center_h - 0.6745 * scale - dn_disp * 0.50,
+            "q50": center_h,
+            "q75": center_h + 0.6745 * scale + up_disp * 0.50,
+            "q90": center_h + 1.2816 * scale + up_disp * 0.90,
+        }
+        clipped = sorted(_clip_cumulative_return_by_daily_limit(prev[k], raw[k], daily_limit_pct) for k in raw)
+        r10, r25, r50, r75, r90 = [round_to_tick(x, market, asset_type, base_day) for x in clipped]
+        r25 = max(r10, r25)
+        r50 = max(r25, r50)
+        r75 = max(r50, r75)
+        r90 = max(r75, r90)
+        prev = {"q10": r10, "q25": r25, "q50": r50, "q75": r75, "q90": r90}
+        mix_q10.append(r10)
+        mix_q25.append(r25)
+        mix_q50.append(r50)
+        mix_q75.append(r75)
+        mix_q90.append(r90)
+
+    return {
+        "available": bool(items),
+        "display_only": True,
+        "calibrated": False,
+        "legend_label_cn": "情景混合（非校准区间）",
+        "note": "按各适用情景的 L2 历史条件频率加权合成的条件分布扇形，仅用于展示情景偏态，非校准区间；默认区间仍为鞅中心分期限保形区间。",
+        "weights": [
+            {
+                "id": s["id"],
+                "name": s["name"],
+                "direction": s["direction"],
+                "target_freq": float((s.get("historical_frequency") or {}).get("target_freq") or 0.0),
+                "normalized_weight": round(w, 4),
+            }
+            for s, w in zip(items, norm_weights)
+        ],
+        "q10": mix_q10,
+        "q25": mix_q25,
+        "q50": mix_q50,
+        "center_q50": mix_q50,
+        "q75": mix_q75,
+        "q90": mix_q90,
+    }
+
+
 def compute_conformal_forecast(
     bars: list[dict[str, Any]],
     meta: dict[str, Any],
     horizon_bars: int = 15,
     extra_context: dict[str, Any] | None = None,
+    scenarios: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """未来 H 步分位区间：以最新收盘价为中心（鞅假设，不加任何漂移），按期限 h 分别做 split-conformal 校准。
 
@@ -392,6 +487,16 @@ def compute_conformal_forecast(
     )
 
     analogues = match_historical_analogues(bars, horizon_bars=horizon_bars, patch_len=20, top_k=10)
+    scenario_fan = _build_scenario_conditional_fan(
+        last_c,
+        last_day,
+        sigma_now,
+        horizon_bars,
+        market,
+        asset_type,
+        daily_limit_pct,
+        scenarios,
+    )
 
     return {
         "method": "PER_HORIZON_SPLIT_CONFORMAL_MARTINGALE_V6",
@@ -448,4 +553,5 @@ def compute_conformal_forecast(
             "mean_similarity": analogues.get("mean_similarity", 0.0),
             "matches": analogues.get("matches", [])[:5],
         },
+        "scenario_conditional_fan": scenario_fan,
     }

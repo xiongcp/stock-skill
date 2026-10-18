@@ -40,7 +40,7 @@ function Invoke-Native([string]$Exe, [string[]]$Arguments) {
     Write-Host "    + $Exe $($Arguments -join ' ')"
     if (-not $DryRun) {
         & $Exe @Arguments
-        if ($LASTEXITCODE -ne 0) { Die "$Exe 执行失败（退出码 $LASTEXITCODE）" }
+        if ($LASTEXITCODE -ne 0) { Die "$Exe 执行失败（退出码 ${LASTEXITCODE}）" }
     }
 }
 
@@ -63,7 +63,7 @@ function Get-SkillsDir([string]$Agent) {
         'gemini' { return [IO.Path]::Combine($HOME, '.gemini', 'skills') }
         'cursor' { return [IO.Path]::Combine($HOME, '.cursor', 'skills') }
         'opencode' { return [IO.Path]::Combine($HOME, '.config', 'opencode', 'skills') }
-        default { Die "不支持的 agent: $Agent（可选 $($AllAgents -join ', ')）" }
+        default { Die "不支持的 agent: ${Agent}（可选 $($AllAgents -join ', ')）" }
     }
 }
 
@@ -122,7 +122,7 @@ function Register-One([string]$SkillsDir) {
         }
     }
     if ($Copy) {
-        Invoke-Step "复制 $SkillSrc -> $target（排除 .venv / artifacts）" { Copy-Skill $target }
+        Invoke-Step "复制 $SkillSrc -> ${target}（排除 .venv / artifacts）" { Copy-Skill $target }
         return
     }
     Write-Host "    + New-Item -ItemType SymbolicLink $target -> $SkillSrc"
@@ -155,7 +155,7 @@ function Install-Uv {
 }
 
 function Invoke-Uninstall {
-    Say "卸载 $SkillName（只删除本脚本创建的内容）"
+    Say "卸载 ${SkillName}（只删除本脚本创建的内容）"
     $agentList = if ($Agents.Count -gt 0) { Resolve-Agents } else { $AllAgents }
     $removed = 0
     foreach ($d in (Get-UniqueSkillDirs $agentList)) {
@@ -172,7 +172,7 @@ function Invoke-Uninstall {
             ForEach-Object { Warn "保留了安装时的备份 $($_.FullName)，如不需要请手动删除" }
     }
     if (Test-Path -LiteralPath $Dir) {
-        if (Test-Path -LiteralPath ([IO.Path]::Combine($Dir, '.git', $MarkerName))) {
+        if ((Test-Path -LiteralPath ([IO.Path]::Combine($Dir, '.git', $MarkerName))) -or (Test-Path -LiteralPath ([IO.Path]::Combine($Dir, $MarkerName)))) {
             Invoke-Step "删除 $Dir" { Remove-Item -LiteralPath $Dir -Recurse -Force }
         } else {
             Warn "跳过 ${Dir}：不是本脚本克隆的代码目录（未删除）"
@@ -187,8 +187,22 @@ function Invoke-Install {
     Say "git 已安装：$(git --version)"
     Install-Uv
 
-    if (Test-Path -LiteralPath (Join-Path $Dir '.git')) {
+    if ((Test-Path -LiteralPath $Source -PathType Container) -and ($Dir -eq $Source)) {
+        Say "使用原地代码目录：$Dir"
+    } elseif ((Test-Path -LiteralPath $Source -PathType Container) -and (-not (Test-Path -LiteralPath (Join-Path $Source '.git')))) {
+        Say "从本地归档目录复制代码：$Source -> $Dir"
+        Invoke-Step "复制 $Source -> $Dir" {
+            New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+            $exclude = @('.venv', 'artifacts', '__pycache__', '.pytest_cache')
+            Get-ChildItem -LiteralPath $Source -Force | Where-Object { $exclude -notcontains $_.Name } |
+                ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $Dir -Recurse -Force }
+            Set-Content -LiteralPath (Join-Path $Dir $MarkerName) -Value ("installed-by=install.ps1" + [Environment]::NewLine + "source=$Source") -Encoding UTF8
+        }
+    } elseif (Test-Path -LiteralPath (Join-Path $Dir '.git')) {
         Say "更新代码：$Dir"
+        if (Test-Path -LiteralPath (Join-Path $Source '.git')) {
+            Invoke-Native git @('-C', $Dir, 'remote', 'set-url', 'origin', $Source)
+        }
         Invoke-Native git @('-C', $Dir, 'pull', '--ff-only')
     } elseif ((Test-Path -LiteralPath $Dir) -and (Get-ChildItem -LiteralPath $Dir -Force | Select-Object -First 1)) {
         Die "$Dir 已存在且不是 Git 仓库；请换一个 -Dir 或手动处理"
@@ -196,7 +210,7 @@ function Invoke-Install {
         Say "克隆代码：$Source -> $Dir"
         Invoke-Native git @('clone', '--depth', '1', $Source, $Dir)
         if (-not $DryRun) {
-            Set-Content -LiteralPath ([IO.Path]::Combine($Dir, '.git', $MarkerName)) -Value "installed-by=install.ps1`nsource=$Source" -Encoding UTF8
+            Set-Content -LiteralPath ([IO.Path]::Combine($Dir, '.git', $MarkerName)) -Value ("installed-by=install.ps1" + [Environment]::NewLine + "source=$Source") -Encoding UTF8
         }
     }
     if (-not $DryRun -and -not (Test-Path -LiteralPath (Join-Path $SkillSrc 'SKILL.md'))) { Die "$(Join-Path $SkillSrc 'SKILL.md') 不存在，代码目录不完整" }
@@ -211,6 +225,13 @@ function Invoke-Install {
     if ($NoTest) {
         Say '跳过自检（-NoTest）'
     } else {
+        Say '检查核心脚本完整性（L1 结构 / L2 历史频率 / L3 研判校验 / 回复校验）'
+        if (-not $DryRun) {
+            foreach ($s in @('analyze_and_forecast.py', 'resolve_symbol.py', 'scenarios.py', 'base_rates.py', 'judgment.py', 'validate_judgment.py', 'score_judgments.py', 'lint_response.py', 'doctor.py')) {
+                $sp = Join-Path (Join-Path $SkillSrc 'scripts') $s
+                if (-not (Test-Path -LiteralPath $sp)) { Die "缺少核心脚本: $sp" }
+            }
+        }
         Say '离线快速自检（文档契约 + 工具测试，不访问网络）'
         Invoke-Native uv @('run', '--frozen', '--directory', $SkillSrc, 'pytest', '-q', 'tests/test_docs_contract.py', 'tests/test_tools.py')
         Say '环境自检 doctor（数据源连通项需要联网，失败不影响安装）'
