@@ -124,7 +124,10 @@ def test_doctor_reports_missing_and_broken_skill_links(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     (project / ".claude" / "skills").mkdir(parents=True)
     (project / ".claude" / "skills" / doctor.SKILL_NAME).symlink_to(SKILL_DIR)
+    (project / ".hermes" / "skills").mkdir(parents=True)
+    (project / ".hermes" / "skills" / doctor.SKILL_NAME).symlink_to(SKILL_DIR)
     assert any(c.ok and "项目" in c.name for c in doctor.check_skill_links(tmp_path, project))
+    assert any(c.ok and ".hermes/skills" in c.name for c in doctor.check_skill_links(tmp_path, project))
 
 
 # ---------------------------------------------------------------------------

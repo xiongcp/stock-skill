@@ -131,7 +131,11 @@ def check_data_sources() -> list[Check]:
 def check_skill_links(home: Path, project: Path | None = None) -> list[Check]:
     locations = [(label, home / rel) for label, rel in AGENT_SKILL_DIRS.items()]
     if project is not None:
-        locations += [("项目 .claude/skills", project / ".claude" / "skills"), ("项目 .agents/skills", project / ".agents" / "skills")]
+        locations += [
+            ("项目 .claude/skills", project / ".claude" / "skills"),
+            ("项目 .agents/skills", project / ".agents" / "skills"),
+            ("项目 .hermes/skills", project / ".hermes" / "skills"),
+        ]
     checks: list[Check] = []
     for label, base in locations:
         entry = base / SKILL_NAME

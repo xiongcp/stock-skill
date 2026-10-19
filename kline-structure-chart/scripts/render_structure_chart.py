@@ -97,12 +97,14 @@ def datalen_for(days: int) -> int:
 
 
 def fetch(url: str, encoding: str = "utf-8") -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return resp.read().decode(encoding, errors="ignore")
+    from data_gateway import _http_get
+
+    return _http_get(url, encoding=encoding)
 
 
 def load_daily(sina_symbol: str, datalen: int = 320) -> list[dict]:
+    if not re.fullmatch(r"(?:sh|sz|bj)\d{6}|hk[A-Za-z0-9]+|gb_[a-z0-9_.]+", sina_symbol.strip()):
+        raise ValueError(f"Invalid sina symbol: {sina_symbol!r}")
     url = (
         "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
         f"CN_MarketData.getKLineData?symbol={sina_symbol}&scale=240&ma=no&datalen={datalen}"
@@ -132,6 +134,8 @@ def load_daily(sina_symbol: str, datalen: int = 320) -> list[dict]:
 
 
 def load_intraday(sina_symbol: str) -> dict | None:
+    if not re.fullmatch(r"(?:sh|sz|bj)\d{6}|hk[A-Za-z0-9]+|gb_[a-z0-9_.]+", sina_symbol.strip()):
+        return None
     try:
         raw = fetch(f"https://qt.gtimg.cn/q={sina_symbol}", "gbk")
     except Exception:

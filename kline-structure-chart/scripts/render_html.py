@@ -42,7 +42,8 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     """将已通过 Schema 校验的 AnalysisReport 渲染为零外部依赖、断网双击即开的单文件交互式 HTML 终端。"""
     validate_report(report)
     meta = report["meta"]
-    title_str = html.escape(f"{meta['name']} ({meta['symbol']}) · K线数学结构与15日保形预测终端")
+    horizon_n = int((report.get("future_projection_15d") or {}).get("horizon_bars") or 15)
+    title_str = html.escape(f"{meta['name']} ({meta['symbol']}) · K线数学结构与{horizon_n}日保形预测终端")
     q_status = str((report.get("quality") or {}).get("status") or "OK")
     if q_status == "UNAVAILABLE":
         redacted_payload: dict[str, Any] = {
@@ -273,8 +274,8 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
 
 <div class="toolbar">
   <div class="layer-group" id="layerControls">
-    <label class="layer-pill"><input type="checkbox" data-layer="conformal" checked /> 未来15日保形预测扇形(50%/80%)</label>
-    <label class="layer-pill"><input type="checkbox" data-layer="quantiles" checked /> 三情景分位数路径(q75/q50/q25)</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="conformal" checked /> 未来{horizon_n}日保形预测扇形(50%/80%)</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="quantiles" checked /> 分位数边界路径(q75/q50/q25)</label>
     <label class="layer-pill"><input type="checkbox" data-layer="scenarios" checked /> 多情景路径(线宽/深浅按频率·虚线=n&lt;30)</label>
     <label class="layer-pill"><input type="checkbox" data-layer="scenario_fan" /> 情景混合（非校准区间）</label>
     <label class="layer-pill"><input type="checkbox" data-layer="barriers" checked /> Triple-Barrier 止盈止损框</label>
@@ -526,7 +527,11 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       replayLabel.textContent = '最新截面 (' + meta.as_of + ')';
     }} else {{
       const snap = replays[activeReplayIdx];
-      replayLabel.textContent = '历史回放: ' + snap.as_of + ' (80%扇形命中: ' + (snap.terminal_within_80pct_band ? '是' : '否') + ')';
+      const hitTxt = (snap.terminal_within_80pct_band === null || snap.terminal_within_80pct_band === undefined)
+        ? '待到期'
+        : (snap.terminal_within_80pct_band ? '是' : '否');
+      const rsTxt = snap.rule_score !== undefined ? (' · 当时规则分 ' + snap.rule_score + '/100') : '';
+      replayLabel.textContent = '历史回放: ' + snap.as_of + rsTxt + ' (80%扇形命中: ' + hitTxt + ')';
     }}
     drawChart();
   }});
@@ -615,7 +620,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
         (sc.waypoints_offset || []).forEach(function(wp) {{ prices.push(wp[1]); }});
       }});
     }}
-    if (layers.barriers) {{
+    if (layers.barriers && activeReplayIdx === replays.length) {{
       prices.push(tb.stop_loss_barrier, tb.take_profit_1, tb.take_profit_2);
     }}
     realizedCloses.forEach(function(p) {{ prices.push(p); }});
@@ -671,7 +676,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     ctx.fillText('右侧: 未来 ' + hBars + ' Bar 预测演进区', divX + 10, padT + 18);
 
     // Layer: Volume Profile POC / Value Area
-    if (layers.poc && REPORT.volume_profile) {{
+    if (layers.poc && REPORT.volume_profile && activeReplayIdx === replays.length) {{
       const vp = REPORT.volume_profile;
       const yVah = yOfPrice(vp.vah_price);
       const yVal = yOfPrice(vp.val_price);
@@ -690,7 +695,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     }}
 
     // Layer: SMC Order Blocks & FVG (配色跟随 meta.color_scheme)
-    if (layers.smc && REPORT.smc_structures) {{
+    if (layers.smc && REPORT.smc_structures && activeReplayIdx === replays.length) {{
       const bullObFill = isCnColor ? 'rgba(242, 68, 68, 0.14)' : 'rgba(16, 188, 132, 0.14)';
       const bearObFill = isCnColor ? 'rgba(16, 188, 132, 0.14)' : 'rgba(242, 68, 68, 0.14)';
       (REPORT.smc_structures.order_blocks || []).forEach(function(ob) {{
@@ -889,9 +894,9 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
         ctx.font = 'bold 11px monospace';
         ctx.fillText(labelPrefix + ' ' + fmtPrice(lastP), W - padR + 6, endY + 4);
       }}
-      drawFutureCurve(activeFp.optimistic_q75, UP_COL, '乐观q75');
+      drawFutureCurve(activeFp.optimistic_q75, UP_COL, '上侧q75');
       drawFutureCurve(activeFp.base_median_q50, '#facc15', '基准q50');
-      drawFutureCurve(activeFp.q25, DN_COL, '悲观q25');
+      drawFutureCurve(activeFp.q25, DN_COL, '下侧q25');
     }}
 
     // Layer: Multi-Scenario Playbook Paths (width & alpha scaled by historical_frequency, dashed if n < 30)

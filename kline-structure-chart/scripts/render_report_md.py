@@ -91,6 +91,11 @@ def render_report_markdown(
     bench = report["market_benchmark"]
     plan = report["triple_barrier_plan"]
     fp = report["future_projection_15d"]
+    partial_prefix = (
+        f"【数据说明（PARTIAL）：{'；'.join(quality.get('warnings') or ['缺少大盘基准或来源待核验'])}】"
+        if quality.get("status") == "PARTIAL"
+        else ""
+    )
     veto_prefix = (
         f"【风控否决：{'；'.join(debate.get('veto_reasons') or [])}，以下点位仅用于观察，不构成做多建议】"
         if debate.get("risk_officer_veto")
@@ -99,7 +104,7 @@ def render_report_markdown(
     mr_adj = mtf.get("regime_adjustment") or {}
     mr_note = f"{mr_adj['note_cn']}。" if mr_adj.get("applied") else ""
     flash_digest = (
-        f"{veto_prefix}数据截至 {meta['as_of']}（数据源 {meta['data_source']}，{ADJUSTMENT_CN.get(meta.get('adjustment'), meta.get('adjustment'))}，质量 {quality['status']}）。"
+        f"{partial_prefix}{veto_prefix}数据截至 {meta['as_of']}（数据源 {meta['data_source']}，{ADJUSTMENT_CN.get(meta.get('adjustment'), meta.get('adjustment'))}，质量 {quality['status']}）。"
         f"基准 {bench['index_name']}（{bench['index_symbol']}）处于{bench['regime_label_cn']}（状态分 {bench['regime_score']:.1f}/100）。"
         f"本标的规则分 {mtf['rule_score']:.1f}/100（{mtf['rating_cn']}，确定性规则加权分，不是胜率或上涨概率），{mr_note}"
         f"当前评级为「{decision['action_cn']}」（{decision['setup_label_cn']}），最新收盘 {price(last_close)}，"
@@ -431,6 +436,8 @@ def render_report_markdown(
             veto_cn = {
                 "BENCHMARK_MISSING": "缺少大盘基准",
                 "BENCHMARK_WEAK": "大盘偏弱",
+                "EXTREME_REGIME_OR_TAIL_RISK": "市场状态极弱或尾部风险过高",
+                "INSUFFICIENT_EDGE_SCORE": "多周期规则分偏低",
                 "RR_INSUFFICIENT": "盈亏比不足",
                 "BELOW_LOWER_RAIL": "收盘在下轨下方",
                 "BREAKOUT_LOW_VOLUME": "突破缺量",
