@@ -210,13 +210,30 @@ def label_triple_barrier_event(
     active_sl = sl_price
     unit_risk = max(1e-6, entry_open - sl_price)
     highest_since_entry = entry_open
+    if start_exit_idx > entry_idx and float(entry_bar["low"]) > active_sl:
+        e_hi = float(entry_bar["high"])
+        e_cl = float(entry_bar["close"])
+        highest_since_entry = max(highest_since_entry, e_hi)
+        if (
+            trailing_stop
+            and highest_since_entry >= entry_open + trigger_r * unit_risk
+            and e_cl >= entry_open + confirm_close_r * unit_risk
+        ):
+            active_sl = max(active_sl, entry_open + lock_r * unit_risk)
+
+    def _is_limit_down_locked(idx: int) -> bool:
+        if limit_pct is None or idx <= 0:
+            return False
+        b_k = bars[idx]
+        hi_k, lo_k = float(b_k["high"]), float(b_k["low"])
+        prev_c_k = float(bars[idx - 1]["close"])
+        return hi_k <= prev_c_k * (1.0 - limit_pct + 0.001) and lo_k == hi_k
 
     for k in range(start_exit_idx, end_idx + 1):
         b = bars[k]
         lo, hi, op, cl = float(b["low"]), float(b["high"]), float(b["open"]), float(b["close"])
-        prev_c = float(bars[k - 1]["close"]) if k > 0 else op
         # Check limit-down lock on CN equities (cannot sell if locked at limit down)
-        if limit_pct is not None and hi <= prev_c * (1.0 - limit_pct + 0.001) and lo == hi:
+        if _is_limit_down_locked(k):
             continue
 
         hit_sl = lo <= active_sl
@@ -251,6 +268,13 @@ def label_triple_barrier_event(
             active_sl = max(active_sl, entry_open + lock_r * unit_risk)
 
     if outcome == "TIME_BARRIER":
+        while _is_limit_down_locked(exit_idx) and exit_idx + 1 < n:
+            exit_idx += 1
+            if not _is_limit_down_locked(exit_idx):
+                b_un = bars[exit_idx]
+                exit_price = min(float(b_un["open"]), active_sl) if float(b_un["low"]) <= active_sl else float(b_un["close"])
+                break
+            exit_price = float(bars[exit_idx]["close"])
         label = 1 if exit_price > entry_open else -1
 
     fee_rate = round_trip_cost_rate(rules) + 2.0 / 10000.0  # 另计 2bps 滑点
@@ -552,6 +576,7 @@ def run_plan_backtest(
     bench = bundle.get("benchmark")
     sub_request = {**request, "display_bars": 120, "account_equity": None}
     trades: dict[str, list[dict[str, Any]]] = {"LONG_CONFIRMED": [], "WATCH_LONG_SETUP": []}
+    all_trades: list[dict[str, Any]] = []
     actions_seen: dict[str, int] = {}
     veto_counts: dict[str, int] = {}
     decision_rows: list[tuple[float, str, float]] = []  # (rule_score, action, 未来 H 日收益)
@@ -559,12 +584,13 @@ def run_plan_backtest(
     full_causal_feat = _build_causal_features(bars)
     no_fill = 0
     decisions = 0
-    busy_until = -1  # 持仓期间照常记录决策（用于 IC 与动作前瞻收益），但不重复开仓
+    busy_until_all = -1  # 合并组合持仓锁（持仓期间照常记录决策用于 IC 与动作前瞻收益）
+    busy_until_by_action: dict[str, int] = {"LONG_CONFIRMED": -1, "WATCH_LONG_SETUP": -1}
 
     t = start
     while t < end:
         cut_day = bars[t]["day"]
-        pit_bars = rescale_bars_as_of(bars[: min(n, t + horizon_bars + 2)], t)
+        pit_bars = rescale_bars_as_of(bars[: min(n, t + horizon_bars + 10)], t)
         sub_bundle = {
             "schema_version": "5.3.0",
             "market": market,
@@ -594,10 +620,12 @@ def run_plan_backtest(
             ev_res = label_scenario_event(full_causal_feat, t, sc_id, horizon_bars, direction=sc_dir)
             y_hit = 1 if ev_res["outcome"] == "HIT_TARGET" else 0
             brier_records.append((sc_id, p_pred, y_hit))
-        if t <= busy_until:
-            t += step
-            continue
         if action in trades:
+            can_open_bucket = t > busy_until_by_action[action]
+            can_open_all = t > busy_until_all
+            if not can_open_bucket and not can_open_all:
+                t += step
+                continue
             plan = rep["triple_barrier_plan"]
             entry_low, entry_high = plan["entry_zone"]
             stop_loss = float(plan["stop_loss_barrier"])
@@ -622,25 +650,27 @@ def run_plan_backtest(
                     name=inst_name,
                 )
                 if res.get("tradable"):
-                    trades[action].append(
-                        {
-                            **res,
-                            "signal_day": cut_day,
-                            "action": action,
-                            "setup_type": rep["meta_labeling_decision"]["setup_type"],
-                            "plan_entry_zone": [entry_low, entry_high],
-                            "plan_stop_loss": stop_loss,
-                            "plan_take_profit_1": float(plan["take_profit_1"]),
-                            "plan_breakeven_ratchet": ratchet,
-                        }
-                    )
-                    busy_until = int(res["exit_idx"])
-            else:
+                    trade_rec = {
+                        **res,
+                        "signal_day": cut_day,
+                        "action": action,
+                        "setup_type": rep["meta_labeling_decision"]["setup_type"],
+                        "plan_entry_zone": [entry_low, entry_high],
+                        "plan_stop_loss": stop_loss,
+                        "plan_take_profit_1": float(plan["take_profit_1"]),
+                        "plan_breakeven_ratchet": ratchet,
+                    }
+                    if can_open_bucket:
+                        trades[action].append(trade_rec)
+                        busy_until_by_action[action] = int(res["exit_idx"])
+                    if can_open_all:
+                        all_trades.append(trade_rec)
+                        busy_until_all = int(res["exit_idx"])
+            elif can_open_all:
                 no_fill += 1
         t += step
 
     years = max(1e-6, (end - start) / 252.0)
-    all_trades = sorted(trades["LONG_CONFIRMED"] + trades["WATCH_LONG_SETUP"], key=lambda x: x["entry_idx"])
     total = len(all_trades)
     bh_ret = (float(bars[end]["close"]) / float(bars[start]["close"]) - 1.0) * 100.0
 

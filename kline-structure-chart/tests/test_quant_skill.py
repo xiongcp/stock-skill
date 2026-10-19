@@ -209,6 +209,13 @@ def test_triple_barrier_t_plus_1_and_same_bar_conservative_sl() -> None:
     # idx=2 (2026-09-29): O=1244.6, H=1245.87, L=1230.88, C=1235.58
     bars = load_recorded("sina_daily/sh600519.json")[-10:-5]
     assert bars[1]["day"] == "2026-09-28" and bars[2]["day"] == "2026-09-29"
+    # 验证 A 股 T+1 入场首日 (idx=1, O=1236.0, H=1244.01, C=1243.88) 涨幅达标时可触发次日保本上移：
+    # 设 sl=1228.0 (unit_risk=8.0, +0.9R=1243.2, +0.3R=1238.4)，idx=1 收盘后止损上移至 1236.64，idx=2 最低 1230.88 触发保本止盈
+    ratchet_res = label_triple_barrier_event(
+        bars, entry_idx=1, tp_price=1300.0, sl_price=1228.0, horizon_bars=3, market="CN", asset_type="equity"
+    )
+    assert ratchet_res["outcome"] == "TRAILING_PROFIT_STOP"
+    assert ratchet_res["exit_idx"] == 2 and ratchet_res["exit_price"] > 1236.0
     # 设 TP=1244.0, SL=1232.0：idx=1 当日虽同时触及，但 A 股 T+1 禁止当日卖出；
     # idx=2 再次同时触及 H=1245.87>=1244.0 与 L=1230.88<=1232.0，按保守规则判先止损
     res_cn = label_triple_barrier_event(
@@ -238,6 +245,17 @@ def test_triple_barrier_t_plus_1_and_same_bar_conservative_sl() -> None:
     )
     assert res_time["outcome"] == "TIME_BARRIER"
     assert res_time["exit_idx"] == 3 and res_time["holding_bars"] == 3
+
+    # 验证到期日 (idx=3) 遭遇一字跌停封死时不能在 idx=3 卖出，必须顺延至开板日 (idx=4) 成交
+    locked_bars = copy.deepcopy(bars)
+    prev_c = float(locked_bars[2]["close"])
+    limit_dn = round(prev_c * 0.90, 2)
+    locked_bars[3] = {**locked_bars[3], "open": limit_dn, "high": limit_dn, "low": limit_dn, "close": limit_dn}
+    res_lock = label_triple_barrier_event(
+        locked_bars, entry_idx=1, tp_price=2000.0, sl_price=800.0, horizon_bars=3, market="CN", asset_type="equity", symbol="600519.SH"
+    )
+    assert res_lock["outcome"] == "TIME_BARRIER"
+    assert res_lock["exit_idx"] == 4
 
 
 @pytest.mark.parametrize(
