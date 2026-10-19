@@ -30,10 +30,10 @@
     },
     "entry_rule": "决策日收盘给出 LONG_CONFIRMED/WATCH_LONG_SETUP 时，次日开盘价落在计划入场区内才成交；出场 = 盘中触及计划硬止损或 TP1 / 盘中触及 +0.90R 且收盘 ≥ +0.30R 后次日起止损上移至 +0.08R 保本位 / 持仓满期触发时间屏障",
     "actions_seen": {
-      "NEUTRAL_HOLD_WAIT": 157,
-      "DEFENSIVE_AVOID": 103,
-      "WATCH_LONG_SETUP": 27,
-      "LONG_CONFIRMED": 14
+      "NEUTRAL_HOLD_WAIT": 158,
+      "DEFENSIVE_AVOID": 102,
+      "WATCH_LONG_SETUP": 28,
+      "LONG_CONFIRMED": 13
     },
     "no_fill_outside_entry_zone": 2,
     "all_long_signals": {
@@ -54,19 +54,19 @@
     },
     "long_confirmed": {
       "trades": 6,
-      "cumulative_return_pct": 7.46,
-      "win_rate_pct": 66.67,
+      "cumulative_return_pct": 10.82,
+      "win_rate_pct": 83.33,
       "win_rate_95ci_pct": [
-        30.0,
-        90.32
+        43.65,
+        96.99
       ],
       "mean_return_95ci_pct": [
-        -1.25,
+        -0.74,
         3.73
       ],
-      "sharpe": 0.78,
-      "max_drawdown_pct": 6.47,
-      "profit_factor": 2.15
+      "sharpe": 1.28,
+      "max_drawdown_pct": 3.68,
+      "profit_factor": 3.88
     },
     "watch_long_setup": {
       "trades": 14,
@@ -92,7 +92,7 @@
       "BENCHMARK_WEAK": 31
     },
     "rule_score_ic": {
-      "spearman": 0.357,
+      "spearman": 0.348,
       "decisions": 301,
       "effective_independent_samples": 20,
       "forward_horizon_bars": 15,
@@ -106,65 +106,65 @@
           38.0
         ],
         "decisions": 97,
-        "mean_forward_return_pct": -2.14,
+        "mean_forward_return_pct": -2.08,
         "median_forward_return_pct": -2.44,
-        "up_share_pct": 29.9
+        "up_share_pct": 30.9
       },
       {
         "range": [
           38.0,
           52.0
         ],
-        "decisions": 100,
-        "mean_forward_return_pct": -0.59,
-        "median_forward_return_pct": -1.05,
-        "up_share_pct": 36.0
+        "decisions": 99,
+        "mean_forward_return_pct": -0.7,
+        "median_forward_return_pct": -1.14,
+        "up_share_pct": 34.3
       },
       {
         "range": [
           52.0,
           65.0
         ],
-        "decisions": 81,
-        "mean_forward_return_pct": 1.76,
-        "median_forward_return_pct": 1.19,
-        "up_share_pct": 64.2
+        "decisions": 83,
+        "mean_forward_return_pct": 1.8,
+        "median_forward_return_pct": 1.2,
+        "up_share_pct": 65.1
       },
       {
         "range": [
           65.0,
           100.0
         ],
-        "decisions": 23,
-        "mean_forward_return_pct": 1.68,
-        "median_forward_return_pct": 0.43,
-        "up_share_pct": 56.5
+        "decisions": 22,
+        "mean_forward_return_pct": 1.67,
+        "median_forward_return_pct": 0.29,
+        "up_share_pct": 54.5
       }
     ],
     "action_forward_returns": {
       "LONG_CONFIRMED": {
-        "decisions": 14,
-        "mean_forward_return_pct": 1.41,
-        "median_forward_return_pct": 1.08,
-        "up_share_pct": 57.1
+        "decisions": 13,
+        "mean_forward_return_pct": 1.38,
+        "median_forward_return_pct": 0.43,
+        "up_share_pct": 53.8
       },
       "WATCH_LONG_SETUP": {
-        "decisions": 27,
-        "mean_forward_return_pct": 1.08,
-        "median_forward_return_pct": -0.14,
-        "up_share_pct": 48.1
+        "decisions": 28,
+        "mean_forward_return_pct": 1.1,
+        "median_forward_return_pct": 0.22,
+        "up_share_pct": 50.0
       },
       "NEUTRAL_HOLD_WAIT": {
-        "decisions": 157,
-        "mean_forward_return_pct": 0.53,
-        "median_forward_return_pct": 0.04,
-        "up_share_pct": 50.3
+        "decisions": 158,
+        "mean_forward_return_pct": 0.52,
+        "median_forward_return_pct": -0.02,
+        "up_share_pct": 50.0
       },
       "DEFENSIVE_AVOID": {
-        "decisions": 103,
+        "decisions": 102,
         "mean_forward_return_pct": -2.11,
-        "median_forward_return_pct": -2.43,
-        "up_share_pct": 29.1
+        "median_forward_return_pct": -2.44,
+        "up_share_pct": 29.4
       }
     },
     "scenario_frequency_brier": {

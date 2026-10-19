@@ -532,7 +532,7 @@ def build_falsification_text(
             if inv_price is not None
             else f"出现主情景「{name}」的失效条件（{inv_text}）"
         )
-        cond = f"{inv_part}，或盘中触及三重屏障止损位 {_fmt_price(stop_loss, p_dec)}（见 E10）"
+        cond = f"{inv_part}，或盘中跌破三重屏障止损位 {_fmt_price(stop_loss, p_dec)}（见 E10）"
     elif inv_text and inv_text != "—":
         cond = f"出现主情景「{name}」的失效条件：{inv_text}"
     elif breakout is not None and breakdown is not None:

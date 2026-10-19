@@ -85,7 +85,6 @@
 ## 5. 形态与信号证据（公式可复核）
 
 - 早晨之星（看多，2026-10-01）：`Bar[-2]Bear(3.76>=0.6*ATR) AND StarBody(0.89<=0.35*Body[-2]) AND Close(230.86) >= Mid[-2](229.09)`
-- 最近一次结构破位：BEARISH_BOS（2026-09-14，破位价 214.86）
 
 ## 6. 未来 15 个交易日价格区间（只描述波动幅度，不含方向判断）
 
@@ -104,7 +103,7 @@
 
 ## 8. LLM 情景研判证据包（供受约束主观研判使用）
 
-- 已生成结构化证据包（共 13 条可溯源证据 `E1..E13`、2 组冲突信号），Agent 按 `references/llm-judgment-protocol.md` 完成 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验后，将在此展示调整前后的主观研判概率。
+- 已生成结构化证据包（共 12 条可溯源证据 `E1..E12`、2 组冲突信号），Agent 按 `references/llm-judgment-protocol.md` 完成 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验后，将在此展示调整前后的主观研判概率。
 
 ## 9. 产物文件
 

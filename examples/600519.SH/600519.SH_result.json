@@ -1472,37 +1472,8 @@
         "formula_verified": "Low[2026-07-16](1245.05) - High[2026-07-14](1226.87) > 0.2*ATR(29.22)"
       }
     ],
-    "order_blocks": [
-      {
-        "kind": "BEARISH_ORDER_BLOCK",
-        "day": "2026-08-13",
-        "idx": 80,
-        "zone": [
-          1337.0,
-          1359.6
-        ],
-        "status": "ACTIVE",
-        "formula_verified": "LastBullBar[2026-08-13] before Breakdown(1300.01), Close stays <= 1359.60"
-      }
-    ],
-    "structure_breaks": [
-      {
-        "type": "BEARISH_BOS",
-        "day": "2026-08-17",
-        "idx": 82,
-        "broken_level": 1300.01,
-        "pivot_day": "2026-08-06",
-        "formula_verified": "Close[2026-08-17](1293.09) < SwingLow[2026-08-06](1300.01)"
-      },
-      {
-        "type": "BEARISH_BOS",
-        "day": "2026-09-16",
-        "idx": 104,
-        "broken_level": 1270.33,
-        "pivot_day": "2026-08-24",
-        "formula_verified": "Close[2026-09-16](1258.00) < SwingLow[2026-08-24](1270.33)"
-      }
-    ],
+    "order_blocks": [],
+    "structure_breaks": [],
     "note": "SMC 区域由 OHLCV 代数规则确定性计算，代表算法结构区而非逐笔机构持仓。"
   },
   "volume_profile": {
@@ -1771,21 +1742,21 @@
     }
   ],
   "multi_timeframe_score": {
-    "rule_score": 36.6,
+    "rule_score": 36.7,
     "rating": "BEARISH_PRESSURE",
     "rating_cn": "均值回归体制评分偏空（短期偏离均值过大，防追高）",
-    "components_total": 55.5,
+    "components_total": 58.5,
     "regime_adjustment": {
       "applied": true,
       "scoring_regime": "MEAN_REVERSION_ADAPTED",
-      "components_total": 55.5,
-      "adjusted_rule_score": 36.6,
+      "components_total": 58.5,
+      "adjusted_rule_score": 36.7,
       "causal_momentum_ic_15d": -0.219,
-      "note_cn": "均值回归体制：近 240 日 20 日均线偏离与随后 15 日收益的秩相关为 -0.219（≤ -0.10）且长期均线偏弱，四组规则分项合计 55.5 经反转调整为 36.6；该分数衡量的是均值回归下的追高/回落位置，不代表多周期共振或承压"
+      "note_cn": "均值回归体制：近 240 日 20 日均线偏离与随后 15 日收益的秩相关为 -0.219（≤ -0.10）且长期均线偏弱，四组规则分项合计 58.5 经反转调整为 36.7；该分数衡量的是均值回归下的追高/回落位置，不代表多周期共振或承压"
     },
     "components": {
       "macro_trend_25": 14.0,
-      "structure_pattern_25": 12.5,
+      "structure_pattern_25": 15.5,
       "strategy_trigger_25": 16.0,
       "volume_benchmark_25": 13.0
     },
@@ -1803,7 +1774,7 @@
   "meta_labeling_decision": {
     "setup_type": "WAIT_CONFIRMATION",
     "setup_label_cn": "区间观察/等待右侧收盘突破",
-    "rule_score": 36.6,
+    "rule_score": 36.7,
     "scoring_method": "DETERMINISTIC_MULTI_FACTOR_RULE_V5",
     "action": "DEFENSIVE_AVOID",
     "action_cn": "防守回避/破位警惕",
@@ -3349,7 +3320,7 @@
     "veto_codes": [
       "BENCHMARK_WEAK"
     ],
-    "final_verdict_cn": "【防守回避/破位警惕】综合规则分 36.6/100，当前属于「区间观察/等待右侧收盘突破」；关键突破位 1425.15，关键防守/止损位 1284.83，TP1 1359.27（净盈亏比 1.39）。"
+    "final_verdict_cn": "【防守回避/破位警惕】综合规则分 36.7/100，当前属于「区间观察/等待右侧收盘突破」；关键突破位 1425.15，关键防守/止损位 1284.83，TP1 1359.27（净盈亏比 1.39）。"
   },
   "replay_snapshots": [
     {
@@ -4470,7 +4441,7 @@
       "regime_score": 24.2,
       "benchmark_regime_score": 75.5,
       "benchmark_relative_strength": 0.9421,
-      "rule_score": 68.4,
+      "rule_score": 67.5,
       "rating": "BULLISH_RESONANCE",
       "horizon_dates": [
         "2026-06-17",
@@ -5580,7 +5551,7 @@
       "regime_score": 32.1,
       "benchmark_regime_score": 47.2,
       "benchmark_relative_strength": 1.0407,
-      "rule_score": 38.0,
+      "rule_score": 36.6,
       "rating": "BEARISH_PRESSURE",
       "horizon_dates": [
         "2026-07-16",
@@ -6690,7 +6661,7 @@
       "regime_score": 80.6,
       "benchmark_regime_score": 46.0,
       "benchmark_relative_strength": 1.0954,
-      "rule_score": 36.9,
+      "rule_score": 36.5,
       "rating": "BEARISH_PRESSURE",
       "horizon_dates": [
         "2026-08-13",
@@ -7800,7 +7771,7 @@
       "regime_score": 29.1,
       "benchmark_regime_score": 23.6,
       "benchmark_relative_strength": 0.9861,
-      "rule_score": 22.2,
+      "rule_score": 23.7,
       "rating": "BEARISH_PRESSURE",
       "horizon_dates": [
         "2026-09-10",
@@ -11325,7 +11296,7 @@
   "reproducibility": {
     "engine_version": "5.3.0",
     "bars_hash": "d27b3e6fee1270c2",
-    "report_hash": "a352c48d335413ca"
+    "report_hash": "f92352a7503da506"
   },
   "judgment_pack": {
     "schema_version": "5.3.0",
@@ -11381,9 +11352,9 @@
         "id": "E5",
         "category": "SCORE",
         "json_path": "multi_timeframe_score.rule_score",
-        "value": 36.6,
+        "value": 36.7,
         "direction": "BEARISH",
-        "summary_cn": "多周期规则综合分为 36.6/100（均值回归体制评分偏空（短期偏离均值过大，防追高）），二阶段动作分类为「防守回避/破位警惕」；均值回归体制：近 240 日 20 日均线偏离与随后 15 日收益的秩相关为 -0.219（≤ -0.10）且长期均线偏弱，四组规则分项合计 55.5 经反转调整为 36.6；该分数衡量的是均值回归下的追高/回落位置，不代表多周期共振或承压"
+        "summary_cn": "多周期规则综合分为 36.7/100（均值回归体制评分偏空（短期偏离均值过大，防追高）），二阶段动作分类为「防守回避/破位警惕」；均值回归体制：近 240 日 20 日均线偏离与随后 15 日收益的秩相关为 -0.219（≤ -0.10）且长期均线偏弱，四组规则分项合计 58.5 经反转调整为 36.7；该分数衡量的是均值回归下的追高/回落位置，不代表多周期共振或承压"
       },
       {
         "id": "E6",
@@ -11440,14 +11411,6 @@
         "value": "LowerWick(10.90) >= 2.0*Body(2.89) AND UpperWick/Range(0.14) <= 0.18 AND Range(16.00) >= 0.75*ATR(20.05) AND LowRank20(0.22)",
         "direction": "BULLISH",
         "summary_cn": "形态「看涨锤头线」（BULLISH，确认日 2026-10-08）：LowerWick(10.90) >= 2.0*Body(2.89) AND UpperWick/Range(0.14) <= 0.18 AND Range(16.00) >= 0.75*ATR(20.05) AND LowRank20(0.22)"
-      },
-      {
-        "id": "E13",
-        "category": "SMC",
-        "json_path": "smc_structures.structure_breaks[1].type",
-        "value": "BEARISH_BOS",
-        "direction": "BEARISH",
-        "summary_cn": "最近一次结构破位为 BEARISH_BOS（2026-09-16，破位价 1270.33）"
       }
     ],
     "conflicting_signals": [
@@ -11476,10 +11439,9 @@
         "bearish_evidence_ids": [
           "E1",
           "E5",
-          "E10",
-          "E13"
+          "E10"
         ],
-        "summary_cn": "当前截面同时存在偏多证据（E2, E3, E6, E7, E8, E9, E11, E12）与偏空/风控约束证据（E1, E5, E10, E13），不可单边外推"
+        "summary_cn": "当前截面同时存在偏多证据（E2, E3, E6, E7, E8, E9, E11, E12）与偏空/风控约束证据（E1, E5, E10），不可单边外推"
       }
     ],
     "scenario_anchors": [
@@ -11586,7 +11548,7 @@
     "price_whitelist": {
       "price_decimals": 2,
       "tolerance": 0.01,
-      "count": 399,
+      "count": 397,
       "prices": [
         1151.01,
         1156.72,
@@ -11866,7 +11828,6 @@
         1333.77,
         1334.9,
         1336.77,
-        1337.0,
         1338.61,
         1338.86,
         1338.89,
@@ -11915,7 +11876,6 @@
         1359.22,
         1359.27,
         1359.33,
-        1359.6,
         1361.03,
         1362.33,
         1363.35,
@@ -12321,8 +12281,6 @@
         "1334.9",
         "1334.90",
         "1336.77",
-        "1337",
-        "1337.00",
         "1338.61",
         "1338.86",
         "1338.89",
@@ -12374,8 +12332,6 @@
         "1359.22",
         "1359.27",
         "1359.33",
-        "1359.6",
-        "1359.60",
         "1361.03",
         "1362.33",
         "1363.35",

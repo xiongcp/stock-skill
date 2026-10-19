@@ -518,7 +518,8 @@ def detect_smc_structures(
     high_pivs = [p for p in confirmed if p["kind"] == "H"]
     low_pivs = [p for p in confirmed if p["kind"] == "L"]
 
-    for last_h in high_pivs[-3:]:
+    if high_pivs:
+        last_h = high_pivs[-1]
         h_idx = int(last_h["idx"])
         h_price = float(last_h["price"])
         for k in range(h_idx + 1, n):
@@ -555,7 +556,8 @@ def detect_smc_structures(
                         )
                 break
 
-    for last_l in low_pivs[-3:]:
+    if low_pivs:
+        last_l = low_pivs[-1]
         l_idx = int(last_l["idx"])
         l_price = float(last_l["price"])
         for k in range(l_idx + 1, n):
