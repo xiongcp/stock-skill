@@ -25,24 +25,22 @@ name = "kline-structure-chart"
 version = "5.3.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "numpy" },
     { name = "pillow" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "numpy" },
     { name = "pytest" },
     { name = "ta-lib" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "numpy", specifier = ">=1.26.0" },
-    { name = "pillow", specifier = ">=10.0.0" },
-]
+requires-dist = [{ name = "pillow", specifier = ">=10.0.0" }]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "numpy", specifier = ">=1.26.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "ta-lib", specifier = ">=0.6" },
 ]

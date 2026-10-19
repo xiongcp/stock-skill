@@ -1843,9 +1843,14 @@
       "lot_size": 100,
       "min_order_shares": 100,
       "lot_step": 100,
-      "recommended_shares": 100,
-      "estimated_notional": 131297.0,
-      "settlement_rule": "T+1"
+      "sizing_basis": "ENTRY_HIGH_WORST_FILL",
+      "unit_risk_per_share": 37.0906,
+      "recommended_shares": null,
+      "estimated_notional": null,
+      "max_loss_at_stop": null,
+      "settlement_rule": "T+1",
+      "gap_risk_note": "按止损价成交估算；跳空低开、跌停封板无法卖出或流动性不足时，实际亏损可能超过风险预算；A 股 T+1，买入当日不能卖出止损",
+      "reason": "风控已否决做多（原因见 veto_reasons），不给出建议股数，以下点位只用于观察"
     },
     "holder_defense_plan": {
       "available": true,

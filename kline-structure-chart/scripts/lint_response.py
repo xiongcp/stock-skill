@@ -48,6 +48,8 @@ _LINT_PRICE_BEFORE_RE = re.compile(
     r"(?:买入|卖出|建仓|加仓|减仓|止损|止盈|挂单|入场|抄底|离场|低吸)"
 )
 VETO_HEAD_CHARS = 400
+# 买入/建仓语境下的股数（「每手 100 股」「最小申报 200 股」等制度描述不在此列）
+_BUY_SHARES_RE = re.compile(r"(?:买入|买进|建仓|加仓|开仓|仓位|可买|买)[^。；\n股手]{0,8}?\d[\d,]*\s*股")
 
 
 def _sentence_around(text: str, start: int, end: int) -> str:
@@ -112,6 +114,13 @@ def lint_agent_response(
             errors.append("risk_officer_veto == true 时，「风控否决」提示必须出现在「风控计划」之前")
         if first_veto > VETO_HEAD_CHARS:
             errors.append(f"risk_officer_veto == true 时，「风控否决」必须置顶（出现在回复前 {VETO_HEAD_CHARS} 个字符内）")
+
+    # 3b. 报告没有给出建议股数（风控否决、评级非做多或未给账户净值）时，回复不得自行换算买入股数
+    sizing = (report.get("triple_barrier_plan") or {}).get("position_sizing") or {}
+    if sizing.get("recommended_shares") is None:
+        m_sh = _BUY_SHARES_RE.search(text)
+        if m_sh:
+            errors.append(f"报告未给出建议股数（{sizing.get('reason') or '无账户净值'}），回复不得出现买入股数: {m_sh.group(0)!r}")
 
     # 4. 禁用术语检查
     for pat in _FORBIDDEN_PROB_PHRASES:

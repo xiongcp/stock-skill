@@ -115,7 +115,7 @@ def evaluate_five_core_strategies(
     bb_l = snap["volatility"]["bb_lower"] or last_c * 0.97
     bbw_pct_series = series["bbw_percentile"]
     prev_bbw_pct = float(bbw_pct_series[-2]) if (n >= 2 and bbw_pct_series[-2] is not None) else 50.0
-    rv = float(snap["momentum"]["rvol20"] or 1.0)
+    rv = float(snap["momentum"]["rvol20"])
 
     rsi_series = series["rsi14"]
     stoch_k = series["stoch"]["k"]
@@ -350,7 +350,7 @@ def compute_multi_timeframe_score(
     snap = ind["snapshot"]
     last_c = float(daily_bars[-1]["close"])
     ema200 = snap["trend"]["ema200"]
-    rv = float(snap["momentum"]["rvol20"] or 1.0)
+    rv = float(snap["momentum"]["rvol20"])
     corr_pv = float(snap["qlib_factors"].get("corr_close_logvol_20d") or 0.0)
 
     # 1. 大周期方向组 (Macro Trend Group: 0 ~ 25)

@@ -55,7 +55,7 @@ def compute_triple_barrier_plan(
 
     last_bar = bars[-1]
     last_c = float(last_bar["close"])
-    raw_c = float(last_bar.get("raw_close", last_c))
+    p_dec = price_decimals(last_c, market, asset_type, as_of_day)
     atr14 = _num_or(ind_snapshot["volatility"], "atr14", last_c * 0.018)
     atr14 = max(last_c * 0.005, atr14)
     rv = _num_or(ind_snapshot["momentum"], "rvol20", 1.0)
@@ -171,6 +171,12 @@ def compute_triple_barrier_plan(
     if setup_type == "RIGHT_SIDE_BREAKOUT" and rv < 1.15:
         veto_codes.append("BREAKOUT_LOW_VOLUME")
         veto_reasons.append(f"上攻突破缺乏成交量配合 (RVOL={rv:.2f} < 1.15)，警惕假突破")
+    # 计划几何不变量：止损必须低于整个入场区、TP1 必须高于整个入场区，否则在区内成交即刻处于止损下方或止盈即亏损
+    if stop_loss >= entry_low or tp1 <= entry_high:
+        veto_codes.append("PLAN_GEOMETRY_INVALID")
+        veto_reasons.append(
+            f"计划点位自相矛盾（入场区 {entry_low:.{p_dec}f}~{entry_high:.{p_dec}f}，止损 {stop_loss:.{p_dec}f}，TP1 {tp1:.{p_dec}f}），不可执行"
+        )
 
     vetoed = len(veto_reasons) > 0
     overextended = (ext_atr > 2.0) or (rsi14 >= 70.0) or climax_distribution
@@ -207,6 +213,14 @@ def compute_triple_barrier_plan(
         action_cn = "条件观察（待放量/收盘确认）"
 
     # Position sizing calculation
+    # 每股风险按入场区上沿（区内最差成交价）计：在入场区内任意价位成交，按止损价离场的亏损都不超过风险预算
+    adj_factor = float(last_bar.get("adj_factor", 1.0)) or 1.0
+    worst_unit_risk = ((entry_high - stop_loss) + entry_high * fee_rate) / adj_factor
+    entry_high_raw = entry_high / adj_factor
+    gap_risk_note = (
+        "按止损价成交估算；跳空低开、跌停封板无法卖出或流动性不足时，实际亏损可能超过风险预算"
+        + ("；A 股 T+1，买入当日不能卖出止损" if rules["settlement"] == "T+1" else "")
+    )
     position_sizing: dict[str, Any]
     if asset_type == "index":
         position_sizing = {
@@ -219,18 +233,21 @@ def compute_triple_barrier_plan(
             "tradable": True,
             "recommended_shares": None,
             "lot_size": rules["lot_size"],
-            "unit_risk_per_share": round(unit_risk, 3),
+            "sizing_basis": "ENTRY_HIGH_WORST_FILL",
+            "unit_risk_per_share": round(worst_unit_risk, 4),
             "reason": "未提供账户净值 (account_equity)，仅输出价格屏障与每股风险，不编造建议股数。",
         }
     else:
         risk_budget = float(account_equity) * float(max_risk_pct)
-        adj_factor = float(last_bar.get("adj_factor", 1.0)) or 1.0
-        raw_unit_risk = net_risk / adj_factor
-        raw_shares = int(math.floor(risk_budget / max(1e-6, raw_unit_risk)))
+        raw_shares = int(math.floor(risk_budget / max(1e-6, worst_unit_risk)))
         lot = int(rules["lot_size"])
         lot_shares = round_shares_to_lot(raw_shares, rules)
-        max_cash_shares = round_shares_to_lot(int(math.floor(float(account_equity) / max(1e-6, raw_c))), rules)
+        max_cash_shares = round_shares_to_lot(
+            int(math.floor(float(account_equity) / max(1e-6, entry_high_raw * (1.0 + fee_rate)))), rules
+        )
         final_shares = max(0, min(lot_shares, max_cash_shares))
+        # 风控否决或评级不是做多确认/条件观察时不给股数：股数本身就是买入建议，与"否决时只给观察位"冲突
+        long_allowed = not vetoed and action in ("LONG_CONFIRMED", "WATCH_LONG_SETUP")
         position_sizing = {
             "tradable": True,
             "account_equity": round(float(account_equity), 2),
@@ -239,10 +256,20 @@ def compute_triple_barrier_plan(
             "lot_size": lot,
             "min_order_shares": int(rules.get("min_order_shares", lot)),
             "lot_step": int(rules.get("lot_step", lot)),
-            "recommended_shares": final_shares,
-            "estimated_notional": round(final_shares * raw_c, 2),
+            "sizing_basis": "ENTRY_HIGH_WORST_FILL",
+            "unit_risk_per_share": round(worst_unit_risk, 4),
+            "recommended_shares": final_shares if long_allowed else None,
+            "estimated_notional": round(final_shares * entry_high_raw, 2) if long_allowed else None,
+            "max_loss_at_stop": round(final_shares * worst_unit_risk, 2) if long_allowed else None,
             "settlement_rule": rules["settlement"],
+            "gap_risk_note": gap_risk_note,
         }
+        if not long_allowed:
+            position_sizing["reason"] = (
+                "风控已否决做多（原因见 veto_reasons），不给出建议股数，以下点位只用于观察"
+                if vetoed
+                else f"当前评级为「{action_cn}」，不是做多确认或条件观察，不给出建议股数"
+            )
 
     meta_decision = {
         "setup_type": setup_type,
@@ -256,7 +283,6 @@ def compute_triple_barrier_plan(
         "veto_codes": veto_codes,
     }
 
-    p_dec = price_decimals(last_c, market, asset_type, as_of_day)
     retest_hold = float(projections["bull"]["retest_hold"])
     bear_target = float(projections["bear"]["target_price"])
     holder_defense = _holder_defense_plan(market, asset_type, as_of_day, p_dec, projections, stop_loss, s1, r1, bear_target)

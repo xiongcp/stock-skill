@@ -5,11 +5,11 @@ description = "Multi-market (CN/HK/US) deterministic K-line structure, algebraic
 requires-python = ">=3.12"
 dependencies = [
     "pillow>=10.0.0",
-    "numpy>=1.26.0",
 ]
 
 [dependency-groups]
 dev = [
+    "numpy>=1.26.0",
     "pytest>=8.0.0",
     "ta-lib>=0.6",
 ]

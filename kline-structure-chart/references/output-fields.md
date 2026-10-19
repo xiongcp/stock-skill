@@ -80,7 +80,7 @@
 | `multi_timeframe_score.components` | 四组分项：`macro_trend_25`、`structure_pattern_25`、`strategy_trigger_25`、`volume_benchmark_25` | 0~25 | 否 | 追问时解释 |
 | `meta_labeling_decision.setup_type` / `setup_label_cn` | 计划类型：右侧突破、左侧回踩、等待确认等 | 枚举 | 否 | — |
 | `meta_labeling_decision.action` / `action_cn` | 动作标签：`LONG_CONFIRMED` 确认做多、`WATCH_LONG_SETUP` 条件观察、`NEUTRAL_HOLD_WAIT` 观望、`DEFENSIVE_AVOID` 防守回避 | 枚举 | 否 | 风控否决时只能说观察，不说买入 |
-| `meta_labeling_decision.risk_veto_applied` / `veto_reasons` / `veto_codes` | 是否被风控否决、原因文本及稳定编码（`BENCHMARK_MISSING`、`BENCHMARK_WEAK`、`RR_INSUFFICIENT`、`BELOW_LOWER_RAIL`、`BREAKOUT_LOW_VOLUME`，与原因一一对应） | 布尔 / 文本 / 枚举 | 否 | 否决时置顶转述原因文本，编码不需要对外说 |
+| `meta_labeling_decision.risk_veto_applied` / `veto_reasons` / `veto_codes` | 是否被风控否决、原因文本及稳定编码（`BENCHMARK_MISSING`、`BENCHMARK_WEAK`、`RR_INSUFFICIENT`、`BELOW_LOWER_RAIL`、`BREAKOUT_LOW_VOLUME`、`PLAN_GEOMETRY_INVALID`（止损不低于入场区下沿或 TP1 不高于入场区上沿），与原因一一对应） | 布尔 / 文本 / 枚举 | 否 | 否决时置顶转述原因文本，编码不需要对外说 |
 
 ## 6. 风控计划 `triple_barrier_plan` 与否决 `debate_and_veto`
 
@@ -96,7 +96,7 @@
 | `market_microstructure.*` | 交易制度：`settlement`、`can_intraday_roundtrip`、`daily_price_limit_pct`（A 股为小数，如 0.1；港美股为空）、`lot_size`/`min_order_shares`/`lot_step`、`tick_size`、`session_hours_local`、`commission_bps`、`stamp_duty_buy_bps`/`stamp_duty_sell_bps`、港股 `lot_size_source`、美股 `day_trading_rule` | — | 部分可空 | 按市场转述，规则来源见 `references/{cn,hk,us}-market.md` |
 | `holder_defense_plan` | 已持仓者的防守计划：`reduce_level`（收盘跌破减仓）、`exit_level`（盘中触及硬止损屏障离场）、`rebound_cap`（跌破后反抽上限）、`downside_reference`、`rules[]`（中文规则原文）、`note`（A 股 T+1 提示）；指数为 `available = false` | 价格 / 文本 | 否 | 用户说"已经持有"时转述 `rules`；不是卖出建议 |
 | `short_plan` | 破位做空计划，仅港股、美股的股票/ETF（A 股与指数 `available = false` 并给出 `reason`）：`trigger`、`entry_zone`、`stop_loss_barrier`、`take_profit_1/2`、`time_barrier_bars`、`risk_reward_ratio`（扣交易成本，**未计融券费**）、`invalidation`、`constraints`（卖空制度限制）、`warnings`（大盘偏强、盈亏比不足） | 价格 / 文本 | 否 | 必须同时转述 `constraints` 与 `warnings`；不得给出报告里没有的做空点位 |
-| `position_sizing.*` | 仓位：`tradable`、`account_equity`、`max_risk_pct`（%）、`risk_budget_amount`、`recommended_shares`、`estimated_notional` | 股 / 货币 | 未传账户净值或指数时不给股数 | "按止损距离计算为 X 股"，不是个性化建议 |
+| `position_sizing.*` | 仓位：`tradable`、`account_equity`、`max_risk_pct`（%）、`risk_budget_amount`、`sizing_basis`（`ENTRY_HIGH_WORST_FILL`：每股风险 = 入场区上沿 − 止损 + 上沿 × 往返费率，区内任意价位成交触及止损都不超预算）、`unit_risk_per_share`、`recommended_shares`、`estimated_notional`（按入场区上沿计）、`max_loss_at_stop`（按止损价成交的亏损）、`gap_risk_note`（跳空/跌停时亏损可能超预算）、`reason` | 股 / 货币 | 未传账户净值、指数、**风控否决或评级不是 `LONG_CONFIRMED`/`WATCH_LONG_SETUP`** 时 `recommended_shares` 等为 `null` 并给出 `reason` | "按入场区上沿到止损的距离计算为 X 股"，同时转述 `gap_risk_note`；为 `null` 时转述 `reason`，不得自行换算股数；不是个性化建议 |
 | `debate_and_veto.bull_case` / `bear_case` | 多空两方的规则化证据句 | 文本 | 否 | 可作为证据列举 |
 | `debate_and_veto.risk_officer_veto` / `veto_reasons` / `veto_codes` | 风控否决开关与原因（大盘状态分 < 35、净盈亏比 < 1.20、收盘在结构下轨下方、突破缺量等） | 布尔 / 文本 | 否 | `true` 时置顶，不给做多建议 |
 | `debate_and_veto.final_verdict_cn` | 一句话结论 | 文本 | 否 | 可原文引用 |

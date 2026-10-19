@@ -591,6 +591,26 @@ def round_to_tick(price: float, market: str = "CN", asset_type: str = "equity", 
     return float((steps * tick).quantize(tick))
 
 
+def daily_limit_prices(
+    prev_close: float,
+    limit_pct: float,
+    market: str = "CN",
+    asset_type: str = "equity",
+    day_str: str | None = None,
+) -> tuple[float, float]:
+    """按交易所规则计算 (涨停价, 跌停价)：前收盘 × (1 ± 涨跌幅)，按最小价位四舍五入。
+
+    用十进制计算：二进制浮点下 1.30 × 0.95 = 1.2349999…，会把交易所的 1.24 误算成 1.23。
+    低价股按比例容差判断会漏判（前收 1.46 的 ST 股跌停价 1.39 只比 0.95 倍高 0.2%），必须按价位取整后比较。
+    """
+    tick = tick_size_for(prev_close, market, asset_type, day_str)
+    prev = Decimal(str(prev_close)).quantize(tick, rounding=ROUND_HALF_UP)
+    pct = Decimal(str(limit_pct))
+    up = (prev * (1 + pct) / tick).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * tick
+    down = (prev * (1 - pct) / tick).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * tick
+    return float(up), float(down)
+
+
 def round_shares_to_lot(raw_shares: int, rules: dict[str, Any]) -> int:
     """按板块最小申报股数与递增步长向下取整（科创板 200+1，北交所 100+1，主板/港股整手）。"""
     min_order = int(rules.get("min_order_shares") or rules.get("lot_size") or 1)

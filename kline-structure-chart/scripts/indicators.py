@@ -421,6 +421,13 @@ def compute_all_indicators(bars: list[dict[str, Any]]) -> dict[str, Any]:
             return None
         return round(float(arr[-1]), digits)
 
+    # 快照直接参与风控与策略判断（(收盘-EMA20)/ATR、收盘与布林带/均线比较），价格类字段按价格量级保留小数：
+    # d = max(2, ceil(4 - log10(价格)))，舍入误差 ≤ 0.5×10^-d，相对 ATR（下限 0.5% 价格）约 1% 以内。
+    # 价格 ≥ 100 时仍为 2 位；1 元左右的 ETF 为 4 位，避免 EMA20 被舍入 0.005 而使偏离度误差达到 0.3 个 ATR。
+    last_close = closes[-1] if closes else 0.0
+    px = max(2, math.ceil(4 - math.log10(last_close))) if last_close > 0 else 2
+    rvol_last = _last(rvol20, 2)
+
     return {
         "series": {
             "sma": sma_map,
@@ -438,16 +445,16 @@ def compute_all_indicators(bars: list[dict[str, Any]]) -> dict[str, Any]:
         },
         "snapshot": {
             "trend": {
-                "sma20": _last(sma_map[20]),
-                "sma60": _last(sma_map[60]),
-                "sma120": _last(sma_map[120]),
-                "sma250": _last(sma_map[250]),
-                "ema20": _last(ema_map[20]),
-                "ema50": _last(ema_map[50]),
-                "ema60": _last(ema_map[60]),
-                "ema200": _last(ema_map[200]),
-                "vwap20": _last(vwap20),
-                "supertrend_line": _last(st_res["line"]),
+                "sma20": _last(sma_map[20], px),
+                "sma60": _last(sma_map[60], px),
+                "sma120": _last(sma_map[120], px),
+                "sma250": _last(sma_map[250], px),
+                "ema20": _last(ema_map[20], px),
+                "ema50": _last(ema_map[50], px),
+                "ema60": _last(ema_map[60], px),
+                "ema200": _last(ema_map[200], px),
+                "vwap20": _last(vwap20, px),
+                "supertrend_line": _last(st_res["line"], px),
                 "supertrend_dir": int(st_res["direction"][-1]) if st_res["direction"] and st_res["direction"][-1] is not None else 0,
                 "adx14": _last(adx_res["adx"]),
                 "plus_di14": _last(adx_res["plus_di"]),
@@ -455,19 +462,20 @@ def compute_all_indicators(bars: list[dict[str, Any]]) -> dict[str, Any]:
             },
             "momentum": {
                 "rsi14": _last(rsi14),
-                "macd_dif": _last(macd_res["macd"], 3),
-                "macd_dea": _last(macd_res["signal"], 3),
-                "macd_hist": _last(macd_res["hist"], 3),
+                "macd_dif": _last(macd_res["macd"], px + 1),
+                "macd_dea": _last(macd_res["signal"], px + 1),
+                "macd_hist": _last(macd_res["hist"], px + 1),
                 "stoch_k": _last(stoch_res["k"]),
                 "stoch_d": _last(stoch_res["d"]),
-                "rvol20": _last(rvol20, 2) or 1.0,
+                # 成交量为 0（如停牌复牌前的零成交）时 RVOL 就是 0，不能被 `or` 当成缺失改写成 1.0
+                "rvol20": 1.0 if rvol_last is None else rvol_last,
             },
             "volatility": {
-                "atr14": _last(atr14, 3),
+                "atr14": _last(atr14, px + 1),
                 "atr20_pct": round(atr_pct(bars, 20) * 100.0, 2),
-                "bb_upper": _last(bb_res["upper"]),
-                "bb_mid": _last(bb_res["mid"]),
-                "bb_lower": _last(bb_res["lower"]),
+                "bb_upper": _last(bb_res["upper"], px),
+                "bb_mid": _last(bb_res["mid"], px),
+                "bb_lower": _last(bb_res["lower"], px),
                 "bbw": _last(bb_res["bbw"], 4),
                 "bbw_percentile_120": _last(bbw_pct),
             },

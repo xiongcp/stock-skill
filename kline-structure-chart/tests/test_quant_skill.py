@@ -309,10 +309,19 @@ def test_multi_market_pipeline_and_backtest(
     fc = report["future_projection_15d"]
     assert fc["calibration_audit"]["calibrated"] is True
     assert fc["calibration_audit"]["q50_mae_pct"] == fc["calibration_audit"]["random_walk_mae_pct"]
+    sizing = report["triple_barrier_plan"]["position_sizing"]
+    long_allowed = not report["debate_and_veto"]["risk_officer_veto"] and report["meta_labeling_decision"]["action"] in (
+        "LONG_CONFIRMED",
+        "WATCH_LONG_SETUP",
+    )
     if asset_type == "index":
-        assert report["triple_barrier_plan"]["position_sizing"]["recommended_shares"] is None
+        assert sizing["recommended_shares"] is None
+    elif long_allowed:
+        assert sizing["recommended_shares"] is not None
     else:
-        assert report["triple_barrier_plan"]["position_sizing"]["recommended_shares"] is not None
+        # 风控否决或评级不是做多时不给股数（股数本身就是买入建议），并写明原因
+        assert sizing["recommended_shares"] is None and sizing["estimated_notional"] is None
+        assert "不给出建议股数" in sizing["reason"]
 
     html_text = Path(paths["dashboard_html"]).read_text(encoding="utf-8")
     assert "https://cdn" not in html_text
@@ -2022,3 +2031,125 @@ def test_p1_all_eight_audit_items_regression(replay_recorded, tmp_path: Path) ->
     for doc_path in [skill_root / "SKILL.md", *sorted((skill_root / "references").glob("*.md"))]:
         txt = doc_path.read_text(encoding="utf-8")
         assert "1,500" not in txt and "1500" not in txt and "盲测" not in txt, f"Unverified claim in {doc_path}"
+
+
+# ---------------------------------------------------------------------------
+# 资金与K线计算深度审查回归（仓位 / 资金参数 / 涨跌停撮合 / 低价品种指标精度 / 计划几何）
+# ---------------------------------------------------------------------------
+
+
+def test_position_sizing_uses_worst_fill_and_is_withheld_under_veto(replay_recorded, tmp_path: Path) -> None:
+    from analysis import analyze_bundle
+    from render_report_md import render_report_markdown
+
+    now = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
+    base = {"symbol": "510300.SH", "market": "CN", "asset_type": "etf", "display_bars": 120, "horizon_bars": 15,
+            "account_equity": 300000.0, "max_risk_pct": 0.01}
+    # 2025-09-12：未被否决的做多确认。按入场区上沿（最差成交价）计每股风险，区内任意价位成交触及止损都不超预算
+    hist_req = {**base, "as_of": "2025-09-12"}
+    hist = analyze_bundle(load_bundle(hist_req, now=now), hist_req, include_replay=False)
+    assert hist["meta_labeling_decision"]["action"] == "LONG_CONFIRMED" and not hist["debate_and_veto"]["risk_officer_veto"]
+    tb, sz = hist["triple_barrier_plan"], hist["triple_barrier_plan"]["position_sizing"]
+    fee = round_trip_cost_rate(tb["market_microstructure"])
+    worst = (tb["entry_zone"][1] - tb["stop_loss_barrier"]) + tb["entry_zone"][1] * fee
+    assert sz["sizing_basis"] == "ENTRY_HIGH_WORST_FILL" and abs(sz["unit_risk_per_share"] - worst) < 1e-3
+    assert sz["recommended_shares"] > 0 and sz["recommended_shares"] % 100 == 0
+    assert sz["recommended_shares"] * worst <= sz["risk_budget_amount"] + 1e-6
+    assert sz["max_loss_at_stop"] <= sz["risk_budget_amount"] and "跌停" in sz["gap_risk_note"]
+    md = render_report_markdown(hist)
+    assert f"**{sz['recommended_shares']} 股**" in md and "触及止损约亏" in md
+
+    # 2026-10-15：风控否决（大盘偏弱等），股数本身就是买入建议，必须不给出，并写明原因
+    rep = analyze_bundle(load_bundle(base, now=now), base, include_replay=False)
+    assert rep["debate_and_veto"]["risk_officer_veto"]
+    sz_now = rep["triple_barrier_plan"]["position_sizing"]
+    assert sz_now["recommended_shares"] is None and sz_now["estimated_notional"] is None and sz_now["max_loss_at_stop"] is None
+    assert "风控已否决" in sz_now["reason"]
+    md_now = render_report_markdown(rep)
+    assert "不给出建议股数" in md_now and "按入场区上沿" not in md_now
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("max_risk_pct", 1.0), ("max_risk_pct", 0.0), ("max_risk_pct", -0.01), ("max_risk_pct", float("nan")),
+     ("account_equity", -100.0), ("account_equity", float("inf"))],
+)
+def test_money_parameters_are_validated_before_fetching(tmp_path: Path, field: str, value: float) -> None:
+    # 1% 误写成 1 会让单笔风险变成 100% 净值：必须在取数前直接拒绝（测试断网，校验先于取数才不会报 DATA_UNAVAILABLE）
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15,
+           "account_equity": 300000.0, "max_risk_pct": 0.01, field: value}
+    with pytest.raises(ValueError, match="max-risk-pct|account-equity"):
+        run_pipeline(req, output_dir=tmp_path)
+
+
+def test_p1_backtest_limit_prices_use_exchange_rounding_and_one_price_boards() -> None:
+    from market_rules import daily_limit_prices
+
+    # 交易所规则：前收 × (1 ± 涨跌幅) 按价位四舍五入；十进制计算避免 1.30 × 0.95 = 1.2349999… 被算成 1.23
+    assert daily_limit_prices(1.30, 0.05) == (1.37, 1.24)
+    assert daily_limit_prices(1.46, 0.05) == (1.53, 1.39)
+    assert daily_limit_prices(1235.58, 0.10) == (1359.14, 1112.02)
+    assert daily_limit_prices(4.242, 0.10, "CN", "etf") == (4.666, 3.818)
+
+    # ST信通（600289.SH，主板 ST 当时 ±5%）真实日线：低价股的涨跌停价相对 1±5% 偏离可达 0.3%，旧的 0.1% 比例容差会漏判
+    bars = load_recorded("sina_daily/sh600289.json")
+    idx = {b["day"]: i for i, b in enumerate(bars)}
+    kw = {"market": "CN", "asset_type": "equity", "symbol": "600289.SH", "is_st": True}
+    for day in ("2024-02-23", "2024-05-08", "2025-01-15"):  # 开盘即一字涨停（如 2024-02-23 前收 1.47、开盘 1.54）
+        res = label_triple_barrier_event(bars, entry_idx=idx[day], tp_price=99.0, sl_price=0.5, horizon_bars=5, **kw)
+        assert res == {"tradable": False, "reason": "LIMIT_UP_NO_FILL", "entry_day": day}
+    # 2024-04-12 开盘 1.22 买入、止损 1.20：04-15（1.24）与 04-16（1.18）均为一字跌停封死无法卖出，
+    # 只能在 04-17 开盘 1.12 离场；旧逻辑漏判 04-16 封板，会按 1.18 止损成交而低估约 5 个百分点的亏损
+    res = label_triple_barrier_event(
+        bars, entry_idx=idx["2024-04-12"], tp_price=99.0, sl_price=1.20, horizon_bars=5, trailing_stop=False, **kw
+    )
+    assert res["outcome"] == "SL_BARRIER" and res["exit_day"] == "2024-04-17" and res["exit_price"] == 1.12
+
+
+def test_indicator_snapshot_keeps_precision_for_low_priced_instruments() -> None:
+    # 快照参与 (收盘-EMA20)/ATR、EMA20 与 EMA50、收盘与布林带的比较；低价 ETF 舍入到 2 位小数会翻转判断
+    etf = load_recorded("sina_daily/sh510300.json")[-420:]
+    ind = compute_all_indicators(etf)
+    snap, series = ind["snapshot"], ind["series"]
+    assert abs(snap["trend"]["ema20"] - series["ema"][20][-1]) <= 0.5e-4
+    assert abs(snap["trend"]["ema50"] - series["ema"][50][-1]) <= 0.5e-4
+    assert abs(snap["volatility"]["bb_upper"] - series["bollinger"]["upper"][-1]) <= 0.5e-4
+    assert abs(snap["volatility"]["atr14"] - series["atr14"][-1]) <= 0.5e-5
+    # 价格 ≥ 100 的品种保持 2 位小数，输出与既有报告一致
+    moutai = compute_all_indicators(load_recorded("sina_daily/sh600519.json")[-420:])["snapshot"]
+    assert moutai["trend"]["ema20"] == round(moutai["trend"]["ema20"], 2)
+
+
+def test_plan_geometry_guard_vetoes_stop_inside_entry_zone(replay_recorded) -> None:
+    from analysis import analyze_bundle
+    from risk import compute_triple_barrier_plan
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    rep = analyze_bundle(bundle, req, include_replay=False)
+    last_c = float(bundle["target"]["bars"][-1]["close"])
+    # 触发位与破位位重合且都在现价下方时，突破计划的止损会落在入场区内：必须否决而不是输出可执行计划
+    proj = copy.deepcopy(rep["rule_scenarios"])
+    proj["breakout_level"]["price"] = proj["breakdown_level"]["price"] = round(last_c * 0.95, 2)
+    wedge = {**rep["mathematical_indicators"]["structure_levels"]["wedge_structure"], "status": "above"}
+    bench = {**rep["market_benchmark"], "regime_score": 60.0, "benchmark_missing": False}
+    dec, tb, debate = compute_triple_barrier_plan(
+        bundle["target"]["bars"], rep["meta"], rep["mathematical_indicators"], wedge, {}, proj,
+        rep["multi_timeframe_score"], [], bench,
+    )
+    assert tb["stop_loss_barrier"] >= tb["entry_zone"][0]
+    assert "PLAN_GEOMETRY_INVALID" in dec["veto_codes"] and debate["risk_officer_veto"]
+
+
+def test_lint_rejects_share_count_when_report_withholds_sizing(replay_recorded) -> None:
+    from analysis import analyze_bundle
+    from lint_response import lint_agent_response
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15,
+           "account_equity": 500000.0, "max_risk_pct": 0.01}
+    rep = analyze_bundle(load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC)), req, include_replay=False)
+    assert rep["triple_barrier_plan"]["position_sizing"]["recommended_shares"] is None
+    head = "【风控否决】大盘偏弱，以下点位只用于观察。交易制度：每手 100 股（最小申报 100 股）。以上不构成投资建议。"
+    assert not any("买入股数" in e for e in lint_agent_response(head, rep))
+    errors = lint_agent_response(head + "按账户 50 万可买入 300 股。", rep)
+    assert any("买入股数" in e for e in errors)

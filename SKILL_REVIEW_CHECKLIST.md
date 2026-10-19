@@ -321,3 +321,28 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 - 未验证：`install.ps1` 未在 Windows 实测；安装后 Claude Code / Codex 新会话能否识别技能未实测。
 - 阶段 2 实测结果：在茅台（`600519.SH`）录制行情回放中，历史条件频率按各情景自身基准率（per-scenario climatology）检验，技能分 `BSS <= 0`，报告如实标注「尚未优于各情景自身基准率，仅作历史统计参考」（`discriminative = false`）。
 
+
+## 7. 第四轮复查（2026-10-19）：资金计算、K 线计算与安装方式
+
+审查方法：逐行通读 `risk.py`、`evaluation.py`、`market_rules.py`、`indicators.py`、`strategies.py`、`structure.py`（推演与阶梯）、`data_gateway.py`（复权与基准对齐），每个疑点用 `tests/fixtures/recorded/` 真实录制行情复现后再改。
+
+| 编号 | 级别 | 位置 | 问题（真实数据证据） | 状态与守护测试 |
+| --- | --- | --- | --- | --- |
+| R4-01 | P0 | `risk.py`、`render_report_md.py`、`render_html.py` | 风控否决仍输出建议股数：截至 2026-10-15 的 10 个录制标的全部被否决，报告仍加粗给出股数（510300.SH 27,300 股、600289.SH 9,100 股） | ✅ 否决或评级非做多时 `recommended_shares = null` 并给 `reason`，`lint_response.py` 拦截回复里自行换算的买入股数；`test_position_sizing_uses_worst_fill_and_is_withheld_under_veto`、`test_lint_rejects_share_count_when_report_withholds_sizing` |
+| R4-02 | P0 | `analyze_and_forecast.py` | `--max-risk-pct` 无校验：用户说"最多亏 1%"被传成 `1` 时风险预算 = 100% 净值 | ✅ 取值 (0, 0.05]、净值须为正有限数，取数前拒绝；`test_money_parameters_are_validated_before_fetching` |
+| R4-03 | P1 | `risk.py` | 每股风险按入场区中值计，在区内高位成交触及止损的亏损超出预算；现金上限按最新收盘价且不含费用 | ✅ 按入场区上沿（最差成交价）含往返费率计，新增 `max_loss_at_stop`、`gap_risk_note`；同上测试 |
+| R4-04 | P1 | `evaluation.py`、`market_rules.py` | 回测用 0.1% 比例容差判涨跌停，低价股漏判：600289.SH 53 次涨停开盘漏 8 次、18 次一字跌停漏 4 次（2024-04-16 一字跌停被当成按 1.18 止损成交，实际 04-17 以 1.12 离场），回测高估可成交性、低估亏损 | ✅ `daily_limit_prices` 按交易所价位四舍五入（十进制），复权价换算回当日原始价口径比较；`test_p1_backtest_limit_prices_use_exchange_rounding_and_one_price_boards` |
+| R4-05 | P1 | `indicators.py`、`strategies.py` | 指标快照一律 2 位小数后参与判断，低价品种翻转信号：510300.SH 763 个交易日中 EMA20>EMA50 翻转 17 天、偏离 >2ATR 翻转 3 天；RVOL=0 被 `or 1.0` 改写 | ✅ 价格类字段按量级保留小数（价格 ≥ 100 仍 2 位）；`test_indicator_snapshot_keeps_precision_for_low_priced_instruments` |
+| R4-06 | P2 | `risk.py` | 无"止损 < 入场区 < TP1"几何校验（理论上 ATR14 与 ATR20% 背离时可出现）；963 个真实回放决策日未出现 | ✅ `PLAN_GEOMETRY_INVALID` 否决；`test_plan_geometry_guard_vetoes_stop_inside_entry_zone` |
+| R4-07 | P2 | `references/math-patterns.md` | "区间观察"入场区与止损公式与实现不一致（文档 `C−0.40ATR`/`C−1.45ATR`，代码按阴阳线分支、`C−1.40ATR`） | ✅ 文档对齐实现（未改变行为） |
+| R4-08 | P2 | `pyproject.toml`、`doctor.py`、`SKILL.md` | 运行期从未导入 numpy 却列为依赖；没有 uv 时 doctor 判失败、`SKILL.md` 无兜底路径 | ✅ numpy 移入 dev 组；新增 `requirements.txt`（`test_requirements_txt_matches_locked_runtime_dependencies` 校验与 `uv.lock` 一致）；`SKILL.md`「运行环境」；新增 `INSTALL_FOR_AGENTS.md` 对话安装 |
+
+已核对无误（未改动）：拆股不重复复权（Yahoo 价格已按拆股调整，只处理分红）；基准序列截到标的最后一根已收盘K线；复权因子最后一根恒为 1；`round_shares_to_lot` 向下取整；三重屏障同根 K 线先判止损；回测入场要求开盘价在入场区内且高于止损。
+
+仍存在、未在本轮修改（使用时需知晓）：
+
+- A 股佣金未计 5 元最低收费与过户费，港股未计交易征费、结算费；小额账户的实际成本高于 `round_trip_cost_rate`。回测滑点固定 2 bps。
+- 盈亏比 `risk_reward_ratio` 与移动保本仍以入场区中值计；在入场区上沿成交时实际盈亏比更低（仓位已按上沿计，资金风险不受影响）。
+- 盘中运行且当天恰为除权除息日时，当日事件晚于最后一根已收盘K线，计划点位仍是除权前口径，未在 `quality.notes` 中提示。
+- 回测"累计收益"按每笔全仓复利计算，不含仓位管理，也不含持仓期内回撤。
+- 代码在 Python 3.9.6 + Pillow 下实测 131 项测试通过（另 2 项为 doctor 版本门槛与 PNG 像素配色），但 `requires-python` 仍为 3.12，放宽需在 CI 增加多版本矩阵后再做。

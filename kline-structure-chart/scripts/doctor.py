@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""环境自检：Python / uv / 依赖 / 中文字体 / 数据源连通 / 技能注册，逐项输出 ✅ 或 ❌ 与修复建议。
+"""环境自检：Python / uv（可选）/ 依赖 / 中文字体 / 数据源连通 / 技能注册，逐项输出 ✅ 或 ❌ 与修复建议。
 
 用法：
   uv run python scripts/doctor.py                    # 全部检查（数据源项需要联网）
@@ -46,13 +46,19 @@ class Check:
 def check_python() -> Check:
     ver = ".".join(map(str, sys.version_info[:3]))
     ok = sys.version_info[:2] >= MIN_PYTHON
-    return Check("Python 版本", ok, f"{ver}（{sys.executable}）", "" if ok else "运行 uv sync --python 3.12 后用 uv run 启动")
+    return Check(
+        "Python 版本",
+        ok,
+        f"{ver}（{sys.executable}）",
+        "" if ok else "运行 uv sync --python 3.12 后用 uv run 启动；没有 uv 时安装 Python 3.12+ 后按 SKILL.md「运行环境」一节创建 .venv",
+    )
 
 
 def check_uv() -> Check:
+    """uv 是推荐工具而非必需：当前 Python 与依赖可用时（例如 .venv/bin/python 运行），缺 uv 不算失败。"""
     uv = shutil.which("uv")
     if not uv:
-        return Check("uv", False, "未找到 uv 命令", "安装 uv：https://docs.astral.sh/uv/ （或 install.sh --install-uv）")
+        return Check("uv", True, f"未找到 uv（可选）：当前用 {sys.executable} 运行；SKILL.md 中的 uv run python 换成该解释器即可")
     try:
         out = subprocess.run([uv, "--version"], capture_output=True, text=True, timeout=10).stdout.strip()
     except (OSError, subprocess.SubprocessError) as exc:
@@ -62,14 +68,20 @@ def check_uv() -> Check:
 
 def check_dependencies() -> Check:
     found, missing = [], []
-    for module, dist in (("numpy", "numpy"), ("PIL", "pillow")):
+    for module, dist in (("PIL", "pillow"),):
         try:
             mod = importlib.import_module(module)
             found.append(f"{dist} {getattr(mod, '__version__', '?')}")
         except ImportError:
             missing.append(dist)
     if missing:
-        return Check("Python 依赖", False, f"缺少 {', '.join(missing)}", "在仓库根目录执行 uv sync --frozen --python 3.12 --directory kline-structure-chart")
+        return Check(
+            "Python 依赖",
+            False,
+            f"缺少 {', '.join(missing)}",
+            "在仓库根目录执行 uv sync --frozen --python 3.12 --directory kline-structure-chart；"
+            "没有 uv 时在技能目录执行 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",
+        )
     return Check("Python 依赖", True, "，".join(found))
 
 

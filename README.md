@@ -76,15 +76,38 @@ flowchart TD
 ## 2. 环境要求
 
 - macOS、Linux 或 Windows（Windows 安装脚本尚未实测，见第 10 节）。
-- `git` 与 [uv](https://docs.astral.sh/uv/)：uv 用来安装 Python 3.12 和锁定版本的依赖。缺 uv 时安装脚本会询问是否代为安装。
+- `git`，以及 **Python ≥ 3.12 + Pillow**（Pillow 只用来画 PNG；全部指标、形态、风控与回测计算只用 Python 标准库）。
+- [uv](https://docs.astral.sh/uv/)：**推荐，但不是必需**。一键安装脚本依赖它；不想装 uv 时按 3.4「不用 uv 的手动安装」用 venv + pip。
 - 网络：安装时需要访问 GitHub 与 PyPI；每次分析需要访问新浪、Yahoo、腾讯的行情接口。没有网络的沙箱环境无法使用（会直接报 `[DATA_UNAVAILABLE]`）。
 - 中文字体（画 PNG 用）：macOS 与 Windows 自带；Linux 需要文泉驿或 Noto CJK，安装脚本发现缺字体时会打印对应发行版的安装命令（不会自动 sudo）。
+
+### 为什么推荐 uv（但不是必需）
+
+技能本身只是一份说明（`SKILL.md`）加一组 Python 脚本，agent 按 `SKILL.md` 里的命令运行脚本，所以电脑上必须有能运行这些脚本的 Python 和 Pillow。uv 解决的是"让这件事在任何机器上都一次成功"：
+
+- **自动拿到对的 Python**：脚本要求 Python ≥ 3.12，而 macOS 自带的是 3.9、不少 Linux 发行版是 3.10/3.11。uv 会在用户目录下载 Python 3.12，不需要 sudo，也不碰系统 Python。
+- **版本锁定、结果可复现**：`uv sync --frozen` 严格按 `uv.lock` 安装，每台机器得到同一个 Pillow 版本，PNG 渲染一致。
+- **不污染系统环境**：依赖装在技能目录的 `.venv` 里；直接 `pip install` 到系统 Python 在新版 macOS（Homebrew）和 Debian/Ubuntu 上会被 PEP 668（externally-managed-environment）拒绝。
+
+"agent 遇到错误会自己安装"大多数时候成立，但不可靠：agent 可能把依赖装进系统 Python（被拒绝或污染环境）、用了过低的 Python 版本、在禁止联网或禁止写系统目录的沙箱里反复失败，轻量模型尤其容易卡住。所以 `SKILL.md` 现在写明了确定的兜底路径：**有 uv 用 `uv run python`；没有 uv 就在技能目录建 `.venv` 并 `pip install -r requirements.txt`，然后用 `.venv/bin/python`**。`scripts/doctor.py` 也不再把"没装 uv"判为失败。
 
 ---
 
 ## 3. 安装
 
-### 3.1 一行命令安装（推荐）
+### 3.0 让 AI 助手在对话里帮你安装（最省事）
+
+不想自己敲命令时，把下面这句话直接发给你正在用的 AI 助手（Claude Code、Codex、Gemini CLI、Cursor、OpenCode、Hermes Agent 等能执行命令的助手）：
+
+```text
+请按 https://raw.githubusercontent.com/xiongcp/stock-skill/main/INSTALL_FOR_AGENTS.md 的步骤，把 kline-structure-chart 技能安装到你自己的技能目录；需要安装 uv 或其他软件前先问我，完成后把 doctor 自检结果告诉我。
+```
+
+助手会读取 [INSTALL_FOR_AGENTS.md](INSTALL_FOR_AGENTS.md)：判断自己该装到哪个技能目录 → 检查 git / Python / uv → 有 uv 就运行一键脚本，没有 uv 且你不同意安装时改用 venv + pip → 运行 `doctor` → 告诉你结果和下一步。指引里写明了安全边界：不用 sudo、不覆盖已有目录、安装任何软件前先征求你的同意、不索要任何账号密码。
+
+助手无法访问网址时，把 [INSTALL_FOR_AGENTS.md](INSTALL_FOR_AGENTS.md) 的全文复制给它即可。装完后**新开一个会话**，技能才会被加载。
+
+### 3.1 一行命令安装
 
 macOS / Linux：
 
@@ -188,6 +211,14 @@ mkdir -p ~/.claude/skills && ln -sfn ~/.local/share/stock-skill/kline-structure-
 
 其他 agent 把最后一步的 `~/.claude/skills` 换成 3.1 表格里的目录。
 
+**不用 uv 的手动安装**：需要 Python ≥ 3.12（`python3 --version` 查看；把下面的 `python3.12` 换成你机器上 3.12 及以上的解释器名）。克隆与软链两步同上，把第二步换成：
+
+```bash
+cd ~/.local/share/stock-skill/kline-structure-chart && python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+```
+
+`requirements.txt` 只有 Pillow，版本与 `uv.lock` 一致（由测试校验）。此后 `SKILL.md` 与本文中的 `uv run python` 一律换成 `.venv/bin/python`（Windows：`.venv\Scripts\python`），助手会按 `SKILL.md`「运行环境」一节自动替换。
+
 ### 3.5 验证安装
 
 以下命令在代码目录（默认 `~/.local/share/stock-skill`）执行。先跑环境自检，逐项显示 ✅/❌ 和修复建议（断网时数据源几项为 ❌，其余可离线通过）：
@@ -261,7 +292,7 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
 | `--horizon-bars` | 预测天数，1~60，默认 15 |
 | `--as-of` | 只用截至某日（`YYYY-MM-DD`）的数据，用于复盘历史 |
 | `--adjustment` | `raw` / `split` / `total_return`。默认个股和 ETF 用前复权（含分红送转），指数不复权 |
-| `--account-equity`、`--max-risk-pct` | 账户净值与单笔风险比例（默认 0.01，即 1%）。不传账户净值时不计算股数 |
+| `--account-equity`、`--max-risk-pct` | 账户净值与单笔风险**比例**（默认 0.01，即 1%；取值 0~0.05，写成 `1` 会以 `[INVALID_ARGUMENT]` 拒绝）。不传账户净值时不计算股数；股数按入场区上沿到止损的距离（含交易成本）计算，风控否决或评级不是做多时不给股数 |
 | `--name`、`--st` | 手动指定证券简称、手动标记 ST。正常情况下会自动获取，无需填写 |
 | `--ipo-no-limit` | 标记上市前 5 个交易日、不设涨跌幅的新股 |
 | `--color-scheme` | `auto` / `cn_red_up` / `us_green_up`。默认 A 股和港股红涨绿跌，美股绿涨红跌 |
@@ -390,7 +421,7 @@ uv run --directory kline-structure-chart python scripts/lint_response.py --resul
 | `[INVALID_ARGUMENT] --days must be between 60 and 500` | `--days` 超出范围；`--horizon-bars` 同理（1~60） |
 | `[DATA_UNAVAILABLE] ... 历史长度不足` | 上市时间太短，或 `--as-of` 太早 |
 | `no CJK font found` | 没有中文字体，运行 `scripts/doctor.py` 查看对应发行版的安装命令 |
-| `uv: command not found` | 先安装 uv：<https://docs.astral.sh/uv/>，或重新执行安装脚本并加 `--install-uv` |
+| `uv: command not found` | 安装 uv：<https://docs.astral.sh/uv/>，或重新执行安装脚本并加 `--install-uv`；不想装 uv 时按 3.4「不用 uv 的手动安装」建 `.venv`，再把命令里的 `uv run python` 换成 `.venv/bin/python` |
 | 新会话里看不到 `kline-structure-chart` | 运行 `scripts/doctor.py` 检查技能软链；确认注册到了正在使用的 agent 的目录（第 3.1 节表格），然后新开会话 |
 | 安装时提示"已存在且不是 Git 仓库" | `--dir` 指向的目录里已有别的文件，换一个目录或先手动清理 |
 | `resolve_symbol.py` 以 `[DATA_UNAVAILABLE]` 退出 | 腾讯证券搜索接口不可用，直接提供带后缀的完整代码 |

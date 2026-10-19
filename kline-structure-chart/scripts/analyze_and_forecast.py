@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,8 @@ from render_html import render_html
 from render_report_md import render_report_markdown
 from render_structure_chart import render as render_png_chart
 from structure import compute_structure_layer
+
+MAX_RISK_PCT_LIMIT = 0.05  # 单笔风险上限 5%：更大的值几乎都是把百分数当比例传入
 
 
 def run_pipeline(
@@ -40,6 +43,15 @@ def run_pipeline(
         raise ValueError(f"--days must be between 60 and 500, got {disp_days}")
     if not 1 <= horizon_bars <= 60:
         raise ValueError(f"--horizon-bars must be between 1 and 60, got {horizon_bars}")
+    # 资金参数是比例，最常见的误用是把 1% 写成 1（单笔风险变成 100% 净值），超出范围直接拒绝而不是静默截断
+    max_risk_pct = request.get("max_risk_pct")
+    if max_risk_pct is not None and not (math.isfinite(float(max_risk_pct)) and 0 < float(max_risk_pct) <= MAX_RISK_PCT_LIMIT):
+        raise ValueError(
+            f"--max-risk-pct 是单笔风险占净值的比例，取值 (0, {MAX_RISK_PCT_LIMIT}]，例如 1% 写 0.01，got {max_risk_pct}"
+        )
+    account_equity = request.get("account_equity")
+    if account_equity is not None and not (math.isfinite(float(account_equity)) and float(account_equity) > 0):
+        raise ValueError(f"--account-equity 必须是大于 0 的有限数值，got {account_equity}")
     output_dir.mkdir(parents=True, exist_ok=True)
     bundle = load_bundle(
         request,
@@ -148,7 +160,9 @@ def main() -> None:
         help="Candlestick color scheme (default: auto = cn_red_up for CN/HK, us_green_up for US)",
     )
     parser.add_argument("--account-equity", type=float, default=None, help="Optional account equity for lot-size position sizing")
-    parser.add_argument("--max-risk-pct", type=float, default=0.01, help="Max risk fraction per trade (default 0.01 = 1%%)")
+    parser.add_argument(
+        "--max-risk-pct", type=float, default=0.01, help="Max risk fraction per trade, 0 < x <= 0.05 (default 0.01 = 1%%; write 1%% as 0.01)"
+    )
     parser.add_argument("--input", default=None, help="Optional local real JSON bundle or bar array file")
     parser.add_argument("--output-dir", required=True, help="Output directory for JSON + PNG + HTML artifacts")
     parser.add_argument("--offline", action="store_true", help="Disable live network requests (requires --input local file)")

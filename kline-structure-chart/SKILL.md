@@ -2,7 +2,7 @@
 name: kline-structure-chart
 description: "Deterministic multi-market (A-share CN / Hong Kong HK / US) candlestick (K-line) technical analysis from real OHLCV data: indicators, swing and candlestick patterns, SMC zones, volume profile, triple-barrier risk levels, a calibrated 15-bar price range and a plan-replay backtest, rendered as JSON + PNG + offline HTML. Use when the user asks to analyze an index, stock or ETF chart, e.g. 上证指数/沪深300/茅台/600519.SH/小米/00700.HK/恒生指数/NVDA/SPY; 分析K线、走势、技术形态、支撑压力、买卖点、回测或未来区间. Not for fundamentals, news, earnings, real-time order placement, or personalized investment advice."
 license: MIT
-compatibility: "Requires Python 3.12+, uv, and network access to PyPI and to Sina / Yahoo / Tencent market-data endpoints. Without live data the scripts exit with [DATA_UNAVAILABLE] instead of fabricating prices."
+compatibility: "Requires Python 3.12+ with Pillow (uv recommended but optional: without uv, create .venv from requirements.txt and run .venv/bin/python), plus network access to Sina / Yahoo / Tencent market-data endpoints. Without live data the scripts exit with [DATA_UNAVAILABLE] instead of fabricating prices."
 metadata:
   author: "承鹏 (chengpeng), Qoder Quant Engine"
   version: "5.3.0"
@@ -17,8 +17,15 @@ metadata:
 - **使用**：用户要分析某个指数、个股或 ETF 的 K 线结构、技术形态、支撑压力、触发与失效位、风控计划、历史回测或未来区间。
 - **不使用**：基本面、财报解读、新闻事件、资金流向等脚本不计算的内容；替用户下单或给出个性化投资建议。脚本不计算的数据在回答中一律标注"未复核"。
 
-工作目录为本 `SKILL.md` 所在目录（技能根目录），以下命令均为相对路径。首次运行时 `uv` 会按 `pyproject.toml` 联网安装依赖，取行情同样需要联网。
-若当前 shell 工作目录不在本 `SKILL.md` 所在目录（例如在 Hermes Agent、Claude Code 或 Codex 的用户工作区中调用），请在 `uv run` 中显式传入 `--directory <本SKILL.md所在目录>`（如 `uv run --directory ~/.hermes/skills/kline-structure-chart`、`~/.claude/skills/kline-structure-chart` 或 `~/.agents/skills/kline-structure-chart`），并将 `--output-dir` 设为绝对路径。
+## 运行环境
+
+工作目录为本 `SKILL.md` 所在目录（技能根目录），以下命令均为相对路径。运行期只需要 Python ≥ 3.12 与 Pillow（只用于画 PNG，全部指标与风控计算只用标准库），取行情需要联网。
+
+- **有 `uv`（推荐）**：直接用下文的 `uv run python ...`。首次运行时 `uv` 会按 `uv.lock` 联网安装锁定版本的依赖（必要时自动下载 Python 3.12，不需要 sudo）。
+- **没有 `uv`**：技能目录下已有 `.venv` 时，把下文所有 `uv run python` 换成 `.venv/bin/python`（Windows：`.venv\Scripts\python`）；没有 `.venv` 时先执行 `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`（`python3` 须 ≥ 3.12，低于 3.12 时请用户安装 Python 3.12+ 或 uv，不要用 sudo 改系统 Python，也不要把依赖装进系统 Python）。
+- 不确定环境是否可用时先运行 `scripts/doctor.py`（用上面同一个解释器），按 ❌ 项的修复建议处理。
+
+若当前 shell 工作目录不在本 `SKILL.md` 所在目录（例如在 Hermes Agent、Claude Code 或 Codex 的用户工作区中调用），请在 `uv run` 中显式传入 `--directory <本SKILL.md所在目录>`（如 `uv run --directory ~/.hermes/skills/kline-structure-chart`、`~/.claude/skills/kline-structure-chart` 或 `~/.agents/skills/kline-structure-chart`；不用 uv 时写成 `<本SKILL.md所在目录>/.venv/bin/python <本SKILL.md所在目录>/scripts/...`），并将 `--output-dir` 设为绝对路径。
 
 ## 零、Flash / 轻量模型零失误执行 SOP（5 步闭环，严禁跳步）
 
@@ -67,7 +74,7 @@ uv run python scripts/resolve_symbol.py 腾讯 --market HK   # 可用 --market /
 | --- | --- | --- |
 | 看结构、形态、支撑压力、触发与失效位 | 无 | 默认即可 |
 | 能不能买、风控计划、止损止盈 | 无 | 读报告第 4 节；风控否决时只给观察位 |
-| 买多少股、仓位 | `--account-equity <净值>`，可加 `--max-risk-pct 0.005` | 只在用户给出账户净值时传入；默认单笔风险 1% |
+| 买多少股、仓位 | `--account-equity <净值>`，可加 `--max-risk-pct 0.005` | 只在用户给出账户净值时传入；默认单笔风险 1%。`--max-risk-pct` 是**比例**：用户说"最多亏 1%"写 `0.01`，取值 (0, 0.05]，写成 `1` 会以 `[INVALID_ARGUMENT]` 退出 |
 | 历史表现、回测、这套规则靠不靠谱 | `--backtest`（慢时加 `--backtest-step 5`） | 生成 `*_backtest.json` |
 | 未来几天的波动区间 | `--horizon-bars <N>`（1~60，默认 15） | 只描述幅度，不含方向 |
 | 想看更长或更短的图 | `--days <N>`（60~500，默认 120） | 只影响显示，不影响任何计算结果 |
@@ -131,6 +138,7 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
      - **10% 涨跌幅主板 / 港美股大盘股**：结合 `rule_score`、相对强弱 `relative_strength_vs_index` 与通道中轨顺势解读；
      - **20% 涨跌幅科创板（`688` 及 `588/589` ETF）/ 创业板（`300/301` 及创业板/双创 ETF）**：日内波动幅度大，不得在偏离 `EMA20` 超过 `2.0 * ATR14` 或 `RSI14 >= 70` 时追高，强调在 `triple_barrier_plan.entry_zone` 挂单区间内执行，并按 `breakeven_ratchet` 移动保本止损执行风控；
      - **弱市中的「超跌反弹」（`OVERSOLD_BOUNCE`）**：当大盘偏弱或个股处于 `MA60` 下方空头排列时，单凭 RSI 超卖左侧抄底容易遭遇“超卖再超卖”，必须提醒用户等待日线收阳并站上触发位右侧确认。
+   - **仓位**：只转述 `position_sizing.recommended_shares`（按入场区上沿到止损的距离含交易成本计算）与 `gap_risk_note`（跳空、跌停时亏损可能超出预算）。风控否决或评级不是做多确认/条件观察时该字段为 `null`，转述 `reason`，**不得**自行用风险预算 ÷ 止损距离换算股数。
    - 用户已持有该标的时，转述报告里的"持仓防守计划"（`holder_defense_plan.rules`）。
    - 港股、美股报告带"破位做空计划"（`short_plan`）：转述时必须同时说明卖空限制（`constraints`）、`warnings`，以及盈亏比未计融券费用。A 股与指数没有做空计划，卖空限制只按制度手册（`references/cn-market.md`、`references/hk-market.md`、`references/us-market.md`）说明，不得给出报告中没有的做空点位。
 5. **未来 15 日区间**：

@@ -13,6 +13,7 @@
 | `kline-structure-chart/references/*.md` | 两者按需查阅 | 公式定义（`math-patterns.md`）与三市场制度规则（带生效日期与来源） |
 | `SKILL_REVIEW_CHECKLIST.md` | 审查者 | 问题清单、修复进度与可复用勾选清单 |
 | `README.md` | 想安装、使用这个技能的人 | 安装、注册到各 Agent、命令行用法、输出解读与故障排查 |
+| `INSTALL_FOR_AGENTS.md` | 替用户安装本技能的 AI 助手 | 对话安装步骤：选技能目录、检查前置、一键脚本或 venv + pip、自检与安全边界 |
 | `CHANGELOG.md` | 所有人 | 版本记录（与四处版本号同步，未发布内容写在 `[Unreleased]`） |
 | `examples/` | 所有人 | 真实行情生成的完整示例（报告、结果 JSON、PNG 与标准回复），注明截止日 |
 
@@ -64,7 +65,8 @@
 ```text
 kline-structure-chart/
 ├── SKILL.md                          # 运行契约（随 skill 分发）
-├── pyproject.toml / uv.lock          # Python >= 3.12；dev 组含 pytest 与 TA-Lib（仅用于金标准测试）
+├── pyproject.toml / uv.lock          # Python >= 3.12；运行期只依赖 Pillow，dev 组含 numpy、pytest 与 TA-Lib（仅用于金标准测试）
+├── requirements.txt                  # 没有 uv 时 venv + pip 用的运行期依赖，版本与 uv.lock 一致（test_docs_contract 校验）
 ├── assets/
 │   └── analysis.schema.json          # AnalysisReport 顶层契约（contracts.validate_report 以它为唯一来源）
 ├── scripts/
@@ -118,6 +120,7 @@ kline-structure-chart/
 
 ```text
 install.sh / install.ps1              # 一键安装、更新、卸载（macOS·Linux / Windows），默认代码目录 ~/.local/share/stock-skill
+INSTALL_FOR_AGENTS.md                 # 给 AI 助手的对话安装指引（README 3.0 的提示词指向它）
 .claude-plugin/marketplace.json       # Claude Code 插件市场清单（source "./"，skills 指向 kline-structure-chart）
 .github/workflows/ci.yml              # CI：uv + pytest + 跨窗口不变性（只用录制数据）
 examples/                             # 真实行情示例产物与标准回复

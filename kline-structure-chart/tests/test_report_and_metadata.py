@@ -78,9 +78,14 @@ def test_hk_board_lot_comes_from_vendor_quote(replay_recorded) -> None:
     report = analyze_bundle(bundle, req, include_replay=False)
     rules = report["triple_barrier_plan"]["market_microstructure"]
     assert rules["lot_size"] == 200 and rules["lot_size_source"] == "PROVIDED"
-    shares = report["triple_barrier_plan"]["position_sizing"]["recommended_shares"]
-    assert shares is not None and shares % 200 == 0
+    assert report["triple_barrier_plan"]["position_sizing"]["lot_size"] == 200
     assert report["meta"]["name"] == "小米集团-W" and report["meta"]["board_lot"] == 200
+    # 截至 2026-10-15 风控否决不给股数；2025-09-29 为未被否决的做多确认，股数按每手 200 股取整
+    hist_req = {**req, "as_of": "2025-09-29"}
+    hist = analyze_bundle(load_bundle(hist_req, now=NOW), hist_req, include_replay=False)
+    assert hist["meta_labeling_decision"]["action"] == "LONG_CONFIRMED" and not hist["debate_and_veto"]["risk_officer_veto"]
+    shares = hist["triple_barrier_plan"]["position_sizing"]["recommended_shares"]
+    assert shares is not None and shares > 0 and shares % 200 == 0
 
 
 def test_hk_board_lot_fallback_is_disclosed(monkeypatch: pytest.MonkeyPatch, replay_recorded) -> None:

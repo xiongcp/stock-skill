@@ -8,11 +8,13 @@ from base_rates import _build_causal_features, compute_scenario_frequency, label
 from forecast import _local_sigma, compute_conformal_forecast
 from indicators import atr_series, compute_all_indicators
 from market_rules import (
+    daily_limit_prices,
     get_daily_price_limit_pct,
     get_market_microstructure_rules,
     rescale_bars_as_of,
     round_to_tick,
     round_trip_cost_rate,
+    tick_size_for,
 )
 from patterns import (
     causal_nadaraya_watson,
@@ -187,14 +189,30 @@ def label_triple_barrier_event(
     if entry_idx >= n:
         return {"tradable": False, "reason": "OUT_OF_RANGE"}
 
-    prev_close = float(bars[entry_idx - 1]["close"]) if entry_idx > 0 else float(bars[entry_idx]["open"])
     entry_bar = bars[entry_idx]
     entry_open = float(entry_bar["open"])
 
     limit_pct = get_daily_price_limit_pct(
         market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=entry_bar["day"], name=name
     )
-    if limit_pct is not None and entry_open >= prev_close * (1.0 + limit_pct - 0.001):
+
+    def _limit_prices(idx: int) -> tuple[float, float, float, float] | None:
+        """第 idx 根K线在其原始价口径下的 (涨停价, 跌停价, 最小价位, 复权价→原始价系数)。
+
+        复权序列不在价位网格上，先把前收盘换算到当根K线的原始价口径（除权日即除权参考价），再按交易所规则取整。
+        """
+        if limit_pct is None or idx <= 0:
+            return None
+        cur = bars[idx]
+        cur_close = float(cur["close"])
+        scale = float(cur.get("raw_close", cur_close)) / cur_close if cur_close > 0 else 1.0
+        ref = float(bars[idx - 1]["close"]) * scale
+        up, down = daily_limit_prices(ref, limit_pct, market, asset_type, cur["day"])
+        tick = float(tick_size_for(ref, market, asset_type, cur["day"]))
+        return up, down, tick, scale
+
+    entry_limits = _limit_prices(entry_idx)
+    if entry_limits is not None and entry_open * entry_limits[3] >= entry_limits[0] - 0.5 * entry_limits[2]:
         return {"tradable": False, "reason": "LIMIT_UP_NO_FILL", "entry_day": entry_bar["day"]}
 
     rules = get_market_microstructure_rules(
@@ -222,12 +240,14 @@ def label_triple_barrier_event(
             active_sl = max(active_sl, entry_open + lock_r * unit_risk)
 
     def _is_limit_down_locked(idx: int) -> bool:
-        if limit_pct is None or idx <= 0:
+        """一字跌停（最高价 = 最低价 = 跌停价）：全天封死，无法卖出。"""
+        limits = _limit_prices(idx)
+        if limits is None:
             return False
+        _, down, tick, scale = limits
         b_k = bars[idx]
         hi_k, lo_k = float(b_k["high"]), float(b_k["low"])
-        prev_c_k = float(bars[idx - 1]["close"])
-        return hi_k <= prev_c_k * (1.0 - limit_pct + 0.001) and lo_k == hi_k
+        return hi_k * scale <= down + 0.5 * tick and lo_k == hi_k
 
     for k in range(start_exit_idx, end_idx + 1):
         b = bars[k]

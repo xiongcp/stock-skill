@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+### 修复（资金计算与 K 线计算深度审查）
+
+- 仓位计算（`scripts/risk.py`、`scripts/render_report_md.py`、`scripts/render_html.py`）：
+  1. 风控否决或评级不是 `LONG_CONFIRMED` / `WATCH_LONG_SETUP` 时不再输出建议股数（`recommended_shares = null` 并给出 `reason`）。此前截至 2026-10-15 的 10 个录制标的全部被否决，报告仍加粗给出股数（如 510300.SH 给出 27,300 股），与"否决时只给观察位"冲突。
+  2. 每股风险改按入场区上沿（区内最差成交价）计算：`入场区上沿 − 止损 + 上沿 × 往返费率`（`sizing_basis = ENTRY_HIGH_WORST_FILL`）。此前按入场区中值计算，在区内高位成交时实际亏损可能超出风险预算；现金上限同样按入场区上沿含费用计算。
+  3. 新增 `max_loss_at_stop`（按止损价成交的亏损）与 `gap_risk_note`（跳空、跌停封板、A 股 T+1 当日不可卖出时亏损可能超出预算）。
+  4. `scripts/lint_response.py` 新增检查：报告未给出建议股数时，回复中出现「买入 300 股」「仓位 … 100 股」等买入股数即拦截（「每手 100 股」等制度描述不受影响）。`examples/` 中三份报告的仓位行、茅台 `result.json` 与看板、`reply.md` 同步更新（其余内容用录制行情重新生成后逐字节一致）。
+- 资金参数校验（`scripts/analyze_and_forecast.py`）：`--max-risk-pct` 限定 (0, 0.05]，`--account-equity` 必须为大于 0 的有限数，取数前校验，越界以 `[INVALID_ARGUMENT]` 退出。此前把"最多亏 1%"误传为 `--max-risk-pct 1` 时，单笔风险预算等于 100% 净值，股数只受现金上限约束。
+- 计划几何不变量（`scripts/risk.py`）：止损不低于入场区下沿或 TP1 不高于入场区上沿时新增 `PLAN_GEOMETRY_INVALID` 否决。真实录制行情 963 个回放决策日未出现该情形，作为防护保留。
+- 回测涨跌停撮合（`scripts/evaluation.py`、`scripts/market_rules.py`）：新增 `daily_limit_prices`，按交易所规则（前收 × (1 ± 比例) 按价位四舍五入，十进制计算）求涨跌停价，复权序列换算回当日原始价口径后比较。此前用 0.1% 比例容差，低价股漏判：ST信通（600289.SH）录制数据中 53 次开盘即涨停漏判 8 次、18 次一字跌停漏判 4 次，回测会在无法成交的一字板上按开盘价买入或止损卖出（例：2024-04-16 一字跌停被当成按 1.18 止损成交，实际只能在 04-17 以 1.12 离场）。
+- 低价品种指标快照精度（`scripts/indicators.py`、`scripts/strategies.py`）：均线、VWAP、Supertrend、布林带按价格量级保留小数（`max(2, ⌈4 − log10(价格)⌉)`），ATR 与 MACD 多保留 1 位；价格 ≥ 100 时仍为 2 位，输出不变。此前一律 2 位小数后再参与 `(收盘 − EMA20)/ATR`、EMA20 与 EMA50、收盘与布林带的比较，510300.SH 在 763 个交易日中有 17 天"EMA20 > EMA50"、3 天"偏离 > 2ATR"的判断因舍入翻转。RVOL 为 0 时不再被 `or 1.0` 改写。
+- 文档与实现对齐：`references/math-patterns.md` 第 7 节"区间观察"的入场区与止损公式改为与代码一致（此前写的是 `C − 0.40 ATR` 与 `C − 1.45 ATR`，实现为按阴阳线分支、止损 `C − 1.40 ATR`），并补充仓位公式与 `PLAN_GEOMETRY_INVALID`；`references/cn-market.md` 补充涨跌停价取整规则。
+
+### 新增（对话安装；uv 改为推荐而非必需）
+
+- 新增仓库根目录 `INSTALL_FOR_AGENTS.md`：给 AI 助手的安装指引（选技能目录、检查前置、一键脚本或 venv + pip、doctor 自检、安全边界）。README 新增 3.0 节，用户把一句提示词发给助手即可完成安装。
+- `SKILL.md` 新增「运行环境」一节：有 uv 用 `uv run python`；没有 uv 时在技能目录建 `.venv` 并 `pip install -r requirements.txt`，命令改用 `.venv/bin/python`。新增 `kline-structure-chart/requirements.txt`（只含 Pillow，版本与 `uv.lock` 一致，由文档契约测试校验）。
+- `numpy` 从运行期依赖移到 dev 组：运行期脚本从未导入 numpy（只有 TA-Lib 金标准测试使用），运行期依赖只剩 Pillow。
+- `scripts/doctor.py`：没有 uv 但当前 Python 与依赖可用时不再判为失败，修复建议补充 venv + pip 路径。
+
 ### 修复（深度审查 P0 / P1）
 
 - 文档命令路径：`SKILL.md` Flash SOP 中的产物文件名改为脚本实际生成的 `600519.SH_result.json`（`sanitize_filename` 保留代码中的点）；`references/llm-judgment-protocol.md` 中 `uv run --directory kline-structure-chart` 之后的相对路径去掉多余的 `kline-structure-chart/` 前缀。新增文档契约测试守护两类错误。

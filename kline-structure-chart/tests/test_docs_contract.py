@@ -329,3 +329,21 @@ def test_example_reply_passes_lint_and_counterexample_is_rejected() -> None:
     assert lint_agent_response(good_body, report) == []
     counter_quote = next(line[1:].strip() for line in counter.splitlines() if line.startswith(">"))
     assert lint_agent_response(counter_quote, report)
+
+
+def test_requirements_txt_matches_locked_runtime_dependencies() -> None:
+    """没有 uv 时用 requirements.txt 安装：运行期依赖与 uv.lock 锁定版本必须一致，不能比 pyproject 多或少。"""
+    pyproject = (SKILL_DIR / "pyproject.toml").read_text(encoding="utf-8")
+    runtime_block = re.search(r"^dependencies = \[(.*?)\]", pyproject, re.S | re.M).group(1)
+    runtime = {re.split(r"[<>=!~ ]", dep.strip().strip('",'))[0].lower() for dep in runtime_block.split(",") if dep.strip().strip('"')}
+    lock = (SKILL_DIR / "uv.lock").read_text(encoding="utf-8")
+    locked = dict(re.findall(r'\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"', lock))
+    lines = [ln.strip() for ln in (SKILL_DIR / "requirements.txt").read_text(encoding="utf-8").splitlines()]
+    pins = dict(ln.split("==", 1) for ln in lines if ln and not ln.startswith("#"))
+    assert set(pins) == runtime, f"requirements.txt 与 pyproject 运行期依赖不一致：{set(pins) ^ runtime}"
+    for name, version in pins.items():
+        assert locked.get(name) == version, f"{name}=={version} 与 uv.lock 的 {locked.get(name)} 不一致"
+    # 运行期代码不得 import 未声明的第三方包（numpy 等只在测试中使用）
+    for script in (SKILL_DIR / "scripts").glob("*.py"):
+        for mod in re.findall(r"^\s*(?:import|from) (numpy|pandas|scipy|talib|requests)\b", script.read_text(encoding="utf-8"), re.M):
+            raise AssertionError(f"{script.name} 运行期导入了未声明依赖 {mod}")

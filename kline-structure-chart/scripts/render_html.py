@@ -424,7 +424,11 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   addKv(barGrid, '下屏障 (硬止损 SL)', tb.stop_loss_barrier);
   addKv(barGrid, '上屏障 (TP1 / TP2)', tb.take_profit_1 + ' / ' + tb.take_profit_2);
   addKv(barGrid, '时间屏障 / 净盈亏比', tb.time_barrier_bars + ' bars / ' + tb.risk_reward_ratio + ' R');
-  addKv(barGrid, '制度 / 建议股数', settleLabel + ' / ' + (tb.position_sizing.recommended_shares !== null ? tb.position_sizing.recommended_shares + '股' : '需账户净值'));
+  const sizing = tb.position_sizing;
+  const sharesLabel = (sizing.recommended_shares !== null && sizing.recommended_shares !== undefined)
+    ? sizing.recommended_shares + '股'
+    : (sizing.account_equity ? '不给出（见报告风控）' : '需账户净值');
+  addKv(barGrid, '制度 / 建议股数', settleLabel + ' / ' + sharesLabel);
 
   const scenList = document.getElementById('scenarioList');
   const activeScenarios = (REPORT.rule_scenarios && REPORT.rule_scenarios.scenarios) ? REPORT.rule_scenarios.scenarios : [];

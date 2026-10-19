@@ -279,7 +279,9 @@ def render_report_markdown(
     elif sizing.get("recommended_shares") is not None:
         lines += [
             f"- 仓位：账户 {sizing['account_equity']:,.2f}、单笔风险 {sizing['max_risk_pct']:.2f}% 时，"
-            f"按止损距离计算为 **{sizing['recommended_shares']} 股**（约 {sizing['estimated_notional']:,.2f} {meta['currency']}）。"
+            f"按入场区上沿到止损的距离（含交易成本）计算为 **{sizing['recommended_shares']} 股**"
+            f"（约 {sizing['estimated_notional']:,.2f} {meta['currency']}，触及止损约亏 {sizing['max_loss_at_stop']:,.2f} {meta['currency']}）；"
+            f"{sizing['gap_risk_note']}。"
         ]
     elif sizing.get("reason"):
         lines += [f"- 仓位：{sizing['reason']}"]
