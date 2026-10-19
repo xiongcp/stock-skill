@@ -1390,6 +1390,9 @@ def test_o3_23_and_o3_24_renderers_and_scenario_conditional_fan(replay_recorded,
     assert len(scf["center_q50"]) == 15
     for i in range(15):
         assert scf["q10"][i] <= scf["q25"][i] <= scf["center_q50"][i] <= scf["q75"][i] <= scf["q90"][i]
+    # 情景条件扇形必须按价格量纲 base_c * sigma * sqrt(h) 展开，避免漏乘 base_c 导致首日 q10 高于现价
+    assert scf["q90"][0] - scf["center_q50"][0] >= last_close * 0.005
+    assert scf["q10"][0] < last_close
 
     # O3-23：HTML 与 Markdown 包含历史条件频率、样本数 n、情景混合（非校准区间）图层与说明
     html_text = Path(rep["rendered_paths"]["dashboard_html"]).read_text(encoding="utf-8")

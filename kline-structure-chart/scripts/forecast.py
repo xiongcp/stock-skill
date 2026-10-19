@@ -235,7 +235,7 @@ def _build_scenario_conditional_fan(
     prev = {"q10": base_c, "q25": base_c, "q50": base_c, "q75": base_c, "q90": base_c}
 
     for h in range(1, horizon_bars + 1):
-        scale = sigma_val * math.sqrt(h)
+        scale = base_c * sigma_val * math.sqrt(h)
         if items:
             center_h = 0.0
             up_disp = 0.0
