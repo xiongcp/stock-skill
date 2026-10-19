@@ -260,8 +260,9 @@ def render_report_markdown(
     lines += [f"- 交易制度：{'；'.join(rule_bits)}。"]
     ratchet = plan.get("breakeven_ratchet") or {}
     if ratchet.get("enabled") and ratchet.get("rule_cn"):
+        t1_note = "，A 股受 T+1 约束自入场次日起生效" if rules["settlement"] == "T+1" else "，支持 T+0 当日止损"
         lines += [
-            f"- 止损与移动保本：硬止损屏障 {price(plan['stop_loss_barrier'])}（盘中最低价触及离场，A 股受 T+1 约束自入场次日起生效）；"
+            f"- 止损与移动保本：硬止损屏障 {price(plan['stop_loss_barrier'])}（盘中最低价触及离场{t1_note}）；"
             f"{ratchet['rule_cn']}。"
         ]
     if rules.get("lot_size_source") == "ASSUMED_DEFAULT":
@@ -402,7 +403,11 @@ def render_report_markdown(
                 f"| {label} | {row['trades']} | {ci_text} | {row['cumulative_return_pct']:.2f}% "
                 f"| {row['max_drawdown_pct']:.2f}% | {row['profit_factor']:.2f} |"
             ]
-        lines += ["", f"- 同期买入持有收益：{bt.get('buy_and_hold_return_pct', 0):.2f}%。"]
+        lines += [
+            "",
+            "- 口径说明：「确认做多」与「观察做多」各自按独立持仓锁统计；「全部做多信号」按单一合并组合持仓锁统计（持仓期间不重复开仓），因此笔数不等于两分项直接相加。",
+            f"- 同期买入持有收益：{bt.get('buy_and_hold_return_pct', 0):.2f}%。",
+        ]
         if bt.get("sample_size_warning"):
             lines += [f"- 样本提示：{bt['sample_size_warning']}。"]
         ic = bt.get("rule_score_ic") or {}

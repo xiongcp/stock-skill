@@ -10,7 +10,9 @@
   "horizon_bars": 15,
   "quality_status": "OK",
   "quality_warnings": [],
-  "quality_notes": [],
+  "quality_notes": [
+    "数据只到 2026-10-15：最近已收盘的交易日 2026-10-19 的日线数据源尚未提供（或标的停牌），本次分析不含该日行情，可稍后重跑"
+  ],
   "risk_officer_veto": true,
   "veto_reasons": [
     "大盘环境评分偏弱 (16.0<35)，压降个股做多评级"

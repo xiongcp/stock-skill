@@ -2153,3 +2153,50 @@ def test_lint_rejects_share_count_when_report_withholds_sizing(replay_recorded) 
     assert not any("买入股数" in e for e in lint_agent_response(head, rep))
     errors = lint_agent_response(head + "按账户 50 万可买入 300 股。", rep)
     assert any("买入股数" in e for e in errors)
+
+
+def test_expert_audit_fixes_regression(replay_recorded, tmp_path: Path) -> None:
+    """量化与 K 线专家全链路审计修复回归测试（跨市场 T+0/T+1 文案、左/右侧计划自洽、港股价位表、HTML 回放除权无前视、L3 校验与 Lint 角色拦截）。"""
+    from lint_response import lint_agent_response
+    from market_rules import round_to_tick
+
+    # 1. 港股 00700.HK：止损文案不出现 A 股 T+1；左侧计划 bull_case[0] 不出现「突破 r1 后指向更低 TP1」倒挂；情景价格符合港股价位表
+    rep_hk = run_pipeline(
+        {"symbol": "00700.HK", "market": "HK", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        output_dir=tmp_path / "hk",
+    )
+    hk_md = Path(rep_hk["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    hk_html = Path(rep_hk["rendered_paths"]["dashboard_html"]).read_text(encoding="utf-8")
+    assert "A 股受 T+1" not in hk_md
+    assert "支持 T+0 当日止损" in hk_md
+    assert "支持 T+0 当日止损" in rep_hk["triple_barrier_plan"]["left_side_constraints"]["exit_rule"]
+    r1_hk = rep_hk["rule_scenarios"]["breakout_level"]["price"]
+    tp1_hk = rep_hk["triple_barrier_plan"]["take_profit_1"]
+    if tp1_hk <= r1_hk:
+        assert f"站稳 {r1_hk:.2f}" not in rep_hk["debate_and_veto"]["bull_case"][0]
+    for sc_item in rep_hk["rule_scenarios"]["scenarios"]:
+        for pk in ("target_price", "invalidation_price", "reference_trigger_price"):
+            pval = sc_item.get(pk)
+            if pval is not None:
+                assert round_to_tick(float(pval), "HK", "equity", rep_hk["meta"]["as_of"]) == float(pval)
+    assert "观察区 (风控已否决)" in hk_html
+
+    # 2. A 股 600519.SH：HTML 历史回放快照使用当时点位复权价（2026-05-19 截面不泄漏 2026-06-26 分红），且 Lint 拦截浪型测算位冒充目标价、否决下做多建议与伪造回测胜率
+    rep_cn = run_pipeline(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        output_dir=tmp_path / "cn",
+    )
+    snap0 = rep_cn["replay_snapshots"][0]
+    # 2026-06-26 除息前的历史快照收盘价必须等于当日原始未除息价，而非扣减未来分红后的 1280+
+    assert snap0["as_of"] < "2026-06-26"
+    assert snap0["base_close"] > 1300.0
+    assert snap0["bars_window"][-1]["close"] == snap0["base_close"]
+
+    disclaimer = "以上为规则化技术分析，仅供研究参考，不构成投资建议。"
+    errs_buy_under_veto = lint_agent_response(f"风控否决：大盘偏弱，但仍建议逢低买入。{disclaimer}", rep_cn)
+    assert any("严禁给出做多/买入建议" in e for e in errs_buy_under_veto)
+    errs_wave_as_target = lint_agent_response(f"风控否决：大盘偏弱，上方目标位 1440.44。{disclaimer}", rep_cn)
+    assert any("浪型测算位" in e for e in errs_wave_as_target)
+    fake_bt = {"backtest": {"all_long_signals": {"win_rate_pct": 46.15}, "long_confirmed": {"win_rate_pct": 83.33}, "watch_long_setup": {"win_rate_pct": 38.46}}}
+    errs_fake_wr = lint_agent_response(f"风控否决：大盘偏弱。回测胜率 95.0%（95% 区间 80%~99%）。{disclaimer}", rep_cn, backtest=fake_bt)
+    assert any("回测胜率" in e for e in errs_fake_wr)

@@ -706,7 +706,8 @@ def generate_constrained_judgment(report: dict[str, Any]) -> dict[str, Any]:
 
 def judgment_origin(judgment: dict[str, Any], report: dict[str, Any]) -> str:
     """判定研判来源：各情景主观概率与 --auto-init 模板完全一致即视为模板（无论是否改过文字），否则为 Agent 研判。"""
-    if str(judgment.get("judgment_type") or "") == "主观研判（脚本预填模板）":
+    j_type = str(judgment.get("judgment_type") or "")
+    if j_type in ("主观研判（脚本预填模板）", "主观研判模板（脚本预填，未经 Agent 调整）") or "模板" in j_type:
         return AUTO_INIT_GENERATOR
     try:
         template = generate_constrained_judgment(report)

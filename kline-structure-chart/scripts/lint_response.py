@@ -50,6 +50,8 @@ _LINT_PRICE_BEFORE_RE = re.compile(
 VETO_HEAD_CHARS = 400
 # 买入/建仓语境下的股数（「每手 100 股」「最小申报 200 股」等制度描述不在此列）
 _BUY_SHARES_RE = re.compile(r"(?:买入|买进|建仓|加仓|开仓|仓位|可买|买)[^。；\n股手]{0,8}?\d[\d,]*\s*股")
+_VETO_POSITIVE_BUY_RE = re.compile(r"(?:建议|可以|应当|不妨|推荐|宜)[^。；\n]{0,8}?(?:买入|建仓|加仓|做多|抄底|低吸)")
+_TARGET_ROLE_PRICE_RE = re.compile(r"(?:目标位|目标价|目标看至|上看目标)\s*[为=:：约至]?\s*(\d+(?:\.\d+)?)")
 
 
 def _sentence_around(text: str, start: int, end: int) -> str:
@@ -114,6 +116,11 @@ def lint_agent_response(
             errors.append("risk_officer_veto == true 时，「风控否决」提示必须出现在「风控计划」之前")
         if first_veto > VETO_HEAD_CHARS:
             errors.append(f"risk_officer_veto == true 时，「风控否决」必须置顶（出现在回复前 {VETO_HEAD_CHARS} 个字符内）")
+        for m_buy in _VETO_POSITIVE_BUY_RE.finditer(text):
+            sent_start = max((sm.end() for sm in _SENTENCE_SPLIT_RE.finditer(text, 0, m_buy.start())), default=0)
+            before_buy = text[sent_start : m_buy.start()]
+            if not _NEGATION_RE.search(before_buy) and not _NEGATION_RE.search(m_buy.group(0)):
+                errors.append(f"risk_officer_veto == true 时，严禁给出做多/买入建议: {m_buy.group(0)!r}")
 
     # 3b. 报告没有给出建议股数（风控否决、评级非做多或未给账户净值）时，回复不得自行换算买入股数
     sizing = (report.get("triple_barrier_plan") or {}).get("position_sizing") or {}
@@ -145,11 +152,54 @@ def lint_agent_response(
             if not any(abs(val_hf - p) <= 0.25 for p in allowed_hf_pcts):
                 errors.append(f"回复中的历史条件频率 {val_hf}% 与 result.json 不一致")
 
+    if backtest is not None:
+        bt_node = backtest.get("backtest") if isinstance(backtest.get("backtest"), dict) else backtest
+        allowed_wr: list[float] = []
+        for bk in ("all_long_signals", "long_confirmed", "watch_long_setup"):
+            row = bt_node.get(bk) if isinstance(bt_node, dict) else None
+            if isinstance(row, dict) and row.get("win_rate_pct") is not None:
+                allowed_wr.append(float(row["win_rate_pct"]))
+        if allowed_wr:
+            for m_wr in re.finditer(r"胜率\s*(?:为|是|约)?\s*(\d+(?:\.\d+)?)\s*%", text):
+                val_wr = float(m_wr.group(1))
+                if not any(abs(val_wr - w) <= 0.25 for w in allowed_wr):
+                    errors.append(f"回复中的回测胜率 {val_wr}% 与 backtest.json ({allowed_wr}) 不一致")
+
     # 5. 价格白名单检查（针对带价格语境的数值）
     pack = report.get("judgment_pack") or build_judgment_pack(report)
     whitelist = pack["price_whitelist"]
     wl_prices: list[float] = [float(p) for p in whitelist.get("prices") or []]
     wl_tol = float(whitelist.get("tolerance") or 0.01)
+    wave_only_prices: list[float] = []
+    levels_node = (report.get("mathematical_indicators") or {}).get("structure_levels") or {}
+    for wc in list(levels_node.get("wave_counts") or []) + ([levels_node["abc_scenario"]] if levels_node.get("abc_scenario") else []):
+        for lv in (wc or {}).get("levels") or []:
+            if lv.get("price") is not None:
+                wave_only_prices.append(float(lv["price"]))
+    valid_target_prices: list[float] = []
+    tb_node = report.get("triple_barrier_plan") or {}
+    for tk in ("take_profit_1", "take_profit_2"):
+        if tb_node.get(tk) is not None:
+            valid_target_prices.append(float(tb_node[tk]))
+    sp_node = tb_node.get("short_plan") or {}
+    for tk in ("take_profit_1", "take_profit_2"):
+        if sp_node.get(tk) is not None:
+            valid_target_prices.append(float(sp_node[tk]))
+    for sc_item in list(rs_obj.get("scenarios") or []) + [rs_obj.get(k) for k in ("bull", "neutral", "bear") if isinstance(rs_obj.get(k), dict)]:
+        if isinstance(sc_item, dict) and sc_item.get("target_price") is not None:
+            valid_target_prices.append(float(sc_item["target_price"]))
+    if isinstance(rs_obj.get("impulse_wave"), dict) and rs_obj["impulse_wave"].get("wave3_1618_target") is not None:
+        valid_target_prices.append(float(rs_obj["impulse_wave"]["wave3_1618_target"]))
+    for m_tp in _TARGET_ROLE_PRICE_RE.finditer(text):
+        sent = _sentence_around(text, m_tp.start(), m_tp.end())
+        if any(w in sent for w in ("测算", "ABC", "浪")):
+            continue
+        cand_tp = float(m_tp.group(1))
+        if (
+            _price_in_whitelist(cand_tp, wave_only_prices, wl_tol)
+            and not _price_in_whitelist(cand_tp, valid_target_prices, wl_tol)
+        ):
+            errors.append(f"不得把浪型测算位 {cand_tp} 当作目标位/目标价: {m_tp.group(0)!r}")
 
     cleaned = text
     for pat in _NON_PRICE_PATTERNS:

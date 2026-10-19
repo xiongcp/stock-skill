@@ -902,6 +902,7 @@ def compute_structure_layer(
     price_decimals: Callable[[float, str], int] | None = None,
     horizon_bars: int = 15,
     benchmark_bars: list[dict] | None = None,
+    round_price: Callable[[float, str], float] | None = None,
 ) -> dict[str, Any]:
     """一次性计算结构层全部结果，供 JSON 报告与 PNG 渲染共用。
 
@@ -978,6 +979,7 @@ def compute_structure_layer(
         base_projections=projections,
         decimals=decimals,
         benchmark_bars=benchmark_bars,
+        round_price=round_price,
     )
     projections["bull"]["historical_frequency"] = scen_bundle["bull_frequency"]
     projections["neutral"]["historical_frequency"] = scen_bundle["neutral_frequency"]

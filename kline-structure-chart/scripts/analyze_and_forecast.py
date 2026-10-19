@@ -20,7 +20,7 @@ from analysis import analyze_bundle
 from contracts import AnalysisRequest, sanitize_filename, validate_report
 from data_gateway import load_bundle
 from evaluation import run_causal_replay_audit, run_plan_backtest
-from market_rules import price_decimals
+from market_rules import price_decimals, round_to_tick
 from render_html import render_html
 from render_report_md import render_report_markdown
 from render_structure_chart import render as render_png_chart
@@ -68,6 +68,7 @@ def run_pipeline(
         price_decimals=lambda price, day: price_decimals(price, inst["market"], inst["asset_type"], day),
         horizon_bars=horizon_bars,
         benchmark_bars=bench_bars_raw,
+        round_price=lambda price, day: round_to_tick(price, inst["market"], inst["asset_type"], day),
     )
     report = analyze_bundle(bundle, request, include_replay=True, structure=layer)
 

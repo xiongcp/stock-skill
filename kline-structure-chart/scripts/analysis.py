@@ -18,6 +18,7 @@ from market_rules import (
     DEFAULT_BENCHMARKS,
     get_market_microstructure_rules,
     price_decimals,
+    rescale_bars_as_of,
     round_to_tick,
 )
 from patterns import (
@@ -109,7 +110,8 @@ def _build_replay_snapshots(
     cutoffs = [n - 1 - k * step for k in range(num_snapshots, 0, -1) if n - 1 - k * step >= 120]
 
     for cut_idx in cutoffs:
-        sub_bars = completed[: cut_idx + 1]
+        pit_ext = rescale_bars_as_of(completed[: min(n, cut_idx + 1 + horizon_bars)], cut_idx)
+        sub_bars = pit_ext[: cut_idx + 1]
         sub_p_dec = price_decimals(float(sub_bars[-1]["close"]), meta["market"], meta["asset_type"], sub_bars[-1]["day"])
         layer_sub = compute_structure_layer(
             sub_bars,
@@ -117,6 +119,7 @@ def _build_replay_snapshots(
             snapshot_window,
             price_decimals=lambda price, day: price_decimals(price, meta["market"], meta["asset_type"], day),
             horizon_bars=horizon_bars,
+            round_price=lambda price, day: round_to_tick(price, meta["market"], meta["asset_type"], day),
         )
         sview_sub = layer_sub["sview"]
         ind_sub_win = _indicators_on_window(layer_sub["hist"], len(sview_sub))
@@ -156,7 +159,7 @@ def _build_replay_snapshots(
             sub_bars, ind_sub_win, wedge_sub, all_pats_sub, smc_sub, strat_sub, bench_info_sub
         )
         fc_sub = compute_conformal_forecast(sub_bars, meta=meta, horizon_bars=horizon_bars)
-        realized_bars = completed[cut_idx + 1 : min(n, cut_idx + 1 + horizon_bars)]
+        realized_bars = pit_ext[cut_idx + 1 : min(len(pit_ext), cut_idx + 1 + horizon_bars)]
         realized_closes = [round(float(b["close"]), sub_p_dec) for b in realized_bars]
         realized_days = [b["day"] for b in realized_bars]
         hit_80 = None
@@ -251,6 +254,7 @@ def analyze_bundle(
             price_decimals=lambda price, day: price_decimals(price, inst["market"], inst["asset_type"], day),
             horizon_bars=horizon_bars,
             benchmark_bars=bench_bars_raw,
+            round_price=lambda price, day: round_to_tick(price, inst["market"], inst["asset_type"], day),
         )
     )
     completed, active_intra, data_note = layer["completed"], layer["active_intra"], layer["data_note"]

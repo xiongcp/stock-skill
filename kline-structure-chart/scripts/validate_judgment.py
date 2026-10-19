@@ -362,6 +362,19 @@ def main() -> None:
 
     log_path = Path(args.log) if args.log else (jud_path.parent / "judgment_log.jsonl")
     log_entry = append_judgment_log(judgment, report, log_path)
+    if log_entry["origin"] == "AGENT":
+        judgment.pop("generator", None)
+        if "脚本预填" in str(judgment.get("disclaimer_cn") or ""):
+            judgment["disclaimer_cn"] = (
+                "本节为锚定 L2 历史条件频率的 Agent 受约束主观研判，已记入日志待到期按 Brier 分数与技能分检验，不构成投资建议。"
+            )
+        jud_path.write_text(json.dumps(judgment, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 将通过校验的研判写回 result.json 并同步更新 report.md
+    report["llm_judgment"] = judgment
+    if isinstance(report.get("rendered_paths"), dict):
+        report["rendered_paths"]["judgment_json"] = str(jud_path.resolve())
+    res_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 若存在同目录或指定的 *_report.md，则将通过校验的主观研判章节合入报告
     md_path = Path(args.report_md) if args.report_md else res_path.with_name(res_path.name.replace("_result.json", "_report.md"))

@@ -386,7 +386,10 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   b2.textContent = '多周期规则分: ' + mtf.rule_score + '/100 (' + dec.action_cn + ')';
   badgeWrap.appendChild(b1);
   badgeWrap.appendChild(b2);
-  document.getElementById('headerVerdict').textContent = debate.final_verdict_cn;
+  const vetoPrefix = debate.risk_officer_veto
+    ? ('【风控否决：' + (debate.veto_reasons || []).join('；') + ' · 以下点位仅用于观察，不构成做多建议】 ')
+    : '';
+  document.getElementById('headerVerdict').textContent = vetoPrefix + debate.final_verdict_cn;
 
   function addKv(container, label, value) {{
     const div = document.createElement('div');
@@ -401,14 +404,32 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   }}
 
   const regGrid = document.getElementById('regimeGrid');
-  addKv(regGrid, '当前标的 Regime', REPORT.market_regime.label_cn);
-  addKv(regGrid, '大盘相对强弱 (RS)', bench.relative_strength_vs_index);
-  addKv(regGrid, 'ADX(14) / RVOL(20)', (ind.trend.adx14 || '--') + ' / ' + (ind.momentum.rvol20 || '--') + 'x');
-  addKv(regGrid, 'BBW分位 / HV比值', (ind.volatility.bbw_percentile_120 || '--') + '% / ' + (ind.qlib_factors.hv_ratio_20_60 || '--'));
-  addKv(regGrid, '成交分布 POC / VAH / VAL (近似)', REPORT.volume_profile.poc_price + ' / ' + REPORT.volume_profile.vah_price + ' / ' + REPORT.volume_profile.val_price);
-  const cov80 = fp.calibration_audit.nominal_80pct_empirical_coverage;
-  addKv(regGrid, '保形预测80%实测覆盖', (cov80 === null || cov80 === undefined ? '--' : (cov80 * 100).toFixed(1) + '%') +
-    ' (n=' + fp.calibration_audit.evaluation_samples + ', ' + fp.promotion_status + ')');
+  const REGIME_LABELS = {{
+    'TRENDING_BULL': '多头趋势扩张',
+    'TRENDING_BEAR': '空头趋势承压',
+    'SQUEEZE_CONSOLIDATION': '窄幅波动率压缩(Squeeze蓄势)',
+    'MEAN_REVERTING_RANGE': '宽幅区间震荡',
+    'HIGH_VOLATILITY_CHAOS': '高波失序/极端波动'
+  }};
+  function renderRegimeGrid(snap) {{
+    regGrid.textContent = '';
+    const regLabel = snap ? (REGIME_LABELS[snap.regime] || snap.regime) : REPORT.market_regime.label_cn;
+    const rsVal = (snap && snap.benchmark_relative_strength !== undefined && snap.benchmark_relative_strength !== null)
+      ? snap.benchmark_relative_strength
+      : bench.relative_strength_vs_index;
+    const snapLastBar = (snap && snap.bars_window && snap.bars_window.length) ? snap.bars_window[snap.bars_window.length - 1] : null;
+    const rvolVal = snapLastBar && snapLastBar.rvol20 !== undefined && snapLastBar.rvol20 !== null ? snapLastBar.rvol20 : (ind.momentum.rvol20 || '--');
+    const adxVal = snap ? '--(历史截面)' : (ind.trend.adx14 || '--');
+    addKv(regGrid, snap ? ('截面 Regime (' + snap.as_of + ')') : '当前标的 Regime', regLabel);
+    addKv(regGrid, '大盘相对强弱 (RS)', rsVal);
+    addKv(regGrid, 'ADX(14) / RVOL(20)', adxVal + ' / ' + rvolVal + 'x');
+    addKv(regGrid, 'BBW分位 / HV比值', (ind.volatility.bbw_percentile_120 || '--') + '% / ' + (ind.qlib_factors.hv_ratio_20_60 || '--'));
+    addKv(regGrid, '成交分布 POC / VAH / VAL (近似)', fmtPrice(REPORT.volume_profile.poc_price) + ' / ' + fmtPrice(REPORT.volume_profile.vah_price) + ' / ' + fmtPrice(REPORT.volume_profile.val_price));
+    const cov80 = fp.calibration_audit.nominal_80pct_empirical_coverage;
+    addKv(regGrid, '保形预测80%实测覆盖', (cov80 === null || cov80 === undefined ? '--' : (cov80 * 100).toFixed(1) + '%') +
+      ' (n=' + fp.calibration_audit.evaluation_samples + ', ' + fp.promotion_status + ')');
+  }}
+  renderRegimeGrid(null);
 
   const barGrid = document.getElementById('barrierGrid');
   const SETTLEMENT_CN = {{
@@ -420,9 +441,9 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   const settleRaw = tb.market_microstructure.settlement;
   const settleLabel = SETTLEMENT_CN[settleRaw] || settleRaw;
   addKv(barGrid, '计划类型', dec.setup_label_cn);
-  addKv(barGrid, '建议入场区', tb.entry_zone[0] + ' ~ ' + tb.entry_zone[1]);
-  addKv(barGrid, '下屏障 (硬止损 SL)', tb.stop_loss_barrier);
-  addKv(barGrid, '上屏障 (TP1 / TP2)', tb.take_profit_1 + ' / ' + tb.take_profit_2);
+  addKv(barGrid, debate.risk_officer_veto ? '观察区 (风控已否决)' : '建议入场区', fmtPrice(tb.entry_zone[0]) + ' ~ ' + fmtPrice(tb.entry_zone[1]));
+  addKv(barGrid, '下屏障 (硬止损 SL)', fmtPrice(tb.stop_loss_barrier));
+  addKv(barGrid, '上屏障 (TP1 / TP2)', fmtPrice(tb.take_profit_1) + ' / ' + fmtPrice(tb.take_profit_2));
   addKv(barGrid, '时间屏障 / 净盈亏比', tb.time_barrier_bars + ' bars / ' + tb.risk_reward_ratio + ' R');
   const sizing = tb.position_sizing;
   const sharesLabel = (sizing.recommended_shares !== null && sizing.recommended_shares !== undefined)
@@ -527,8 +548,20 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
 
   slider.addEventListener('input', function() {{
     activeReplayIdx = parseInt(slider.value, 10);
+    const isLive = activeReplayIdx === replays.length;
+    document.querySelectorAll('#layerControls input[type=checkbox]').forEach(function(cb) {{
+      const lk = cb.getAttribute('data-layer');
+      const liveOnly = (lk === 'scenarios' || lk === 'scenario_fan' || lk === 'barriers' || lk === 'poc' || lk === 'smc');
+      if (liveOnly) {{
+        cb.disabled = !isLive;
+        cb.parentElement.style.opacity = isLive ? '1' : '0.45';
+      }}
+    }});
     if (activeReplayIdx === replays.length) {{
       replayLabel.textContent = '最新截面 (' + meta.as_of + ')';
+      b1.textContent = '大盘基准: ' + bench.index_name + ' (' + bench.regime_label_cn + ' ' + bench.regime_score + '分)';
+      b2.textContent = '多周期规则分: ' + mtf.rule_score + '/100 (' + dec.action_cn + ')';
+      renderRegimeGrid(null);
     }} else {{
       const snap = replays[activeReplayIdx];
       const hitTxt = (snap.terminal_within_80pct_band === null || snap.terminal_within_80pct_band === undefined)
@@ -536,6 +569,9 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
         : (snap.terminal_within_80pct_band ? '是' : '否');
       const rsTxt = snap.rule_score !== undefined ? (' · 当时规则分 ' + snap.rule_score + '/100') : '';
       replayLabel.textContent = '历史回放: ' + snap.as_of + rsTxt + ' (80%扇形命中: ' + hitTxt + ')';
+      b1.textContent = '大盘基准(' + snap.as_of + '): ' + bench.index_name + ' (' + (snap.benchmark_regime_score !== undefined ? snap.benchmark_regime_score : bench.regime_score) + '分)';
+      b2.textContent = '当时规则分(' + snap.as_of + '): ' + snap.rule_score + '/100 (' + (snap.rating || '') + ')';
+      renderRegimeGrid(snap);
     }}
     drawChart();
   }});
@@ -577,7 +613,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       const snap = replays[activeReplayIdx];
       const cutDay = snap.as_of;
       const filtered = bars.filter(function(b) {{ return b.day <= cutDay; }});
-      activeBars = (filtered.length >= 20) ? filtered : (snap.bars_window && snap.bars_window.length ? snap.bars_window : filtered);
+      activeBars = (snap.bars_window && snap.bars_window.length >= 20) ? snap.bars_window : filtered;
       activeFp = {{
         horizon_dates: snap.horizon_dates,
         q10: snap.q10,
@@ -702,17 +738,26 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     if (layers.smc && REPORT.smc_structures && activeReplayIdx === replays.length) {{
       const bullObFill = isCnColor ? 'rgba(242, 68, 68, 0.14)' : 'rgba(16, 188, 132, 0.14)';
       const bearObFill = isCnColor ? 'rgba(16, 188, 132, 0.14)' : 'rgba(242, 68, 68, 0.14)';
+      function xStartForDay(dayStr, fallbackFrac) {{
+        if (!dayStr) return padL + histW * fallbackFrac;
+        for (let bi = 0; bi < activeBars.length; bi++) {{
+          if (activeBars[bi].day >= dayStr) return xOfBar(bi);
+        }}
+        return padL + histW * fallbackFrac;
+      }}
       (REPORT.smc_structures.order_blocks || []).forEach(function(ob) {{
         const y1 = yOfPrice(ob.zone[1]);
         const y2 = yOfPrice(ob.zone[0]);
+        const x0 = xStartForDay(ob.day, 0.35);
         ctx.fillStyle = ob.kind.indexOf('BULL') >= 0 ? bullObFill : bearObFill;
-        ctx.fillRect(padL + histW * 0.35, Math.min(y1, y2), histW * 0.65, Math.max(4, Math.abs(y2 - y1)));
+        ctx.fillRect(x0, Math.min(y1, y2), (padL + histW) - x0, Math.max(4, Math.abs(y2 - y1)));
       }});
       (REPORT.smc_structures.fvgs || []).forEach(function(fvg) {{
         const y1 = yOfPrice(fvg.zone[1]);
         const y2 = yOfPrice(fvg.zone[0]);
+        const x0 = xStartForDay(fvg.day, 0.55);
         ctx.fillStyle = 'rgba(56, 189, 248, 0.12)';
-        ctx.fillRect(padL + histW * 0.55, Math.min(y1, y2), histW * 0.45, Math.max(3, Math.abs(y2 - y1)));
+        ctx.fillRect(x0, Math.min(y1, y2), (padL + histW) - x0, Math.max(3, Math.abs(y2 - y1)));
       }});
     }}
 
@@ -970,7 +1015,8 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     }});
     ctx.fillStyle = '#94a3b8';
     ctx.font = '11px sans-serif';
-    ctx.fillText('成交量 Volume & RVOL20 (当前 ' + (ind.momentum.rvol20 || 1.0) + 'x)', padL + 8, volT + 16);
+    const curRvol = (lastBar && lastBar.rvol20 !== undefined && lastBar.rvol20 !== null) ? lastBar.rvol20 : (ind.momentum.rvol20 || 1.0);
+    ctx.fillText('成交量 Volume & RVOL20 (截面 ' + curRvol + 'x)', padL + 8, volT + 16);
 
     drawQualityWatermark(W, H);
 

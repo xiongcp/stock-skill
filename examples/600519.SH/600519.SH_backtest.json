@@ -30,27 +30,27 @@
     },
     "entry_rule": "决策日收盘给出 LONG_CONFIRMED/WATCH_LONG_SETUP 时，次日开盘价落在计划入场区内才成交；出场 = 盘中触及计划硬止损或 TP1 / 盘中触及 +0.90R 且收盘 ≥ +0.30R 后次日起止损上移至 +0.08R 保本位 / 持仓满期触发时间屏障",
     "actions_seen": {
-      "NEUTRAL_HOLD_WAIT": 158,
+      "NEUTRAL_HOLD_WAIT": 160,
       "DEFENSIVE_AVOID": 102,
-      "WATCH_LONG_SETUP": 28,
+      "WATCH_LONG_SETUP": 26,
       "LONG_CONFIRMED": 13
     },
     "no_fill_outside_entry_zone": 2,
     "all_long_signals": {
-      "trades": 14,
-      "cumulative_return_pct": -1.08,
-      "win_rate_pct": 42.86,
+      "trades": 13,
+      "cumulative_return_pct": 1.72,
+      "win_rate_pct": 46.15,
       "win_rate_95ci_pct": [
-        21.38,
-        67.41
+        23.21,
+        70.86
       ],
       "mean_return_95ci_pct": [
-        -1.58,
-        1.57
+        -1.35,
+        1.81
       ],
-      "sharpe": -0.03,
-      "max_drawdown_pct": 7.45,
-      "profit_factor": 0.98
+      "sharpe": 0.18,
+      "max_drawdown_pct": 6.75,
+      "profit_factor": 1.13
     },
     "long_confirmed": {
       "trades": 6,
@@ -69,20 +69,20 @@
       "profit_factor": 3.88
     },
     "watch_long_setup": {
-      "trades": 14,
-      "cumulative_return_pct": -6.91,
-      "win_rate_pct": 35.71,
+      "trades": 13,
+      "cumulative_return_pct": -4.27,
+      "win_rate_pct": 38.46,
       "win_rate_95ci_pct": [
-        16.34,
-        61.24
+        17.71,
+        64.48
       ],
       "mean_return_95ci_pct": [
-        -1.9,
-        1.04
+        -1.74,
+        1.29
       ],
-      "sharpe": -0.54,
-      "max_drawdown_pct": 12.9,
-      "profit_factor": 0.71
+      "sharpe": -0.32,
+      "max_drawdown_pct": 11.35,
+      "profit_factor": 0.8
     },
     "buy_and_hold_return_pct": -6.99,
     "veto_reason_counts": {
@@ -149,16 +149,16 @@
         "up_share_pct": 53.8
       },
       "WATCH_LONG_SETUP": {
-        "decisions": 28,
-        "mean_forward_return_pct": 1.1,
-        "median_forward_return_pct": 0.22,
-        "up_share_pct": 50.0
+        "decisions": 26,
+        "mean_forward_return_pct": 1.28,
+        "median_forward_return_pct": 0.71,
+        "up_share_pct": 53.8
       },
       "NEUTRAL_HOLD_WAIT": {
-        "decisions": 158,
-        "mean_forward_return_pct": 0.52,
-        "median_forward_return_pct": -0.02,
-        "up_share_pct": 50.0
+        "decisions": 160,
+        "mean_forward_return_pct": 0.49,
+        "median_forward_return_pct": -0.09,
+        "up_share_pct": 49.4
       },
       "DEFENSIVE_AVOID": {
         "decisions": 102,
@@ -402,7 +402,7 @@
         }
       }
     ],
-    "sample_size_warning": "成交仅 14 笔（少于 30），胜率/夏普等统计量置信度很低，仅供参考",
+    "sample_size_warning": "成交仅 13 笔（少于 30），胜率/夏普等统计量置信度很低，仅供参考",
     "conformal_forecast_oos": {
       "evaluated_cutoffs": 21,
       "nominal_50pct_coverage": 0.667,

@@ -191,7 +191,8 @@ def compute_triple_barrier_plan(
         not vetoed
         and not overextended
         and rule_score >= 52.0
-        and (scoring_regime != "MEAN_REVERSION_ADAPTED" or setup_type == "LEFT_SIDE_PULLBACK")
+        and setup_type in ("RIGHT_SIDE_BREAKOUT", "LEFT_SIDE_PULLBACK")
+        and (setup_type == "RIGHT_SIDE_BREAKOUT" or is_stabilizing_bar or has_bull_div or has_bull_candle)
     ):
         action = "WATCH_LONG_SETUP"
         action_cn = "条件观察（待放量/收盘确认）"
@@ -305,6 +306,20 @@ def compute_triple_barrier_plan(
             f"自次日起将保护性止损上移至 +0.08R 保本位（约 {breakeven_stop:.{p_dec}f}）"
         ),
     }
+    t1_exit_note = "（A 股受 T+1 约束自入场次日起生效）" if rules["settlement"] == "T+1" else "（支持 T+0 当日止损）"
+    rail_broken_up = wedge.get("status") == "above" and last_c < r1
+    broke_rail_lvl = round_to_tick(float(wedge.get("upper_today") or s1), market, asset_type, as_of_day)
+    rail_hold_lvl = round_to_tick(max(stop_loss, broke_rail_lvl - 0.25 * atr14), market, asset_type, as_of_day)
+    right_req_ev = (
+        f"日线收盘站稳已突破上轨 {broke_rail_lvl:.{p_dec}f} 之上（上方进一步突破位 {r1:.{p_dec}f}）且 RVOL20 >= 1.15 (当前 {rv:.2f})"
+        if rail_broken_up
+        else f"日线收盘站稳 {r1:.{p_dec}f} 且 RVOL20 >= 1.35 (当前 {rv:.2f})"
+    )
+    right_false_brk = (
+        f"回踩收盘跌回上轨保护位 {rail_hold_lvl:.{p_dec}f} 下方视为假突破"
+        if rail_broken_up
+        else f"突破后收盘跌回 {retest_hold:.{p_dec}f} 下方视为假突破"
+    )
 
     tb_plan = {
         "entry_zone": [entry_low, entry_high],
@@ -317,11 +332,11 @@ def compute_triple_barrier_plan(
         "left_side_constraints": {
             "required_evidence": f"缩量企稳 (RVOL20 <= 1.10，当前 {rv:.2f}) + RSI 底背离或下轨支撑不破",
             "invalidation_level": stop_loss,
-            "exit_rule": f"盘中最低价触及硬止损屏障 {stop_loss:.{p_dec}f} 无条件离场（A 股受 T+1 约束自入场次日起生效）",
+            "exit_rule": f"盘中最低价触及硬止损屏障 {stop_loss:.{p_dec}f} 无条件离场{t1_exit_note}",
         },
         "right_side_constraints": {
-            "required_evidence": f"日线收盘站稳 {r1:.{p_dec}f} 且 RVOL20 >= 1.35 (当前 {rv:.2f})",
-            "false_breakout_rule": f"突破后收盘跌回 {retest_hold:.{p_dec}f} 下方视为假突破",
+            "required_evidence": right_req_ev,
+            "false_breakout_rule": right_false_brk,
         },
         "time_stop_rule": f"持仓满 {horizon_bars} 根K线未触及 TP1({tp1:.{p_dec}f}) 且偏离成本不足 0.5*ATR 时触发时间屏障离场",
         "market_microstructure": rules,
@@ -331,8 +346,18 @@ def compute_triple_barrier_plan(
     }
 
     # Bull vs Bear structured falsification (TradingAgents style)
+    if setup_type == "LEFT_SIDE_PULLBACK" or tp1 <= r1:
+        bull_lead = (
+            f"结构触发：若在支撑 {s1:.{p_dec}f} 上方企稳（入场/观察区 {entry_low:.{p_dec}f}~{entry_high:.{p_dec}f}，防守位 {stop_loss:.{p_dec}f}），"
+            f"修复空间指向 TP1 {tp1:.{p_dec}f}，放量突破 {r1:.{p_dec}f}（{projections['breakout_level']['source']}）后指向 TP2 {tp2:.{p_dec}f}。"
+        )
+    else:
+        bull_lead = (
+            f"结构触发：若日线放量收盘站稳 {r1:.{p_dec}f}（{projections['breakout_level']['source']}），回踩不破 {retest_hold:.{p_dec}f}，"
+            f"上方空间指向 TP1 {tp1:.{p_dec}f} / TP2 {tp2:.{p_dec}f}。"
+        )
     bull_case: list[str] = [
-        f"结构触发：若日线放量收盘站稳 {r1:.{p_dec}f}（{projections['breakout_level']['source']}），回踩不破 {retest_hold:.{p_dec}f}，上方空间指向 TP1 {tp1:.{p_dec}f} / TP2 {tp2:.{p_dec}f}。",
+        bull_lead,
     ]
     for p in algebraic_patterns:
         if p["direction"] == "BULLISH":

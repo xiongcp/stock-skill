@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
@@ -79,8 +80,14 @@ SCENARIO_PLAYBOOK: tuple[dict[str, str], ...] = (
 PLAYBOOK_BY_ID: dict[str, dict[str, str]] = {row["id"]: row for row in SCENARIO_PLAYBOOK}
 
 
-def _money(val: float | Decimal) -> float:
-    return float(Decimal(str(val)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+def _money(val: float | Decimal, decimals: int | None = None) -> float:
+    v = round(float(val), 4)
+    cleaned = Decimal(str(v))
+    if decimals is not None and decimals >= 3:
+        return float(cleaned.quantize(Decimal("10") ** -int(decimals), rounding=ROUND_HALF_UP))
+    if 0 < abs(v) < 10.0 and round(v, 3) != round(v, 2):
+        return float(cleaned.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP))
+    return float(cleaned.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def _fmt(val: float, decimals: int = 2) -> str:
@@ -258,11 +265,14 @@ def build_scenarios_with_base_rates(
     base_projections: dict[str, Any],
     decimals: int = 2,
     benchmark_bars: list[dict[str, Any]] | None = None,
+    round_price: Callable[[float, str], float] | None = None,
 ) -> dict[str, Any]:
     """根据 L1 状态评估 8 类情景，选出 2~5 个适用情景，并附加 L2 历史条件频率与时间窗。"""
     horizon = max(1, int(horizon_bars))
     start_p = float(live_price) if live_price is not None else float(ref)
     fp = lambda v: _fmt(v, decimals)
+    as_of_day = str(sview[-1]["day"]) if sview else ""
+    rp = (lambda v: float(round_price(float(v), as_of_day))) if round_price is not None else (lambda v: _money(v, decimals))
 
     target_feat = _get_or_build_causal_features(hist)
     bench_feat: dict[str, list[float]] | None = None
@@ -367,9 +377,19 @@ def build_scenarios_with_base_rates(
                 trigger_text += "（盘中已触及，待收盘确认）"
 
         t1, t2, t3 = _slot_triplet(med_c, horizon)
-        wp1_price = _money(0.5 * (ref + mid_waypoint_price)) if is_active else _money(raw_trigger_price)
-        wp2_price = _money(mid_waypoint_price)
-        wp3_price = _money(target_price)
+        wp1_price = rp(0.5 * (ref + mid_waypoint_price)) if is_active else rp(raw_trigger_price)
+        wp2_price = rp(mid_waypoint_price)
+        wp3_price = rp(target_price)
+        if direction == "BULLISH" and wp3_price <= ref:
+            wp3_price = rp(ref * (1.0 + max(0.01, 0.6 * atr)))
+        elif direction == "BEARISH" and wp3_price >= ref:
+            wp3_price = rp(max(0.01, ref * (1.0 - max(0.01, 0.6 * atr))))
+        inv_p_clean = rp(invalidation_price) if invalidation_price is not None else None
+        if inv_p_clean is not None:
+            if direction == "BULLISH" and inv_p_clean >= ref:
+                inv_p_clean = rp(max(0.01, ref * (1.0 - max(0.01, 0.4 * atr))))
+            elif direction == "BEARISH" and inv_p_clean <= ref:
+                inv_p_clean = rp(ref * (1.0 + max(0.01, 0.4 * atr)))
         step1_txt = f"进行中 {fp(ref)}" if is_active else f"触发 {fp(raw_trigger_price)}"
 
         return {
@@ -384,15 +404,15 @@ def build_scenarios_with_base_rates(
             "precondition_rationale": rationale,
             "applicability_score": round(applicability_score, 2),
             "trigger": trigger_text,
-            "trigger_price": None if is_active else _money(raw_trigger_price),
-            "reference_trigger_price": _money(raw_trigger_price),
+            "trigger_price": None if is_active else rp(raw_trigger_price),
+            "reference_trigger_price": rp(raw_trigger_price),
             "trigger_distance_atr": trig_dist_atr,
             "target_price": wp3_price,
             "target_source_template": meta["target_source"],
             "target_source": target_source_detail,
             "invalidation": invalidation_text,
             "invalidation_template": meta["invalidation"],
-            "invalidation_price": _money(invalidation_price) if invalidation_price is not None else None,
+            "invalidation_price": inv_p_clean,
             "time_window_bars": {
                 "q25": q25_c,
                 "median": med_c,
@@ -498,16 +518,18 @@ def build_scenarios_with_base_rates(
             for x in (l if not struct["expired"] else None, s1, float(bear_base["target_price"]))
             if x is not None and x <= ref * (1.0 - 0.5 * atr)
         ]
-        other_rail = _money(max(cand_dn) if cand_dn else min(float(bear_base["target_price"]), max(0.01, ref * (1.0 - 0.8 * atr))))
+        other_rail = rp(max(cand_dn) if cand_dn else min(float(bear_base["target_price"]), max(0.01, ref * (1.0 - 0.8 * atr))))
         tested_resist = u if (not struct["expired"] and abs(u - ref) <= 2.5 * atr_abs) else r1
-        brk_cap = _money(max(recent_hi5, min(r1, tested_resist) if strict_3 else tested_resist, ref + 0.4 * atr_abs))
-        trig_3 = _money(
+        brk_cap = rp(max(recent_hi5, min(r1, tested_resist) if strict_3 else tested_resist, ref + 0.4 * atr_abs))
+        trig_3 = rp(
             min(
                 u if not struct["expired"] else float(bull_base["retest_hold"]),
                 float(bull_base["retest_hold"]),
                 ref * (1.0 - 0.55 * atr),
             )
         )
+        fell_back_inside = bool(poked_above and st_code != "above")
+        fb_Fall_lvl = u if (st_code == "above" and not struct["expired"]) else float(bull_base["retest_hold"])
         candidates.append(
             build_item(
                 sc_id="FALSE_BREAKOUT_REVERSAL",
@@ -519,16 +541,16 @@ def build_scenarios_with_base_rates(
                     if strict_3
                     else f"现价逼近上轨/前高阻力 {fp(r1)}，若冲高缺量跌回 {fp(bull_base['retest_hold'])} 下方则触发假突破"
                 ),
-                raw_trigger_price=brk_cap if poked_above else trig_3,
-                pending_trigger_text=f"冲高受阻于 {fp(r1)} 且日线收盘跌回 {fp(bull_base['retest_hold'])} 下方",
-                active_trigger_text=f"已在进行中（冲高 {fp(recent_hi5)} 后已跌回轨道内，受制于 {fp(brk_cap)}）",
+                raw_trigger_price=brk_cap if fell_back_inside else trig_3,
+                pending_trigger_text=f"冲高受阻于 {fp(brk_cap if st_code == 'above' else r1)} 且日线收盘跌回 {fp(fb_Fall_lvl)} 下方",
+                active_trigger_text=f"已在进行中（冲高 {fp(recent_hi5)} 后{'已跌回轨道内' if ref < u else '受阻回落'}，受制于 {fp(brk_cap)}）",
                 mid_waypoint_price=mid_rail if mid_rail < ref else float(neut_base["range"][0]),
                 mid_step_label=f"回落 {fp(mid_rail if mid_rail < ref else neut_base['range'][0])}",
                 target_price=other_rail,
                 target_source_detail=f"轨道另一侧 {fp(other_rail)}",
                 invalidation_price=brk_cap,
                 invalidation_text=f"再次收盘站上突破位 {fp(brk_cap)}",
-                already_active=bool(poked_above),
+                already_active=fell_back_inside,
             )
         )
 
@@ -759,9 +781,15 @@ def build_scenarios_with_base_rates(
         selected = (met_list + rest)[:2]
 
     # 为向后兼容的三路径（bull / neutral / bear）挂载对应的历史条件频率
-    bull_sc = next((s for s in selected if s["direction"] == "BULLISH"), None)
+    bull_sc = next(
+        (s for s in selected if s["id"] in ("BREAKOUT_RETEST", "TREND_CONTINUATION") and s["direction"] == "BULLISH"),
+        None,
+    )
     neut_sc = next((s for s in selected if s["id"] == "RANGE_OSCILLATION"), None)
-    bear_sc = next((s for s in selected if s["direction"] == "BEARISH"), None)
+    bear_sc = next(
+        (s for s in selected if s["id"] in ("BREAKDOWN_DECLINE", "FALSE_BREAKOUT_REVERSAL") and s["direction"] == "BEARISH"),
+        None,
+    )
 
     bull_freq = bull_sc["historical_frequency"] if bull_sc else get_freq("bull", "BULLISH")
     neut_freq = neut_sc["historical_frequency"] if neut_sc else get_freq("RANGE_OSCILLATION", "NEUTRAL")

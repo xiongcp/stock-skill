@@ -602,6 +602,10 @@ def render(
         prices.extend(level["price"] for level in scenario["levels"] if level["drawn"])
     for key in ("bull", "neutral", "bear"):
         prices.extend(pt[1] for pt in projections[key]["waypoints_offset"])
+    for sc_item in projections.get("scenarios") or []:
+        for _, p_sc in sc_item.get("waypoints_offset") or []:
+            if abs(float(p_sc) / float(ref_p) - 1) <= 0.25:
+                prices.append(float(p_sc))
     for rail_val in (wedge["upper_today"], wedge["lower_today"]):
         if abs(rail_val / float(ref_p) - 1) <= 0.15:
             prices.append(rail_val)
@@ -820,7 +824,7 @@ def render(
     dashed_line(draw, (div_x, top), (div_x, main_bottom), fill=(96, 165, 250, 220), width=1.8, dash=8, gap=6)
     scen_cnt = len(projections.get("scenarios") or [])
     zone_txt = (
-        f"规则推演区({scen_cnt}情景) · 线宽/深浅按历史频率 · 虚线=低样本(n<30)"
+        f"规则推演区(三路径+{scen_cnt}情景) · 线宽按频率 · 虚线=低样本(n<30)"
         if scen_cnt
         else f"规则推演区 · {up_word}:上攻 / 黄:震荡 / {down_word}:下探（非预测）"
     )
@@ -965,6 +969,27 @@ def render(
             all_proj_segs.append((pts[i], pts[i + 1]))
         draw_arrow_polyline(draw, pts, fill=col, width=w_val, dashed=is_dashed, alpha=a_val)
         right_gutter_tags.append((pts[-1][1], tag_text, col))
+
+    # 同步叠绘 L1 活跃情景中与三主路径目标位不同的独立情景路径，保证 PNG 与 HTML 同源
+    main_targets = [float(projections[k]["target_price"]) for k in ("bull", "neutral", "bear")]
+    for sc_item in projections.get("scenarios") or []:
+        sc_tgt = float(sc_item.get("target_price") or 0.0)
+        if sc_tgt <= 0 or any(abs(sc_tgt - mt) <= dup_tol for mt in main_targets):
+            continue
+        sc_wps = sc_item.get("waypoints_offset") or []
+        if len(sc_wps) < 2:
+            continue
+        sc_dir = str(sc_item.get("direction") or "NEUTRAL")
+        sc_col = PROJ_BULL if sc_dir == "BULLISH" else (PROJ_BEAR if sc_dir == "BEARISH" else PROJ_NEUTRAL)
+        sc_hf = sc_item.get("historical_frequency") or {}
+        sc_freq = max(0.0, min(1.0, float(sc_hf.get("target_freq") or 0.35)))
+        sc_n = int(sc_hf.get("sample_size") or 0)
+        sc_low = bool(sc_hf.get("low_sample", sc_n < 30))
+        sc_raw = float(sc_hf["raw_target_freq"]) if sc_hf.get("raw_target_freq") is not None else sc_freq
+        sc_pct = f"{sc_raw * 100:.1f}%" if sc_n > 0 else f"先验{sc_freq * 100:.0f}%"
+        sc_pts = [(x_of(last_bar_idx + dx), yp(p)) for dx, p in sc_wps]
+        draw_arrow_polyline(draw, sc_pts, fill=sc_col, width=round(1.6 + 1.8 * sc_freq, 2), dashed=True, alpha=165 if sc_low else 200)
+        right_gutter_tags.append((sc_pts[-1][1], f"{sc_item['name']} {fp(sc_tgt)} {sc_pct}(n={sc_n})", sc_col))
 
     step_boxes: list[tuple[int, int, int, int]] = []
     for key, col, _, _, _, _ in proj_configs:

@@ -132,7 +132,8 @@ def score_judgment_entries(
             sid = str(sc["scenario_id"])
             p_llm = float(sc["subjective_probability_pct"]) / 100.0
             p_base = float(sc["baseline_probability_pct"]) / 100.0
-            y_win = 1 if (sid == winner_id or event_hits.get(sid, 0) == 1) else 0
+            # 与互斥概率空间 (sum p_k = 1.0) 严格对齐：单次截面最多一个 realized winner_id 记 y_win = 1
+            y_win = 1 if sid == winner_id else 0
 
             sq_llm = (p_llm - y_win) ** 2
             sq_base = (p_base - y_win) ** 2
