@@ -22,6 +22,9 @@ DRY_RUN=0
 UNINSTALL=0
 RUN_TEST=1
 INSTALL_UV=0
+# 缺 uv 且不安装 uv 时改用本机 Python 3.12+ 建 .venv（USE_UV=0，PYTHON 为找到的解释器）
+USE_UV=1
+PYTHON=""
 
 usage() {
   cat <<'EOF'
@@ -32,7 +35,7 @@ usage() {
   --agents <列表>     逗号分隔：claude,codex,hermes,gemini,cursor,opencode 或 all（默认自动探测）
   --project <目录>    只注册到某个项目（Claude Code 用 <目录>/.claude/skills，其余用 <目录>/.agents/skills）
   --copy              复制技能目录而不是软链（更新后需重新执行本脚本）
-  --install-uv        缺少 uv 时直接用官方安装器安装（非交互环境必须显式传入）
+  --install-uv        缺少 uv 时直接用官方安装器安装；不安装 uv 时改用本机 Python 3.12+ 建 .venv
   --no-test           跳过安装后的离线自检与 doctor
   --dry-run           只打印将要执行的操作，不做任何修改
   --update            更新（等同重新执行安装）
@@ -191,6 +194,19 @@ uninstall() {
 # ---------------------------------------------------------------------------
 # 安装
 # ---------------------------------------------------------------------------
+# 按 python3.13、python3.12、python3 的顺序找第一个 >= 3.12 的解释器
+find_python() {
+  local py
+  for py in python3.13 python3.12 python3; do
+    if command -v "$py" >/dev/null 2>&1 &&
+      "$py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null; then
+      command -v "$py"
+      return 0
+    fi
+  done
+  return 1
+}
+
 ensure_uv() {
   if command -v uv >/dev/null 2>&1; then
     say "uv 已安装：$(uv --version)"
@@ -199,11 +215,16 @@ ensure_uv() {
   if [ "$INSTALL_UV" -eq 0 ]; then
     if (: </dev/tty) 2>/dev/null; then
       local ans=""
-      printf '未找到 uv。是否用官方安装器安装（curl -LsSf https://astral.sh/uv/install.sh | sh）？[y/N] ' >/dev/tty
+      printf '未找到 uv。是否用官方安装器安装（curl -LsSf https://astral.sh/uv/install.sh | sh）？选 N 则改用本机 Python 3.12+ 建 .venv [y/N] ' >/dev/tty
       read -r ans </dev/tty || ans=""
       case "$ans" in y|Y|yes|YES) INSTALL_UV=1 ;; esac
     fi
-    [ "$INSTALL_UV" -eq 1 ] || die "需要 uv：请先安装（https://docs.astral.sh/uv/），或加 --install-uv 让本脚本安装"
+    if [ "$INSTALL_UV" -eq 0 ]; then
+      PYTHON="$(find_python)" || die "未找到 uv，也未找到 Python 3.12+（依次查找 python3.13、python3.12、python3）：请安装 Python 3.12+（https://www.python.org/downloads/）后重试，或加 --install-uv 让本脚本安装 uv"
+      USE_UV=0
+      say "未找到 uv，改用 ${PYTHON}（$("$PYTHON" --version 2>&1)）在技能目录建 .venv"
+      return
+    fi
   fi
   command -v curl >/dev/null 2>&1 || die "安装 uv 需要 curl"
   say "安装 uv"
@@ -257,8 +278,15 @@ fetch_code() {
 }
 
 sync_deps() {
-  say "安装 Python 3.12 与锁定依赖（uv.lock）"
-  run uv sync --frozen --python 3.12 --directory "$SKILL_SRC"
+  if [ "$USE_UV" -eq 1 ]; then
+    say "安装 Python 3.12 与锁定依赖（uv.lock）"
+    run uv sync --frozen --python 3.12 --directory "$SKILL_SRC"
+    return
+  fi
+  say "创建虚拟环境并安装运行期依赖（requirements.txt，与 uv.lock 版本一致）"
+  run "$PYTHON" -m venv "$SKILL_SRC/.venv" ||
+    die "创建 .venv 失败；Debian / Ubuntu 需先安装 python3-venv（需要 sudo，请自行执行），或加 --install-uv 改用 uv"
+  run "$SKILL_SRC/.venv/bin/pip" install -r "$SKILL_SRC/requirements.txt"
 }
 
 check_fonts() {
@@ -330,16 +358,17 @@ self_test() {
       [ -f "$SKILL_SRC/scripts/$s" ] || die "缺少核心脚本: $SKILL_SRC/scripts/$s"
     done
   fi
-  say "离线快速自检（文档契约 + 工具测试，不访问网络）"
-  run uv run --frozen --directory "$SKILL_SRC" pytest -q tests/test_docs_contract.py tests/test_tools.py
-  say "环境自检 doctor（数据源连通项需要联网，失败不影响安装）"
-  local doctor_args=()
-  [ -n "$PROJECT_DIR" ] && doctor_args=(--project "$PROJECT_DIR")
-  if [ "$DRY_RUN" -eq 0 ]; then
-    run uv run --frozen --directory "$SKILL_SRC" python scripts/doctor.py ${doctor_args[@]+"${doctor_args[@]}"} || warn "doctor 有未通过项，请按上面的建议处理"
+  local doctor_cmd=(uv run --frozen --directory "$SKILL_SRC" python scripts/doctor.py)
+  if [ "$USE_UV" -eq 1 ]; then
+    say "离线快速自检（文档契约 + 工具测试，不访问网络）"
+    run uv run --frozen --directory "$SKILL_SRC" pytest -q tests/test_docs_contract.py tests/test_tools.py
   else
-    run uv run --frozen --directory "$SKILL_SRC" python scripts/doctor.py ${doctor_args[@]+"${doctor_args[@]}"}
+    say "跳过离线 pytest 自检（未使用 uv，pytest 不在 requirements.txt 中）"
+    doctor_cmd=("$SKILL_SRC/.venv/bin/python" "$SKILL_SRC/scripts/doctor.py")
   fi
+  say "环境自检 doctor（数据源连通项需要联网，失败不影响安装）"
+  [ -n "$PROJECT_DIR" ] && doctor_cmd+=(--project "$PROJECT_DIR")
+  run "${doctor_cmd[@]}" || warn "doctor 有未通过项，请按上面的建议处理"
 }
 
 install() {

@@ -23,6 +23,7 @@
 - `SKILL.md` 新增「运行环境」一节：有 uv 用 `uv run python`；没有 uv 时在技能目录建 `.venv` 并 `pip install -r requirements.txt`，命令改用 `.venv/bin/python`。新增 `kline-structure-chart/requirements.txt`（只含 Pillow，版本与 `uv.lock` 一致，由文档契约测试校验）。
 - `numpy` 从运行期依赖移到 dev 组：运行期脚本从未导入 numpy（只有 TA-Lib 金标准测试使用），运行期依赖只剩 Pillow。
 - `scripts/doctor.py`：没有 uv 但当前 Python 与依赖可用时不再判为失败，修复建议补充 venv + pip 路径。
+- 一键安装脚本缺 uv 时不再直接退出（`install.sh`、`install.ps1`）：未加 `--install-uv` / `-InstallUv` 且不安装 uv 时（非交互运行或回答 N），依次查找 `python3.13`、`python3.12`、`python3`（Windows：`py -3.13`、`py -3.12`、`python`）中第一个 ≥ 3.12 的解释器，在技能目录建 `.venv` 并 `pip install -r requirements.txt`，跳过 `uv sync`；安装后自检跳过 pytest（不在 `requirements.txt` 中），改用 `.venv` 里的解释器运行 `doctor`；`--dry-run` 打印上述命令。找不到 3.12+ 时退出并提示安装 Python 3.12+ 或加 `--install-uv`。README 3.1 / 3.2 与 `INSTALL_FOR_AGENTS.md` 同步；`tests/test_tools.py` 新增在 PATH 中去掉 uv、临时 HOME 下的 dry-run 回归测试。
 
 ### 修复（深度审查 P0 / P1）
 

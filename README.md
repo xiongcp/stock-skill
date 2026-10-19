@@ -123,12 +123,12 @@ irm https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.ps1 | iex
 
 脚本依次完成：
 
-1. 检查 `git` 和 `uv`（缺 uv 时询问是否用官方安装器安装；非交互环境需要加 `--install-uv`）。
+1. 检查 `git` 和 `uv`。缺 uv 时询问是否用官方安装器安装（加 `--install-uv` 则不询问直接安装）；不安装 uv 时（回答 N，或非交互环境未加 `--install-uv`）改用本机 Python 3.12+，依次查找 `python3.13`、`python3.12`、`python3`（Windows：`py -3.13`、`py -3.12`、`python`），都低于 3.12 才退出并提示安装 Python 3.12+ 或加 `--install-uv`。
 2. 把代码克隆到 `~/.local/share/stock-skill`；已存在时执行 `git pull --ff-only`，所以**重复执行同一条命令就是更新**。
-3. 执行 `uv sync --frozen --python 3.12`，按 `uv.lock` 安装依赖。
+3. 执行 `uv sync --frozen --python 3.12`，按 `uv.lock` 安装依赖；不用 uv 时改为在技能目录 `python -m venv .venv` 并 `.venv/bin/pip install -r requirements.txt`（版本与 `uv.lock` 一致）。
 4. Linux 下检查中文字体。
 5. 自动探测已安装的 `claude`、`codex`、`gemini`、`cursor-agent`、`opencode`，把技能目录**软链**到对应的技能目录（见下表）。目标位置已有同名的普通目录时先备份为 `*.bak.<时间>`。
-6. 运行离线快速自检（文档契约与工具测试）和环境自检 `doctor`，最后打印下一步。
+6. 运行离线快速自检（文档契约与工具测试；不用 uv 时跳过，因为 pytest 不在 `requirements.txt` 里）和环境自检 `doctor`（不用 uv 时用 `.venv/bin/python` 运行），最后打印下一步。
 
 | Agent | 探测命令 | 全局技能目录 | `--project` 时的目录 |
 | --- | --- | --- | --- |
@@ -157,7 +157,7 @@ curl -fsSL https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.sh
 | `--agents claude,codex` | `-Agents claude,codex` | 只注册到指定 agent；`all` 表示全部五个 |
 | `--project <目录>` | `-Project` | 只注册到某个项目（项目级技能目录），不动全局目录 |
 | `--copy` | `-Copy` | 复制而不是软链（更新代码后需重新执行脚本） |
-| `--install-uv` | `-InstallUv` | 缺 uv 时直接安装，不询问 |
+| `--install-uv` | `-InstallUv` | 缺 uv 时直接安装，不询问；不加且不安装 uv 时改用本机 Python 3.12+ 建 `.venv`（见 3.1 第 1 步） |
 | `--no-test` | `-NoTest` | 跳过安装后的自检 |
 | `--dry-run` | `-DryRun` | 只打印将要执行的操作，不做任何修改 |
 | `--source <地址或路径>` | `-Source` | 从其他 Git 地址或本地检出安装（开发测试用） |

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -190,3 +192,42 @@ def test_install_scripts_brace_variables_before_non_ascii_and_dry_run(tmp_path: 
         check=True,
     ).stdout
     assert "卸载 kline-structure-chart" in dry_uninst
+
+
+def test_install_sh_dry_run_falls_back_to_venv_without_uv(tmp_path: Path) -> None:
+    """PATH 中没有 uv 且未加 --install-uv 时，改用 Python 3.12+ 建 .venv 并 pip 安装 requirements.txt，跳过 pytest 自检。"""
+    script = REPO_DIR / "install.sh"
+    if not script.exists():
+        pytest.skip("install.sh 不随 skill 分发")
+    bash, git = shutil.which("bash"), shutil.which("git")
+    if not (bash and git):
+        pytest.skip("需要 bash 与 git")
+    # 去掉含 uv 的 PATH 目录；另放一个只含 git 与当前解释器（>= 3.12）的目录，保证回退路径一定找得到 Python
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "git").symlink_to(git)
+    (bin_dir / "python3").symlink_to(Path(sys.executable).resolve())
+    path = [str(bin_dir)] + [d for d in os.environ.get("PATH", "").split(os.pathsep) if d and not (Path(d) / "uv").exists()]
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {**os.environ, "HOME": str(home), "PATH": os.pathsep.join(path)}
+    env.pop("STOCK_SKILL_DIR", None)
+    # start_new_session 脱离控制终端，脚本打不开 /dev/tty，不会弹出"是否安装 uv"的询问
+    proc = subprocess.run(
+        [bash, str(script), "--source", str(REPO_DIR), "--agents", "claude", "--dry-run"],
+        capture_output=True,
+        text=True,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    skill_src = home / ".local" / "share" / "stock-skill" / SKILL_DIR.name
+    assert "未找到 uv，改用" in out
+    assert f"-m venv {skill_src}/.venv" in out
+    assert f"{skill_src}/.venv/bin/pip install -r {skill_src}/requirements.txt" in out
+    assert "跳过离线 pytest 自检" in out
+    assert f"{skill_src}/.venv/bin/python {skill_src}/scripts/doctor.py" in out
+    assert "uv sync" not in out and "uv run" not in out
+    assert not any(home.iterdir()), "--dry-run 不得在 HOME 下创建任何文件"

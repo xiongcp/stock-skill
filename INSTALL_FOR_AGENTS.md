@@ -35,7 +35,8 @@ uv --version
 
 - `git` 必需。缺失时请用户安装（macOS：`xcode-select --install`）。
 - 运行期只需要 **Python ≥ 3.12 + Pillow**。`uv` 是推荐工具，不是必需：它能不借助 sudo 自动下载 Python 3.12 并按 `uv.lock` 安装锁定版本的依赖。
-- 有 `uv` → 走第 3 节方式 A；没有 `uv`：问用户是否允许安装 uv（官方安装器，只写入用户目录）。同意 → 方式 A 并加 `--install-uv`；不同意 → 方式 B。
+- 有 `uv` → 走第 3 节方式 A；没有 `uv`：问用户是否允许安装 uv（官方安装器，只写入用户目录）。同意 → 方式 A 并加 `--install-uv`；不同意 → 仍可走方式 A（不加 `--install-uv`，脚本自动改用本机 Python ≥ 3.12 建 `.venv`），用户不想运行脚本时走方式 B。
+- 没有 `uv` 且用户不安装 uv 时，`python3 --version` 低于 3.12 也没有 `python3.12` / `python3.13`：请用户安装 Python 3.12+，否则两种方式都无法完成。
 
 ## 3. 方式 A：一键脚本（macOS / Linux，推荐）
 
@@ -45,9 +46,10 @@ uv --version
 curl -fsSL https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.sh | bash -s -- --agents <agent>
 ```
 
-- 用户同意安装 uv 时追加 `--install-uv`（你运行的是非交互 shell，脚本不会弹出询问；不加该参数且缺 uv 会直接退出）。
+- 用户同意安装 uv 时追加 `--install-uv`（你运行的是非交互 shell，脚本不会弹出询问）。不加该参数且缺 uv 时，脚本依次查找 `python3.13`、`python3.12`、`python3` 中第一个 ≥ 3.12 的解释器，在技能目录建 `.venv` 并 `pip install -r requirements.txt`；都找不到才退出，提示安装 Python 3.12+ 或加 `--install-uv`。
 - 想先看会做什么：追加 `--dry-run`，把输出给用户确认后再去掉该参数重跑。
-- 脚本会：克隆到 `~/.local/share/stock-skill`（已存在则 `git pull --ff-only`）→ `uv sync --frozen --python 3.12` → 软链到技能目录 → 离线自检与 `doctor`。重复执行即更新。
+- 脚本会：克隆到 `~/.local/share/stock-skill`（已存在则 `git pull --ff-only`）→ `uv sync --frozen --python 3.12`（不用 uv 时为 venv + pip）→ 软链到技能目录 → 离线自检（不用 uv 时跳过 pytest）与 `doctor`。重复执行即更新。
+- 脚本走了 venv 回退（输出里有"未找到 uv，改用 …"）时，后续命令与方式 B 相同：`uv run python` 换成 `.venv/bin/python`。
 
 Windows（PowerShell，脚本尚未在 Windows 实测）：
 
@@ -76,7 +78,7 @@ mkdir -p <技能目录> && ln -s ~/.local/share/stock-skill/kline-structure-char
 
 ## 5. 验证
 
-在技能目录（`~/.local/share/stock-skill/kline-structure-chart`）执行，方式 B 把 `uv run python` 换成 `.venv/bin/python`：
+在技能目录（`~/.local/share/stock-skill/kline-structure-chart`）执行，没有 uv（方式 B 或方式 A 的 venv 回退）时把 `uv run python` 换成 `.venv/bin/python`：
 
 ```bash
 uv run python scripts/doctor.py

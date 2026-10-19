@@ -25,6 +25,9 @@ $ErrorActionPreference = 'Stop'
 $SkillName = 'kline-structure-chart'
 $MarkerName = '.stock-skill-installer'
 $AllAgents = @('claude', 'codex', 'hermes', 'gemini', 'cursor', 'opencode')
+# 缺 uv 且不安装 uv 时改用本机 Python 3.12+ 建 .venv（$Python 为解释器命令及其前置参数，如 py -3.12）
+$UseUv = $true
+$Python = @()
 
 function Say([string]$Msg) { Write-Host "==> $Msg" -ForegroundColor Cyan }
 function Warn([string]$Msg) { Write-Warning $Msg }
@@ -46,6 +49,7 @@ function Invoke-Native([string]$Exe, [string[]]$Arguments) {
 
 $Dir = [System.IO.Path]::GetFullPath($Dir)
 $SkillSrc = Join-Path $Dir $SkillName
+$VenvPython = [IO.Path]::Combine($SkillSrc, '.venv', 'Scripts', 'python.exe')
 if ($Project) {
     if (-not (Test-Path -LiteralPath $Project -PathType Container)) { Die "项目目录不存在: $Project" }
     $Project = (Resolve-Path -LiteralPath $Project).Path
@@ -137,15 +141,35 @@ function Register-One([string]$SkillsDir) {
     }
 }
 
+# 按 py -3.13、py -3.12、python 的顺序找第一个 >= 3.12 的解释器，返回命令及其前置参数
+function Find-Python {
+    # 局部放宽：py 启动器找不到对应版本时会写 stderr，不应中断安装
+    $ErrorActionPreference = 'Continue'
+    foreach ($cand in @(@('py', '-3.13'), @('py', '-3.12'), @('python'))) {
+        if (-not (Get-Command $cand[0] -ErrorAction SilentlyContinue)) { continue }
+        $pre = @($cand | Select-Object -Skip 1)
+        & $cand[0] @pre -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2>$null
+        if ($LASTEXITCODE -eq 0) { return , $cand }
+    }
+    return $null
+}
+
 function Install-Uv {
     if (Get-Command uv -ErrorAction SilentlyContinue) { Say "uv 已安装：$(uv --version)"; return }
     if (-not $InstallUv) {
         $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
         if ($interactive) {
-            $ans = Read-Host '未找到 uv。是否用官方安装器安装（irm https://astral.sh/uv/install.ps1 | iex）？[y/N]'
+            $ans = Read-Host '未找到 uv。是否用官方安装器安装（irm https://astral.sh/uv/install.ps1 | iex）？选 N 则改用本机 Python 3.12+ 建 .venv [y/N]'
             if ($ans -match '^(y|yes)$') { $script:InstallUv = $true }
         }
-        if (-not $InstallUv) { Die '需要 uv：请先安装（https://docs.astral.sh/uv/），或加 -InstallUv 让本脚本安装' }
+        if (-not $InstallUv) {
+            $script:Python = Find-Python
+            if (-not $script:Python) { Die '未找到 uv，也未找到 Python 3.12+（依次查找 py -3.13、py -3.12、python）：请安装 Python 3.12+（https://www.python.org/downloads/）后重试，或加 -InstallUv 让本脚本安装 uv' }
+            $script:UseUv = $false
+            $pre = @($script:Python | Select-Object -Skip 1)
+            Say "未找到 uv，改用 $($script:Python -join ' ')（$(& $script:Python[0] @pre --version)）在技能目录建 .venv"
+            return
+        }
     }
     Say '安装 uv'
     Write-Host '    + irm https://astral.sh/uv/install.ps1 | iex'
@@ -217,8 +241,14 @@ function Invoke-Install {
     }
     if (-not $DryRun -and -not (Test-Path -LiteralPath (Join-Path $SkillSrc 'SKILL.md'))) { Die "$(Join-Path $SkillSrc 'SKILL.md') 不存在，代码目录不完整" }
 
-    Say '安装 Python 3.12 与锁定依赖（uv.lock）'
-    Invoke-Native uv @('sync', '--frozen', '--python', '3.12', '--directory', $SkillSrc)
+    if ($UseUv) {
+        Say '安装 Python 3.12 与锁定依赖（uv.lock）'
+        Invoke-Native uv @('sync', '--frozen', '--python', '3.12', '--directory', $SkillSrc)
+    } else {
+        Say '创建虚拟环境并安装运行期依赖（requirements.txt，与 uv.lock 版本一致）'
+        Invoke-Native $Python[0] (@($Python | Select-Object -Skip 1) + @('-m', 'venv', (Join-Path $SkillSrc '.venv')))
+        Invoke-Native $VenvPython @('-m', 'pip', 'install', '-r', (Join-Path $SkillSrc 'requirements.txt'))
+    }
 
     $agentList = Resolve-Agents
     Say "注册到 agent：$($agentList -join ', ')"
@@ -234,14 +264,21 @@ function Invoke-Install {
                 if (-not (Test-Path -LiteralPath $sp)) { Die "缺少核心脚本: $sp" }
             }
         }
-        Say '离线快速自检（文档契约 + 工具测试，不访问网络）'
-        Invoke-Native uv @('run', '--frozen', '--directory', $SkillSrc, 'pytest', '-q', 'tests/test_docs_contract.py', 'tests/test_tools.py')
-        Say '环境自检 doctor（数据源连通项需要联网，失败不影响安装）'
+        $doctorExe = 'uv'
         $doctorArgs = @('run', '--frozen', '--directory', $SkillSrc, 'python', 'scripts/doctor.py')
+        if ($UseUv) {
+            Say '离线快速自检（文档契约 + 工具测试，不访问网络）'
+            Invoke-Native uv @('run', '--frozen', '--directory', $SkillSrc, 'pytest', '-q', 'tests/test_docs_contract.py', 'tests/test_tools.py')
+        } else {
+            Say '跳过离线 pytest 自检（未使用 uv，pytest 不在 requirements.txt 中）'
+            $doctorExe = $VenvPython
+            $doctorArgs = @([IO.Path]::Combine($SkillSrc, 'scripts', 'doctor.py'))
+        }
+        Say '环境自检 doctor（数据源连通项需要联网，失败不影响安装）'
         if ($Project) { $doctorArgs += @('--project', $Project) }
-        Write-Host "    + uv $($doctorArgs -join ' ')"
+        Write-Host "    + $doctorExe $($doctorArgs -join ' ')"
         if (-not $DryRun) {
-            & uv @doctorArgs
+            & $doctorExe @doctorArgs
             if ($LASTEXITCODE -ne 0) { Warn 'doctor 有未通过项，请按上面的建议处理' }
         }
     }
