@@ -27,6 +27,7 @@ _CONFLICT_ID_RE = re.compile(r"\bC\d+\b")
 # 剔除非价格数字的模式：日期、证据编号、指标参数名、百分比、百分点、样本量、天数/根数/手数/股数/倍数/ATR/分数/基点
 _NON_PRICE_PATTERNS = (
     re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
+    re.compile(r"\b(?:RSI|ATR|ADX|RVOL|BBW|HV|IC|BSS|Brier)\d*\s*(?:\(\s*\d+\s*\))?\s*(?:[=:：约为达]|处于|位于)\s*[+-]?\d+(?:\.\d+)?", re.I),
     re.compile(r"\b(?:E|C|MA|EMA|SMA|RSI|ATR|ADX|RVOL|TP|Wave|W)\d+\b", re.I),
     re.compile(r"\b(?:Supertrend|MACD)\s*\(\s*\d+(?:\s*,\s*\d+)*\s*\)", re.I),
     re.compile(r"\b(?:RSI|ATR|ADX|RVOL|MA|EMA|SMA)\s*\(\s*\d+\s*\)", re.I),

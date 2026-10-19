@@ -411,7 +411,14 @@ def load_bundle(
 ) -> MarketDataBundle:
     """统一多市场取数入口：先加载或获取标的与对应市场基准指数（先大盘、后个股），执行点位时间对齐与复权处理。"""
     if input_path is not None:
-        raw_data = json.loads(Path(input_path).read_text(encoding="utf-8"))
+        try:
+            raw_text = Path(input_path).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ValueError(f"Cannot read --input file {input_path}: {exc}") from exc
+        try:
+            raw_data = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON in --input file {input_path}: {exc}") from exc
         if isinstance(raw_data, dict) and "schema_version" in raw_data and "target" in raw_data:
             target = raw_data.get("target") or {}
             inst = target.get("instrument")

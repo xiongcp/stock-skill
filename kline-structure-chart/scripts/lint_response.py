@@ -89,15 +89,14 @@ def lint_agent_response(
 
     # 1. UNAVAILABLE 检查
     if q_status == "UNAVAILABLE":
-        price_hits = list(_CONTEXT_PRICE_RE.finditer(text))
-        if price_hits:
+        if any(pat.search(text) for pat in (_CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_PRICE_BEFORE_RE)):
             errors.append("quality.status == UNAVAILABLE 时，严禁在回复中输出任何具体价格点位或交易计划")
         return errors
 
     # 2. PARTIAL 告警置顶检查
     if q_status == "PARTIAL":
         head = text[:500]
-        if not any(tok in head for tok in ("PARTIAL", "数据说明", "告警", "缺少大盘", "注意")):
+        if not any(tok in head for tok in ("PARTIAL", "数据说明", "数据质量", "缺少大盘", "来源待核验", "本地文件")):
             errors.append("quality.status == PARTIAL 时，必须在回复前部披露数据质量告警")
 
     # 3. 风控否决置顶检查
@@ -124,6 +123,18 @@ def lint_agent_response(
         errors.append(
             f"检测到未经校验的概率/确定性表述: {hit!r}（只允许引用历史条件频率、通过校验的主观研判、带 95% 区间的回测胜率与区间覆盖率）"
         )
+    allowed_hf_pcts: list[float] = []
+    rs_obj = report.get("rule_scenarios") or {}
+    for sc_item in list(rs_obj.get("scenarios") or []) + [rs_obj.get(k) for k in ("bull", "neutral", "bear") if isinstance(rs_obj.get(k), dict)]:
+        hf = (sc_item or {}).get("historical_frequency") or {}
+        for fk in ("raw_target_freq_pct", "shrunk_target_freq_pct", "target_freq_pct"):
+            if hf.get(fk) is not None:
+                allowed_hf_pcts.append(float(hf[fk]))
+    if allowed_hf_pcts:
+        for m_hf in re.finditer(r"历史条件频率\s*(?:为|是|约)?\s*(\d+(?:\.\d+)?)\s*%", text):
+            val_hf = float(m_hf.group(1))
+            if not any(abs(val_hf - p) <= 0.25 for p in allowed_hf_pcts):
+                errors.append(f"回复中的历史条件频率 {val_hf}% 与 result.json 不一致")
 
     # 5. 价格白名单检查（针对带价格语境的数值）
     pack = report.get("judgment_pack") or build_judgment_pack(report)

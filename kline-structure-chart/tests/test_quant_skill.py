@@ -1658,6 +1658,14 @@ def test_lint_response_catches_contract_violations_and_passes_clean_report(repla
     assert len(errs_bad) >= 2
     assert any("上涨概率" in e or "规则分" in e for e in errs_bad)
     assert any("9123.45" in e for e in errs_bad)
+
+    # UNAVAILABLE 时任何带交易动作的价格（如 "1300.00 买入"）与捏造历史条件频率均被拦截
+    unavail_rep = copy.deepcopy(rep)
+    unavail_rep["quality"]["status"] = "UNAVAILABLE"
+    errs_unavail = lint_agent_response("建议在 1300.00 买入，不构成投资建议。", unavail_rep)
+    assert any("UNAVAILABLE" in e for e in errs_unavail)
+    errs_fake_hf = lint_agent_response("风控否决。该情景历史条件频率 99.9%，不构成投资建议。", rep)
+    assert any("历史条件频率" in e for e in errs_fake_hf)
     assert any("免责声明" in e for e in errs_bad)
 
 
