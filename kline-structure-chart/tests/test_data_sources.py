@@ -120,6 +120,29 @@ def test_too_short_history_after_as_of_is_rejected(replay_recorded) -> None:
         load_bundle({**REQ_CN, "as_of": first_days[50]["day"]}, now=NOW)
 
 
+def test_input_bundle_honors_as_of_and_incomplete_bar(tmp_path: Path, replay_recorded) -> None:
+    """bundle dict 输入也必须走与联网路径相同的 as_of 与未收盘隔离。"""
+    bars = load_recorded("sina_daily/sh600519.json")
+    instrument = data_gateway.resolve_instrument("600519.SH", market="CN", asset_type="equity")
+    bundle = {
+        "schema_version": "5.3.0",
+        "market": "CN",
+        "target": {"instrument": instrument, "bars": bars, "intraday": None},
+        "benchmark": None,
+    }
+    path = tmp_path / "bundle.json"
+    path.write_text(json.dumps(bundle, ensure_ascii=False), encoding="utf-8")
+    loaded = load_bundle(
+        {**REQ_CN, "as_of": "2024-08-01"},
+        input_path=path,
+        allow_network=False,
+        now=NOW,
+    )
+    assert loaded["target"]["bars"][-1]["day"] <= "2024-08-01"
+    assert all(b["day"] <= "2024-08-01" for b in loaded["target"]["bars"])
+    assert loaded["target"]["intraday"] is None
+
+
 def test_benchmark_failure_blocks_analysis(monkeypatch: pytest.MonkeyPatch, replay_recorded) -> None:
     original = data_gateway.fetch_sina_daily_bars
 

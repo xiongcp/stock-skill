@@ -413,10 +413,28 @@ def load_bundle(
     if input_path is not None:
         raw_data = json.loads(Path(input_path).read_text(encoding="utf-8"))
         if isinstance(raw_data, dict) and "schema_version" in raw_data and "target" in raw_data:
-            validate_bars(raw_data["target"]["bars"], "bundle.target.bars")
-            if raw_data.get("benchmark") and raw_data["benchmark"].get("bars"):
-                validate_bars(raw_data["benchmark"]["bars"], "bundle.benchmark.bars")
-            return raw_data  # type: ignore[return-value]
+            target = raw_data.get("target") or {}
+            inst = target.get("instrument")
+            if not isinstance(inst, dict) or not inst.get("market"):
+                raise ValueError("input bundle target.instrument.market is required")
+            target_bars = [dict(b) for b in target.get("bars") or []]
+            validate_bars(target_bars, "bundle.target.bars")
+            as_of = request.get("as_of")
+            if as_of:
+                target_bars = [b for b in target_bars if str(b["day"]) <= str(as_of)[:10]]
+            target_bars, intraday = split_incomplete_last_bar(target_bars, inst["market"], now)
+            if len(target_bars) < MIN_LIVE_BARS:
+                raise RuntimeError(f"历史长度不足 ({len(target_bars)} < {MIN_LIVE_BARS})")
+            out = dict(raw_data)
+            out["target"] = {**target, "bars": target_bars, "intraday": intraday or target.get("intraday")}
+            benchmark = raw_data.get("benchmark")
+            if benchmark and benchmark.get("bars"):
+                bench_bars = [dict(b) for b in benchmark["bars"]]
+                if as_of:
+                    bench_bars = [b for b in bench_bars if str(b["day"]) <= str(as_of)[:10]]
+                validate_bars(bench_bars, "bundle.benchmark.bars")
+                out["benchmark"] = {**benchmark, "bars": bench_bars}
+            return out  # type: ignore[return-value]
         if isinstance(raw_data, list):
             inst = resolve_instrument(
                 request.get("symbol", "000001.SH"),
