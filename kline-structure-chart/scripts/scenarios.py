@@ -122,7 +122,7 @@ def detect_impulse_wave(
                 rule_w4 = p4["price"] > p1["price"]
                 if w1 / max(p0["price"], 1e-6) >= min_leg and rule_w2 and rule_w3 and rule_w4 and last_c > p4["price"]:
                     t1618 = _money(p2["price"] + 1.618 * w1)
-                    w5_target = _money(max(t1618, p4["price"] + w1, p3["price"] * (1.0 + 0.8 * atr)))
+                    w5_target = _money(max(t1618, p4["price"] + w1, p3["price"] * (1.0 + 0.8 * atr), last_c * (1.0 + 0.8 * atr)))
                     return {
                         "direction": "up",
                         "label": "上升推动 5 浪（第 5 浪进行中）",
@@ -150,7 +150,7 @@ def detect_impulse_wave(
                 rule_w4 = p4["price"] < p1["price"]
                 if w1 / max(p0["price"], 1e-6) >= min_leg and rule_w2 and rule_w3 and rule_w4 and last_c < p4["price"]:
                     t1618 = _money(max(0.01, p2["price"] - 1.618 * w1))
-                    w5_target = _money(min(t1618, max(0.01, p4["price"] - w1), p3["price"] * (1.0 - 0.8 * atr)))
+                    w5_target = _money(min(t1618, max(0.01, p4["price"] - w1), p3["price"] * (1.0 - 0.8 * atr), max(0.01, last_c * (1.0 - 0.8 * atr))))
                     return {
                         "direction": "down",
                         "label": "下降推动 5 浪（第 5 浪进行中）",
@@ -179,8 +179,11 @@ def detect_impulse_wave(
             w3_now = max(last_hi, last_c) - p2["price"]
             if w1 / max(p0["price"], 1e-6) >= min_leg and 0.236 <= retrace < 0.95 and last_c > p1["price"] and w3_now >= 0.8 * w1:
                 t1618 = _money(p2["price"] + 1.618 * w1)
-                if t1618 <= last_c * (1.0 + 0.3 * atr):
-                    t1618 = _money(p2["price"] + 2.0 * w1)
+                for mult in (2.0, 2.618, 3.618):
+                    if t1618 <= last_c * (1.0 + 0.5 * atr):
+                        t1618 = _money(p2["price"] + mult * w1)
+                if t1618 <= last_c * (1.0 + 0.5 * atr):
+                    t1618 = _money(last_c * (1.0 + 1.2 * atr))
                 return {
                     "direction": "up",
                     "label": "上升推动浪（第 3 浪推进中）",
@@ -203,8 +206,11 @@ def detect_impulse_wave(
             w3_now = p2["price"] - min(last_lo, last_c)
             if w1 / max(p0["price"], 1e-6) >= min_leg and 0.236 <= retrace < 0.95 and last_c < p1["price"] and w3_now >= 0.8 * w1:
                 t1618 = _money(max(0.01, p2["price"] - 1.618 * w1))
-                if t1618 >= last_c * (1.0 - 0.3 * atr):
-                    t1618 = _money(max(0.01, p2["price"] - 2.0 * w1))
+                for mult in (2.0, 2.618, 3.618):
+                    if t1618 >= last_c * (1.0 - 0.5 * atr):
+                        t1618 = _money(max(0.01, p2["price"] - mult * w1))
+                if t1618 >= last_c * (1.0 - 0.5 * atr):
+                    t1618 = _money(max(0.01, last_c * (1.0 - 1.2 * atr)))
                 return {
                     "direction": "down",
                     "label": "下降推动浪（第 3 浪推进中）",
@@ -407,16 +413,16 @@ def build_scenarios_with_base_rates(
     up_impulse = impulse is not None and impulse["direction"] == "up" and ref >= mid_rail
     if channel_active or up_impulse or (ref >= ma20 >= ma60 and ref >= mid_rail):
         strict_1 = bool(channel_active or up_impulse)
-        ext_u = _money(max(u + max(0.0, su) * horizon, bull_base["target_price"]))
+        ext_u = _money(max(u + max(0.0, su) * horizon, bull_base["target_price"], ref * (1.0 + 0.8 * atr)))
         if up_impulse and impulse is not None:
-            tgt_1 = float(impulse["wave3_1618_target"])
+            tgt_1 = _money(max(float(impulse["wave3_1618_target"]), ref * (1.0 + 0.8 * atr)))
             src_1 = f"{impulse['label']} · 1.618×浪1 ({fp(tgt_1)})"
             rat_1 = f"{impulse['label']}，收盘 {fp(ref)} 位于通道中轨 {fp(mid_rail)} 之上"
         else:
             tgt_1 = ext_u
             src_1 = f"通道上轨外推 {fp(ext_u)}（基准目标 {fp(bull_base['target_price'])}）"
             rat_1 = f"{pat_name}进行中，收盘 {fp(ref)} 站稳通道中轨 {fp(mid_rail)} 与 MA20 ({fp(ma20)}) 之上"
-        inv_1 = _money(min(l, s1))
+        inv_1 = _money(min(l, s1, ref * (1.0 - 0.5 * atr)))
         candidates.append(
             build_item(
                 sc_id="TREND_CONTINUATION",
@@ -424,7 +430,7 @@ def build_scenarios_with_base_rates(
                 precondition_met=strict_1,
                 applicability_score=88.0 if strict_1 else 62.0,
                 rationale=rat_1,
-                raw_trigger_price=max(mid_rail, ma20),
+                raw_trigger_price=max(mid_rail, ma20) if strict_1 else _money(max(r1, ref * (1.0 + 0.55 * atr))),
                 pending_trigger_text=f"日线收盘站稳通道中轨 {fp(mid_rail)} 之上并突破 {fp(r1)}",
                 active_trigger_text=f"已在进行中（收盘 {fp(ref)} 位于通道中轨 {fp(mid_rail)} 之上，沿通道推进）",
                 mid_waypoint_price=max(ref, r1),
@@ -438,18 +444,21 @@ def build_scenarios_with_base_rates(
         )
 
     # 2. BREAKOUT_RETEST（突破回踩）
-    broke_neck_up = any(ref >= ph * 0.998 and min(float(b["close"]) for b in recent5) < ph for ph in piv_hs[-3:])
-    broke_up_recent = (
-        (st_code == "above" and status_run_bars <= 5)
-        or (ref >= prev20_hi * 0.998 and len(sview) >= 20)
-        or broke_neck_up
-    )
+    broken_up_candidates: list[float] = []
+    if st_code == "above" and status_run_bars <= 5 and not struct["expired"] and ref >= u:
+        broken_up_candidates.append(u)
+    if len(sview) >= 20 and ref >= prev20_hi * 0.998 and min(float(b["close"]) for b in recent5) < prev20_hi:
+        broken_up_candidates.append(min(ref, prev20_hi))
+    for ph in piv_hs[-3:]:
+        if ref >= ph * 0.998 and min(float(b["close"]) for b in recent5) < ph:
+            broken_up_candidates.append(min(ref, ph))
+    broke_up_recent = bool(broken_up_candidates)
     near_breakout = (not broke_up_recent) and (abs(r1 / ref - 1.0) <= max(0.035, 1.8 * atr) or abs(u / ref - 1.0) <= 1.5 * atr)
     strict_2 = bool(broke_up_recent)
-    meas_target = _money((u if broke_up_recent else r1) + (min(height, ref * 3.0 * atr) if height > 0 else ref * 2.2 * atr))
-    tgt_2 = max(meas_target, float(bull_base["target_price"]))
-    rail_ref = u if (broke_up_recent and not struct["expired"]) else r1
-    inv_2 = _money(rail_ref - 0.5 * atr_abs)
+    rail_ref = _money(max(broken_up_candidates)) if broke_up_recent else _money(max(r1, ref * (1.0 + 0.55 * atr)))
+    meas_target = _money(rail_ref + (min(height, ref * 3.0 * atr) if height > 0 else ref * 2.2 * atr))
+    tgt_2 = _money(max(meas_target, float(bull_base["target_price"]), ref * (1.0 + 0.8 * atr)))
+    inv_2 = _money(min(rail_ref - 0.5 * atr_abs, ref - 0.4 * atr_abs))
     candidates.append(
         build_item(
             sc_id="BREAKOUT_RETEST",
@@ -461,7 +470,7 @@ def build_scenarios_with_base_rates(
                 if strict_2
                 else f"现价距上方突破位 {fp(r1)}（{r1_src}）约 {abs(r1 / ref - 1.0) / max(atr, 1e-6):.1f} 个 ATR"
             ),
-            raw_trigger_price=rail_ref if strict_2 else r1,
+            raw_trigger_price=rail_ref,
             pending_trigger_text=bull_base["trigger"],
             active_trigger_text=f"已在进行中（已突破 {fp(rail_ref)}，回踩守住 {fp(inv_2)} 即确认有效）",
             mid_waypoint_price=float(bull_base["retest_hold"]),
@@ -475,7 +484,7 @@ def build_scenarios_with_base_rates(
     )
 
     # 3. FALSE_BREAKOUT_REVERSAL（假突破回落）
-    poked_above = (
+    poked_above = st_code != "below" and ref >= mid_rail - 0.3 * atr_abs and (
         (recent_hi10 >= u * 0.997 and ref < u and not struct["expired"])
         or (recent_hi10 >= prev20_hi * 0.998 and ref < prev20_hi)
         or any(recent_hi10 >= ph * 0.998 and ref < ph for ph in piv_hs[-3:])
@@ -484,8 +493,21 @@ def build_scenarios_with_base_rates(
     strict_3 = bool(poked_above or low_vol_break)
     near_upper_resist = ref >= mid_rail and abs(u - ref) <= 1.6 * atr_abs
     if strict_3 or near_upper_resist:
-        other_rail = _money(max(l, s1) if l < ref * (1.0 - 0.5 * atr) else float(bear_base["target_price"]))
-        brk_cap = _money(max(r1, u if not struct["expired"] else r1, recent_hi5))
+        cand_dn = [
+            x
+            for x in (l if not struct["expired"] else None, s1, float(bear_base["target_price"]))
+            if x is not None and x <= ref * (1.0 - 0.5 * atr)
+        ]
+        other_rail = _money(max(cand_dn) if cand_dn else min(float(bear_base["target_price"]), max(0.01, ref * (1.0 - 0.8 * atr))))
+        tested_resist = u if (not struct["expired"] and abs(u - ref) <= 2.5 * atr_abs) else r1
+        brk_cap = _money(max(recent_hi5, min(r1, tested_resist) if strict_3 else tested_resist, ref + 0.4 * atr_abs))
+        trig_3 = _money(
+            min(
+                u if not struct["expired"] else float(bull_base["retest_hold"]),
+                float(bull_base["retest_hold"]),
+                ref * (1.0 - 0.55 * atr),
+            )
+        )
         candidates.append(
             build_item(
                 sc_id="FALSE_BREAKOUT_REVERSAL",
@@ -497,7 +519,7 @@ def build_scenarios_with_base_rates(
                     if strict_3
                     else f"现价逼近上轨/前高阻力 {fp(r1)}，若冲高缺量跌回 {fp(bull_base['retest_hold'])} 下方则触发假突破"
                 ),
-                raw_trigger_price=u if strict_3 else float(bull_base["retest_hold"]),
+                raw_trigger_price=brk_cap if poked_above else trig_3,
                 pending_trigger_text=f"冲高受阻于 {fp(r1)} 且日线收盘跌回 {fp(bull_base['retest_hold'])} 下方",
                 active_trigger_text=f"已在进行中（冲高 {fp(recent_hi5)} 后已跌回轨道内，受制于 {fp(brk_cap)}）",
                 mid_waypoint_price=mid_rail if mid_rail < ref else float(neut_base["range"][0]),
@@ -514,6 +536,9 @@ def build_scenarios_with_base_rates(
     dist_u_atr = (max(u, r1) - ref) / atr_abs
     dist_l_atr = (ref - min(l, s1)) / atr_abs
     strict_4 = bool(st_code == "inside" and dist_u_atr >= 1.0 and dist_l_atr >= 1.0)
+    neut_trig_raw = float(neut_base["target_price"])
+    if not strict_4 and abs(neut_trig_raw / ref - 1.0) < min_trig_dist:
+        neut_trig_raw = _money(ref * (1.0 + 0.55 * atr) if neut_trig_raw >= ref else ref * (1.0 - 0.55 * atr))
     candidates.append(
         build_item(
             sc_id="RANGE_OSCILLATION",
@@ -525,7 +550,7 @@ def build_scenarios_with_base_rates(
                 if strict_4
                 else f"条件备选（前提未成立）：当前距轨道/支撑边界不足 1.0 ATR 或已越出轨道，仅当回到 {fp(neut_base['range'][0])} ~ {fp(neut_base['range'][1])} 区间内才按震荡处理"
             ),
-            raw_trigger_price=float(neut_base["target_price"]),
+            raw_trigger_price=neut_trig_raw,
             pending_trigger_text=neut_base["condition"],
             active_trigger_text=f"已在进行中（{neut_base['condition']}，在 {fp(neut_base['range'][0])} ~ {fp(neut_base['range'][1])} 内运行）",
             mid_waypoint_price=float(neut_base["range"][1]),
@@ -539,12 +564,20 @@ def build_scenarios_with_base_rates(
     )
 
     # 5. BREAKDOWN_DECLINE（破位下行）
-    broke_piv_l = any(ref <= pl * 1.002 for pl in piv_ls[-2:])
-    broke_dn_recent = st_code == "below" or (ref <= prev20_lo * 1.002 and len(sview) >= 20) or broke_piv_l
+    broken_dn_candidates: list[float] = []
+    if st_code == "below" and not struct["expired"] and ref <= l:
+        broken_dn_candidates.append(l)
+    if len(sview) >= 20 and ref <= prev20_lo * 1.002 and max(float(b["close"]) for b in recent5) > prev20_lo:
+        broken_dn_candidates.append(max(ref, prev20_lo))
+    for pl in piv_ls[-2:]:
+        if ref <= pl * 1.002 and max(float(b["close"]) for b in recent5) > pl:
+            broken_dn_candidates.append(max(ref, pl))
+    broke_dn_recent = bool(broken_dn_candidates)
     near_support = ref <= mid_rail or abs(ref / s1 - 1.0) <= max(0.035, 1.8 * atr)
     strict_5 = bool(broke_dn_recent)
-    dn_ref = l if (broke_dn_recent and not struct["expired"]) else s1
-    inv_5 = _money(dn_ref + 0.4 * atr_abs)
+    dn_ref = _money(min(broken_dn_candidates)) if broke_dn_recent else _money(min(s1, ref * (1.0 - 0.55 * atr)))
+    inv_5 = _money(max(dn_ref + 0.4 * atr_abs, ref + 0.4 * atr_abs))
+    tgt_5 = _money(min(float(bear_base["target_price"]), max(0.01, ref * (1.0 - 0.8 * atr))))
     candidates.append(
         build_item(
             sc_id="BREAKDOWN_DECLINE",
@@ -556,12 +589,12 @@ def build_scenarios_with_base_rates(
                 if strict_5
                 else f"现价距下方支撑位 {fp(s1)}（{s1_src}）约 {abs(ref / s1 - 1.0) / max(atr, 1e-6):.1f} 个 ATR"
             ),
-            raw_trigger_price=dn_ref if strict_5 else s1,
+            raw_trigger_price=dn_ref,
             pending_trigger_text=bear_base["trigger"],
             active_trigger_text=f"已在进行中（已收盘跌破 {fp(dn_ref)}，反抽受制于 {fp(inv_5)}）",
             mid_waypoint_price=float(bear_base["rebound_cap"]),
             mid_step_label=f"反抽 {fp(bear_base['rebound_cap'])}",
-            target_price=float(bear_base["target_price"]),
+            target_price=tgt_5,
             target_source_detail=f"形态高度 / 前低（{bear_base['target_source']}）",
             invalidation_price=inv_5,
             invalidation_text=f"收盘收回破位位 {fp(inv_5)} 上方",
@@ -597,8 +630,26 @@ def build_scenarios_with_base_rates(
         strict_6 = bool(near_100 and exhaustion)
         if strict_6 or (0.65 <= c_ratio <= 1.75):
             rev_dir = "BULLISH" if c_dir == "down" else "BEARISH"
-            lvl_1618 = _money(b_end_p - 1.618 * a_span) if c_dir == "down" else _money(b_end_p + 1.618 * a_span)
+            lvl_1618 = (
+                _money(min(b_end_p - 1.618 * a_span, ref * (1.0 - 0.5 * atr)))
+                if c_dir == "down"
+                else _money(max(b_end_p + 1.618 * a_span, ref * (1.0 + 0.5 * atr)))
+            )
+            tgt_6 = (
+                _money(max(b_end_p, ref * (1.0 + 0.8 * atr)))
+                if rev_dir == "BULLISH"
+                else _money(min(b_end_p, max(0.01, ref * (1.0 - 0.8 * atr))))
+            )
             trig_6 = _money(ref * (1.0 + 0.55 * atr)) if rev_dir == "BULLISH" else _money(ref * (1.0 - 0.55 * atr))
+            raw_trig_6 = (
+                r1
+                if (rev_dir == "BULLISH" and r1 >= ref * (1.0 + 0.55 * atr) and abs(r1 / ref - 1.0) <= 1.5 * atr)
+                else (
+                    s1
+                    if (rev_dir == "BEARISH" and s1 <= ref * (1.0 - 0.55 * atr) and abs(s1 / ref - 1.0) <= 1.5 * atr)
+                    else trig_6
+                )
+            )
             candidates.append(
                 build_item(
                     sc_id="C_WAVE_REVERSAL",
@@ -606,19 +657,17 @@ def build_scenarios_with_base_rates(
                     precondition_met=strict_6,
                     applicability_score=89.0 if strict_6 else 65.0,
                     rationale=f"{c_cand['label']} C/A 已达 {c_ratio:.2f} 倍（接近 1.0×A），RSI14={rsi_now:.1f}",
-                    raw_trigger_price=r1 if (rev_dir == "BULLISH" and abs(r1 / ref - 1.0) <= 1.5 * atr) else (
-                        s1 if (rev_dir == "BEARISH" and abs(s1 / ref - 1.0) <= 1.5 * atr) else trig_6
-                    ),
+                    raw_trigger_price=raw_trig_6,
                     pending_trigger_text=(
-                        f"C 浪在 1.0×A 附近企稳并放量站上 {fp(min(r1, trig_6))}"
+                        f"C 浪在 1.0×A 附近企稳并放量站上 {fp(raw_trig_6)}"
                         if rev_dir == "BULLISH"
-                        else f"C 浪在 1.0×A 附近受阻并收盘跌破 {fp(max(s1, trig_6))}"
+                        else f"C 浪在 1.0×A 附近受阻并收盘跌破 {fp(raw_trig_6)}"
                     ),
                     active_trigger_text=f"已在进行中（C/A={c_ratio:.2f} 已在 1.0×A 附近出现反转K线）",
-                    mid_waypoint_price=_money(0.5 * (ref + b_end_p)),
-                    mid_step_label=f"反抽 {fp(0.5 * (ref + b_end_p))}",
-                    target_price=b_end_p,
-                    target_source_detail=f"B 浪终点 {fp(b_end_p)} ({c_cand['b_end']['day'][5:]})",
+                    mid_waypoint_price=_money(0.5 * (ref + tgt_6)),
+                    mid_step_label=f"反抽 {fp(0.5 * (ref + tgt_6))}",
+                    target_price=tgt_6,
+                    target_source_detail=f"B 浪终点 {fp(tgt_6)} ({c_cand['b_end']['day'][5:]})",
                     invalidation_price=lvl_1618,
                     invalidation_text=(
                         f"C 浪继续创新低超过 1.618×A（跌破 {fp(lvl_1618)}）"
@@ -634,9 +683,10 @@ def build_scenarios_with_base_rates(
     strict_7 = bool(rsi_now < 30.0 or dev_ma20_atr >= 2.0 or (rsi_now <= 35.0 and dev_ma20_atr >= 1.5))
     if strict_7 or (rsi_now <= 40.0 and dev_ma20_atr >= 1.1):
         fib_382 = next((lv["price"] for lv in fibs.get("retracements", []) if abs(lv["ratio"] - 0.382) < 0.01), None)
-        bounce_tgt = _money(ma20 if ma20 > ref * (1.0 + 0.5 * atr) else (fib_382 or r1))
+        cand_bounce = [x for x in (ma20, fib_382, r1) if x is not None and x > ref * (1.0 + 0.5 * atr)]
+        bounce_tgt = _money(min(cand_bounce) if cand_bounce else max(ma20, r1, ref * (1.0 + 1.2 * atr)))
         inv_7 = _money(min(recent_lo5, ref * (1.0 - 0.8 * atr)))
-        trig_7 = _money(min(r1, ref * (1.0 + 0.55 * atr)))
+        trig_7 = _money(min(r1, ref * (1.0 + 0.8 * atr)) if r1 >= ref * (1.0 + 0.55 * atr) else ref * (1.0 + 0.55 * atr))
         candidates.append(
             build_item(
                 sc_id="OVERSOLD_BOUNCE",
@@ -661,12 +711,11 @@ def build_scenarios_with_base_rates(
     is_converging = any(k in pat_name for k in ("三角", "楔形", "收敛"))
     strict_8 = bool(
         is_converging
-        and (
-            (apex_ahead is not None and 0 <= int(apex_ahead) <= 10)
-            or (struct.get("expired") and (u - l) / atr_abs <= 3.5)
-        )
+        and not struct.get("expired")
+        and apex_ahead is not None
+        and 0.0 <= float(apex_ahead) <= 10.0
     )
-    if strict_8 or (is_converging and apex_ahead is not None and 0 <= int(apex_ahead) <= 18):
+    if strict_8 or (is_converging and not struct.get("expired") and apex_ahead is not None and 0.0 <= float(apex_ahead) <= 18.0):
         span_h = height if height > 0 else 2.5 * atr_abs
         up_apex_tgt = _money(max(r1 + span_h * 0.65, float(bull_base["target_price"])))
         dn_apex_tgt = _money(min(max(0.01, s1 - span_h * 0.65), float(bear_base["target_price"])))

@@ -1246,6 +1246,22 @@ def test_o3_20_multi_scenario_engine_diversity_active_trigger_and_impulse_rules(
                     assert s["status"] == "ACTIVE" and s["status_cn"] == "已在进行中"
                     assert s["trigger_price"] is None
                     active_found = True
+                ref_c = float(layer["last_c"])
+                if s["direction"] == "BULLISH":
+                    assert s["target_price"] > ref_c, f"{sym}@{cut} {s['id']} 看多目标 {s['target_price']} <= 现价 {ref_c}"
+                    if s["invalidation_price"] is not None:
+                        assert s["invalidation_price"] < ref_c, f"{sym}@{cut} {s['id']} 看多失效位 {s['invalidation_price']} >= 现价 {ref_c}"
+                elif s["direction"] == "BEARISH":
+                    assert s["target_price"] < ref_c, f"{sym}@{cut} {s['id']} 看空目标 {s['target_price']} >= 现价 {ref_c}"
+                    if s["invalidation_price"] is not None:
+                        assert s["invalidation_price"] > ref_c, f"{sym}@{cut} {s['id']} 看空失效位 {s['invalidation_price']} <= 现价 {ref_c}"
+                if s["id"] == "APEX_BREAKOUT":
+                    assert not layer["wedge"].get("expired")
+                    assert layer["wedge"].get("apex_bars_ahead") is not None and float(layer["wedge"]["apex_bars_ahead"]) >= 0.0
+                if s["id"] == "BREAKDOWN_DECLINE" and s["status"] == "ACTIVE":
+                    assert s["reference_trigger_price"] >= ref_c
+                if s["id"] == "BREAKOUT_RETEST" and s["status"] == "ACTIVE":
+                    assert s["reference_trigger_price"] <= ref_c
             imp = proj.get("impulse_wave")
             if imp is not None:
                 impulse_found = True
@@ -1253,6 +1269,11 @@ def test_o3_20_multi_scenario_engine_diversity_active_trigger_and_impulse_rules(
                 assert rules["wave2_above_wave1_start"] is True
                 assert rules["wave3_not_shortest"] is True
                 assert rules["wave4_outside_wave1"] is True
+                ref_c = float(layer["last_c"])
+                if imp["direction"] == "up":
+                    assert imp["wave3_1618_target"] > ref_c
+                else:
+                    assert imp["wave3_1618_target"] < ref_c
 
     # 不同标的和截面不能总是同一套三剧本，必须产生多种情景组合
     assert len(signatures) >= 10, f"情景组合过于单一: {signatures}"
