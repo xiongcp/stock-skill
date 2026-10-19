@@ -18,6 +18,14 @@
 - 移除无脚本/无数据可复现的“1,500 股盲测”调参与引用（`scripts/base_rates.py`、`scripts/forecast.py`、`scripts/strategies.py`、`SKILL.md`、`references/interpretation-guide.md`）：恢复 `forecast.py` 为 `references/math-patterns.md` 第 5 节定义的 60 日对数收益 RMS 与 $\lceil (n+1)\alpha \rceil$ 次序统计量，清理文档中无法核实的盲测统计数字。
 - `scripts/lint_response.py` 加强：拦截「上涨概率 70%」「大概率」「胜算」「七成」等未经校验的概率措辞（否定式说明与带 95% 区间的回测胜率、历史条件频率、主观研判、模板数字除外）；价格检查扩展到交易动作前后的数字（如「1330 附近买入」「目标 1440」）；风控否决须出现在回复前 400 个字符内；价格白名单不再收录频率、百分比、根数、比值等非价格字段，并补收反抽上限、回踩位、区间与缺口区等价格字段。`SKILL.md` 自己列出的错误回复示例现在会被拦截。同时修正价格识别会把「1 个交易日」等中文单位前的数字误当价格的问题，并让「规则分不是胜率或上涨概率」之类的否定说明不再误报。
 - 待触发主情景的证伪条件写明「预测期内始终未触发，或触发后出现失效条件」，避免把触发前已经成立的失效条件当成证伪。
+- 全量金融与量化审查修复（`scripts/data_gateway.py`、`scripts/analysis.py`、`scripts/forecast.py`、`scripts/scenarios.py`、`scripts/evaluation.py`、`scripts/score_judgments.py`、`scripts/base_rates.py`、`scripts/judgment.py`、`scripts/market_rules.py`、`scripts/render_html.py`、`scripts/render_structure_chart.py`）：
+  1. 复权动作过滤 `ex_date > as_of`，本地 bundle 输入统一执行 `as_of` 截断与未收盘 K 线隔离，历史回放截面按当时截止日重算基准状态分与相对强弱；
+  2. 修复 `scenario_conditional_fan` 漏乘价格基准 `base_c` 的量纲错误；
+  3. 消除 `scenarios.py` 中触发状态、目标位与失效位的自相矛盾（如看空情景下现价高于失效位、已过期交叉形态触发 `APEX_BREAKOUT` 等）；
+  4. 无前视回放审计 `run_causal_replay_audit` 改为真实对比截断序列与追加极端未来 K 线后的序列；
+  5. `UNAVAILABLE` 时 PNG 与 HTML 屏蔽具体价格点位，并区分 `PARTIAL` 水印文案；
+  6. 回测按 `LONG_CONFIRMED` 与 `WATCH_LONG_SETUP` 分桶独立维护持仓锁，补齐 A 股 T+1 首日保本上移与到期一字跌停顺延；
+  7. 修正 L3 到期打分同向多情景达标归属与未命中兜底偏差，修复证据 `E4` 结构字段读取，支持港美股半日市/提前收市判定与 A 股 T+0 ETF 识别。
 - `examples/` 以 `--as-of 2026-10-16` 用实时行情重新生成；茅台 `judgment.json` 改为 Agent 在预填模板上改写的主观研判（`origin = AGENT`），`reply.md` 与 `SKILL.md` 回复示例同步为新的规则分披露、频率口径与回测数字。
 
 ## [5.3.0] - 2026-10-18

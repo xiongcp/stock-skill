@@ -30,10 +30,10 @@
     },
     "entry_rule": "决策日收盘给出 LONG_CONFIRMED/WATCH_LONG_SETUP 时，次日开盘价落在计划入场区内才成交；出场 = 盘中触及计划硬止损或 TP1 / 盘中触及 +0.90R 且收盘 ≥ +0.30R 后次日起止损上移至 +0.08R 保本位 / 持仓满期触发时间屏障",
     "actions_seen": {
-      "NEUTRAL_HOLD_WAIT": 158,
-      "DEFENSIVE_AVOID": 102,
-      "WATCH_LONG_SETUP": 28,
-      "LONG_CONFIRMED": 13
+      "NEUTRAL_HOLD_WAIT": 157,
+      "DEFENSIVE_AVOID": 103,
+      "WATCH_LONG_SETUP": 27,
+      "LONG_CONFIRMED": 14
     },
     "no_fill_outside_entry_zone": 2,
     "all_long_signals": {
@@ -53,36 +53,36 @@
       "profit_factor": 0.98
     },
     "long_confirmed": {
-      "trades": 3,
-      "cumulative_return_pct": 4.48,
+      "trades": 6,
+      "cumulative_return_pct": 7.46,
       "win_rate_pct": 66.67,
       "win_rate_95ci_pct": [
-        20.77,
-        93.85
+        30.0,
+        90.32
       ],
       "mean_return_95ci_pct": [
-        -3.69,
-        4.32
+        -1.25,
+        3.73
       ],
-      "sharpe": 0.54,
-      "max_drawdown_pct": 3.69,
-      "profit_factor": 2.25
+      "sharpe": 0.78,
+      "max_drawdown_pct": 6.47,
+      "profit_factor": 2.15
     },
     "watch_long_setup": {
-      "trades": 11,
-      "cumulative_return_pct": -5.32,
-      "win_rate_pct": 36.36,
+      "trades": 14,
+      "cumulative_return_pct": -6.91,
+      "win_rate_pct": 35.71,
       "win_rate_95ci_pct": [
-        15.17,
-        64.62
+        16.34,
+        61.24
       ],
       "mean_return_95ci_pct": [
-        -1.95,
-        1.28
+        -1.9,
+        1.04
       ],
-      "sharpe": -0.49,
-      "max_drawdown_pct": 11.42,
-      "profit_factor": 0.69
+      "sharpe": -0.54,
+      "max_drawdown_pct": 12.9,
+      "profit_factor": 0.71
     },
     "buy_and_hold_return_pct": -6.99,
     "veto_reason_counts": {
@@ -92,7 +92,7 @@
       "BENCHMARK_WEAK": 31
     },
     "rule_score_ic": {
-      "spearman": 0.348,
+      "spearman": 0.357,
       "decisions": 301,
       "effective_independent_samples": 20,
       "forward_horizon_bars": 15,
@@ -106,75 +106,75 @@
           38.0
         ],
         "decisions": 97,
-        "mean_forward_return_pct": -2.08,
+        "mean_forward_return_pct": -2.14,
         "median_forward_return_pct": -2.44,
-        "up_share_pct": 30.9
+        "up_share_pct": 29.9
       },
       {
         "range": [
           38.0,
           52.0
         ],
-        "decisions": 99,
-        "mean_forward_return_pct": -0.7,
-        "median_forward_return_pct": -1.14,
-        "up_share_pct": 34.3
+        "decisions": 100,
+        "mean_forward_return_pct": -0.59,
+        "median_forward_return_pct": -1.05,
+        "up_share_pct": 36.0
       },
       {
         "range": [
           52.0,
           65.0
         ],
-        "decisions": 83,
-        "mean_forward_return_pct": 1.8,
-        "median_forward_return_pct": 1.2,
-        "up_share_pct": 65.1
+        "decisions": 81,
+        "mean_forward_return_pct": 1.76,
+        "median_forward_return_pct": 1.19,
+        "up_share_pct": 64.2
       },
       {
         "range": [
           65.0,
           100.0
         ],
-        "decisions": 22,
-        "mean_forward_return_pct": 1.67,
-        "median_forward_return_pct": 0.29,
-        "up_share_pct": 54.5
+        "decisions": 23,
+        "mean_forward_return_pct": 1.68,
+        "median_forward_return_pct": 0.43,
+        "up_share_pct": 56.5
       }
     ],
     "action_forward_returns": {
       "LONG_CONFIRMED": {
-        "decisions": 13,
-        "mean_forward_return_pct": 1.38,
-        "median_forward_return_pct": 0.43,
-        "up_share_pct": 53.8
+        "decisions": 14,
+        "mean_forward_return_pct": 1.41,
+        "median_forward_return_pct": 1.08,
+        "up_share_pct": 57.1
       },
       "WATCH_LONG_SETUP": {
-        "decisions": 28,
-        "mean_forward_return_pct": 1.1,
-        "median_forward_return_pct": 0.22,
-        "up_share_pct": 50.0
+        "decisions": 27,
+        "mean_forward_return_pct": 1.08,
+        "median_forward_return_pct": -0.14,
+        "up_share_pct": 48.1
       },
       "NEUTRAL_HOLD_WAIT": {
-        "decisions": 158,
-        "mean_forward_return_pct": 0.52,
-        "median_forward_return_pct": -0.02,
-        "up_share_pct": 50.0
+        "decisions": 157,
+        "mean_forward_return_pct": 0.53,
+        "median_forward_return_pct": 0.04,
+        "up_share_pct": 50.3
       },
       "DEFENSIVE_AVOID": {
-        "decisions": 102,
+        "decisions": 103,
         "mean_forward_return_pct": -2.11,
-        "median_forward_return_pct": -2.44,
-        "up_share_pct": 29.4
+        "median_forward_return_pct": -2.43,
+        "up_share_pct": 29.1
       }
     },
     "scenario_frequency_brier": {
-      "samples": 832,
-      "brier_score": 0.2235,
-      "climatology_base_rate": 0.3702,
-      "climatology_brier_score": 0.2069,
-      "pooled_climatology_brier_score": 0.2331,
-      "brier_skill_score": -0.0804,
-      "pooled_brier_skill_score": 0.0414,
+      "samples": 673,
+      "brier_score": 0.2145,
+      "climatology_base_rate": 0.373,
+      "climatology_brier_score": 0.2017,
+      "pooled_climatology_brier_score": 0.2339,
+      "brier_skill_score": -0.0635,
+      "pooled_brier_skill_score": 0.0826,
       "discriminative": false,
       "reliability_buckets": [
         {
@@ -194,10 +194,10 @@
             0.4
           ],
           "bucket_pct": "20%~40%",
-          "count": 182,
-          "mean_predicted_freq": 0.3617,
-          "empirical_hit_rate": 0.4945,
-          "calibration_gap": 0.1328
+          "count": 166,
+          "mean_predicted_freq": 0.3603,
+          "empirical_hit_rate": 0.4819,
+          "calibration_gap": 0.1216
         },
         {
           "bucket": [
@@ -205,10 +205,10 @@
             0.6
           ],
           "bucket_pct": "40%~60%",
-          "count": 375,
-          "mean_predicted_freq": 0.4707,
-          "empirical_hit_rate": 0.3627,
-          "calibration_gap": -0.108
+          "count": 285,
+          "mean_predicted_freq": 0.4702,
+          "empirical_hit_rate": 0.3825,
+          "calibration_gap": -0.0877
         },
         {
           "bucket": [
@@ -216,10 +216,10 @@
             0.8
           ],
           "bucket_pct": "60%~80%",
-          "count": 99,
-          "mean_predicted_freq": 0.6215,
-          "empirical_hit_rate": 0.4242,
-          "calibration_gap": -0.1973
+          "count": 50,
+          "mean_predicted_freq": 0.6226,
+          "empirical_hit_rate": 0.48,
+          "calibration_gap": -0.1426
         },
         {
           "bucket": [
@@ -227,36 +227,36 @@
             1.0
           ],
           "bucket_pct": "80%~100%",
-          "count": 37,
+          "count": 33,
           "mean_predicted_freq": 0.8489,
-          "empirical_hit_rate": 0.7838,
-          "calibration_gap": -0.0651
+          "empirical_hit_rate": 0.8182,
+          "calibration_gap": -0.0307
         }
       ],
       "per_scenario": {
         "APEX_BREAKOUT": {
-          "samples": 37,
+          "samples": 33,
           "mean_predicted_freq": 0.8489,
-          "empirical_hit_rate": 0.7838,
-          "brier_score": 0.176,
-          "climatology_brier_score": 0.1695,
-          "brier_skill_score": -0.0385
+          "empirical_hit_rate": 0.8182,
+          "brier_score": 0.152,
+          "climatology_brier_score": 0.1488,
+          "brier_skill_score": -0.022
         },
         "BREAKDOWN_DECLINE": {
-          "samples": 138,
-          "mean_predicted_freq": 0.4031,
-          "empirical_hit_rate": 0.3333,
-          "brier_score": 0.2489,
-          "climatology_brier_score": 0.2222,
-          "brier_skill_score": -0.1202
+          "samples": 86,
+          "mean_predicted_freq": 0.3868,
+          "empirical_hit_rate": 0.4186,
+          "brier_score": 0.2607,
+          "climatology_brier_score": 0.2434,
+          "brier_skill_score": -0.0711
         },
         "BREAKOUT_RETEST": {
-          "samples": 59,
-          "mean_predicted_freq": 0.3744,
-          "empirical_hit_rate": 0.3051,
-          "brier_score": 0.2169,
-          "climatology_brier_score": 0.212,
-          "brier_skill_score": -0.0232
+          "samples": 58,
+          "mean_predicted_freq": 0.3748,
+          "empirical_hit_rate": 0.3103,
+          "brier_score": 0.2185,
+          "climatology_brier_score": 0.214,
+          "brier_skill_score": -0.0211
         },
         "C_WAVE_REVERSAL": {
           "samples": 102,
@@ -267,12 +267,12 @@
           "brier_skill_score": -0.1102
         },
         "FALSE_BREAKOUT_REVERSAL": {
-          "samples": 196,
-          "mean_predicted_freq": 0.5429,
-          "empirical_hit_rate": 0.4439,
-          "brier_score": 0.2611,
-          "climatology_brier_score": 0.2469,
-          "brier_skill_score": -0.0577
+          "samples": 94,
+          "mean_predicted_freq": 0.534,
+          "empirical_hit_rate": 0.4468,
+          "brier_score": 0.2464,
+          "climatology_brier_score": 0.2472,
+          "brier_skill_score": 0.0031
         },
         "OVERSOLD_BOUNCE": {
           "samples": 44,
@@ -299,7 +299,7 @@
           "brier_skill_score": -0.0452
         }
       },
-      "verdict": "样本外 Brier = 0.2235，各情景自身基准率加权 Brier = 0.2069（相对各情景基准率的技能分 BSS = -0.080 ≤ 0，尚未优于各情景自身基准率，仅作历史统计参考）"
+      "verdict": "样本外 Brier = 0.2145，各情景自身基准率加权 Brier = 0.2017（相对各情景基准率的技能分 BSS = -0.063 ≤ 0，尚未优于各情景自身基准率，仅作历史统计参考）"
     },
     "sample_trades": [
       {

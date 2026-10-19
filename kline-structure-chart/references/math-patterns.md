@@ -90,7 +90,7 @@
   - `rule_score_ic.spearman`：规则分与未来收益的 Spearman 秩相关，并列取平均秩。
   - 有效独立样本 ≈ 决策数 × 步长 / $H$。只有有效独立样本 ≥ 20 且 $|\text{IC}| \ge 0.05$ 时，`informative = true`；否则报告注明"规则分只作描述"。
   - `rule_score_buckets`（按 [0,38)、[38,52)、[52,65)、[65,100] 分层）与 `action_forward_returns`（按动作分组）：给出平均、中位数前瞻收益和上涨占比。
-  - `veto_reason_counts`：按稳定编码统计风控否决原因：`BENCHMARK_MISSING`、`BENCHMARK_WEAK`、`RR_INSUFFICIENT`、`BELOW_LOWER_RAIL`、`BREAKOUT_LOW_VOLUME`。
+  - `veto_reason_counts`：按稳定编码统计风控否决原因：`BENCHMARK_MISSING`、`BENCHMARK_WEAK`、`EXTREME_REGIME_OR_TAIL_RISK`、`INSUFFICIENT_EDGE_SCORE`、`RR_INSUFFICIENT`、`BELOW_LOWER_RAIL`、`BREAKOUT_LOW_VOLUME`。
 
 ## 7. 持仓防守与破位做空计划（`scripts/risk.py`，第三轮复查 O3 起）
 
