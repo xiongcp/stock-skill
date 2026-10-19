@@ -4,8 +4,8 @@ import math
 import random
 from typing import Any
 
-from base_rates import _build_causal_features, label_scenario_event
-from forecast import compute_conformal_forecast
+from base_rates import _build_causal_features, compute_scenario_frequency, label_scenario_event
+from forecast import _local_sigma, compute_conformal_forecast
 from indicators import atr_series, compute_all_indicators
 from market_rules import (
     get_daily_price_limit_pct,
@@ -48,22 +48,35 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
     meta_stub = {"market": "CN", "asset_type": "index", "symbol": "AUDIT.SH"}
     for cut in range(140, n - 5, step):
         sub = bars[:cut]
+        cut_day = str(sub[-1]["day"])
+        ext_corrupted = [dict(b) for b in sub] + [
+            {
+                **b,
+                "open": float(b["open"]) * 5.0,
+                "high": float(b["high"]) * 5.5,
+                "low": float(b["low"]) * 4.5,
+                "close": float(b["close"]) * 5.0,
+                "volume": float(b.get("volume") or 0.0) * 10.0,
+            }
+            for b in bars[cut : min(n, cut + 25)]
+        ]
         checked += 1
-        # 1. 因果核平滑逐点一致
+        # 1. 因果核平滑在追加极端未来 K 线后绝不改变历史值
         sub_nw = causal_nadaraya_watson([float(b["close"]) for b in sub], bandwidth=3.0)
-        if abs(sub_nw[-1] - full_nw[cut - 1]) > 1e-12:
+        ext_nw = causal_nadaraya_watson([float(b["close"]) for b in ext_corrupted], bandwidth=3.0)
+        if abs(sub_nw[-1] - full_nw[cut - 1]) > 1e-12 or abs(sub_nw[-1] - ext_nw[cut - 1]) > 1e-12:
             mismatches.append(f"NW kernel mutated at cut={cut}")
 
         # 2. 生产结构层 + 同一自适应阈值下的因果拐点与 SMC FVG
         layer_sub = compute_structure_layer(sub, None, 120)
         thr_sub = layer_sub["zz_thr"]
         sub_hist = sub[-HISTORY_BARS:]
-        ext_hist = bars[max(0, cut - HISTORY_BARS) : min(n, cut + 20)]
+        ext_hist = ext_corrupted[max(0, cut - HISTORY_BARS) :]
         sub_pivs = [p for p in causal_swing_pivots(sub_hist, thr_sub) if p["confirmed"]]
         ext_piv_map = {
             (p["day"], p["kind"]): (p["price"], p["confirmed_at_day"])
             for p in causal_swing_pivots(ext_hist, thr_sub)
-            if p["confirmed"]
+            if p["confirmed"] and str(p.get("confirmed_at_day") or p["day"]) <= cut_day
         }
         for sp in sub_pivs:
             key = (sp["day"], sp["kind"])
@@ -71,34 +84,63 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
                 mismatches.append(f"Pivot mutated at cut={cut}: {sp}")
 
         sub_ind = compute_all_indicators(sub)
+        ext_ind = compute_all_indicators(ext_corrupted)
+        if abs((sub_ind["series"]["atr14"][-1] or 0.0) - (ext_ind["series"]["atr14"][cut - 1] or 0.0)) > 1e-9:
+            mismatches.append(f"ATR14 mutated at cut={cut}")
         sub_smc = detect_smc_structures(sub[-STRUCT_DAYS:], causal_swing_pivots(sub[-STRUCT_DAYS:], thr_sub), sub_ind["series"]["atr14"][-STRUCT_DAYS:])
         for brk in sub_smc["structure_breaks"]:
-            if brk["day"] > sub[-1]["day"]:
+            if brk["day"] > cut_day or brk["pivot_day"] > brk["day"]:
                 mismatches.append(f"Future BOS leaked at cut={cut}: {brk}")
 
-        # 3. 蜡烛形态无前视
+        # 3. 蜡烛形态在追加极端未来 K 线后无前视变化
         sub_cdl = detect_candlestick_patterns(
             sub, sub_ind["series"]["atr14"], sub_ind["series"]["rvol20"], lookback=40, max_items=None
         )
+        ext_cdl = {
+            (p["pattern"], p["observed_at"]): p["formula_verified"]
+            for p in detect_candlestick_patterns(
+                ext_corrupted, ext_ind["series"]["atr14"], ext_ind["series"]["rvol20"], lookback=len(ext_corrupted), max_items=None
+            )
+            if str(p["observed_at"]) <= cut_day
+        }
         for pat in sub_cdl:
             pkey = (pat["pattern"], pat["observed_at"])
-            if pkey not in full_cdl:
+            if pkey not in full_cdl or pkey not in ext_cdl or ext_cdl[pkey] != pat["formula_verified"]:
                 mismatches.append(f"Candlestick pattern mutated at cut={cut}: {pkey}")
 
-        # 4. 保形预测仅依赖截至 cut 的已收盘 K 线
+        # 4. 保形预测波动率与非一致性分数仅依赖截至 cut 的已收盘 K 线（不受 cut 之后极端未来价格影响）
         fc_a = compute_conformal_forecast(sub, meta=meta_stub, horizon_bars=15)
-        fc_b = compute_conformal_forecast([dict(b) for b in bars[:cut]], meta=meta_stub, horizon_bars=15)
-        if fc_a["q10"] != fc_b["q10"] or fc_a["q90"] != fc_b["q90"]:
-            mismatches.append(f"Conformal forecast non-deterministic at cut={cut}")
+        sub_closes = [float(b["close"]) for b in sub]
+        ext_closes = [float(b["close"]) for b in ext_corrupted]
+        sub_lrets = [math.log(sub_closes[i] / sub_closes[i - 1]) for i in range(1, len(sub_closes))]
+        ext_lrets = [math.log(ext_closes[i] / ext_closes[i - 1]) for i in range(1, len(ext_closes))]
+        if abs(_local_sigma(sub_lrets, cut - 1) - _local_sigma(ext_lrets, cut - 1)) > 1e-12:
+            mismatches.append(f"Conformal sigma leaked future bars at cut={cut}")
+        sub_mature_scores = [
+            abs(sub_closes[i + 15] / sub_closes[i] - 1.0) / (_local_sigma(sub_lrets, i) * math.sqrt(15))
+            for i in range(60, cut - 15)
+        ]
+        ext_mature_scores = [
+            abs(ext_closes[i + 15] / ext_closes[i] - 1.0) / (_local_sigma(ext_lrets, i) * math.sqrt(15))
+            for i in range(60, cut - 15)
+        ]
+        if sub_mature_scores != ext_mature_scores or not all(
+            fc_a["q10"][k] <= fc_a["base_median_q50"][k] <= fc_a["q90"][k] for k in range(len(fc_a["q10"]))
+        ):
+            mismatches.append(f"Conformal mature scores mutated at cut={cut}")
 
-        # 5. 多情景筛选与历史条件频率在追加未来 K 线后保持不变
+        # 5. 多情景历史条件频率在追加极端未来 K 线并指定 max_cutoff_idx=len(sub_hist)-1 时保持不变
         sc_sub = layer_sub["projections"].get("scenarios") or []
-        layer_copy = compute_structure_layer([dict(b) for b in bars[:cut]], None, 120)
-        sc_copy = layer_copy["projections"].get("scenarios") or []
-        if [s["id"] for s in sc_sub] != [s["id"] for s in sc_copy]:
-            mismatches.append(f"Scenarios mutated at cut={cut}")
-        for s_a, s_b in zip(sc_sub, sc_copy):
-            if s_a["historical_frequency"] != s_b["historical_frequency"]:
+        feat_ext = _build_causal_features(ext_hist)
+        for s_a in sc_sub:
+            freq_ext = compute_scenario_frequency(
+                feat_ext,
+                s_a["id"],
+                horizon_bars=15,
+                direction=s_a["direction"],
+                max_cutoff_idx=len(sub_hist) - 1,
+            )
+            if s_a["historical_frequency"] != freq_ext:
                 mismatches.append(f"Scenario base rate mutated at cut={cut}: {s_a['id']}")
 
     return {

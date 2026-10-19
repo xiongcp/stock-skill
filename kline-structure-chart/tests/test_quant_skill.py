@@ -189,6 +189,7 @@ def test_causal_replay_invariance_no_lookahead() -> None:
     assert audit["passed"] is True
     assert audit["mismatches_count"] == 0
     assert "conformal_forecast" in audit["modules_audited"]
+    assert "multi_scenarios_base_rates" in audit["modules_audited"]
 
     # C-08：历史相似 Patch 终点满足 cand_idx + H <= cur_end - L_patch（严格无重叠）
     ana = match_historical_analogues(bars, horizon_bars=15, patch_len=20, top_k=5)
