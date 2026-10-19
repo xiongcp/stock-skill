@@ -933,6 +933,17 @@ def test_g03_to_g07_rendering_invariants_and_low_price_etf(replay_recorded, tmp_
     assert "const bullObFill = isCnColor ?" in html_text
 
 
+def test_replay_snapshots_use_point_in_time_benchmark(replay_recorded, tmp_path: Path) -> None:
+    report = run_pipeline(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        output_dir=tmp_path,
+    )
+    snapshot = next(s for s in report["replay_snapshots"] if s["as_of"] == "2026-06-16")
+    # 该截面当时沪深300为宽幅震荡 75.5 分、相对强弱 0.9421；不能用最新截面的 16.0 分/1.1164。
+    assert snapshot["benchmark_regime_score"] == pytest.approx(75.5, abs=0.1)
+    assert snapshot["benchmark_relative_strength"] == pytest.approx(0.9421, abs=0.001)
+
+
 def test_r07_point_in_time_adjustment_from_real_corporate_actions(replay_recorded) -> None:
     # 使用真实录制的比亚迪 (002594.SZ) 行情与 Yahoo 除权除息事件（含 2025-07-29 10送转20 及历年分红）
     now = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)

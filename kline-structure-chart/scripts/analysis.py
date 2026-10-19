@@ -93,6 +93,7 @@ def _build_replay_snapshots(
     completed: list[dict[str, Any]],
     meta: dict[str, Any],
     benchmark_info: dict[str, Any],
+    benchmark_bars: list[dict[str, Any]] | None = None,
     horizon_bars: int = 15,
     num_snapshots: int = 5,
     snapshot_window: int = 60,
@@ -135,8 +136,24 @@ def _build_replay_snapshots(
         reg_sub = classify_market_regime(sview_sub, ind_sub_win["snapshot"])
         strat_sub = evaluate_five_core_strategies(sview_sub, ind_sub_win, reg_sub)
         wedge_sub = {k: v for k, v in layer_sub["wedge"].items() if not k.startswith("_")}
+        bench_info_sub = benchmark_info
+        if benchmark_bars:
+            cut_day = sub_bars[-1]["day"]
+            b_sub = [b for b in benchmark_bars if str(b["day"]) <= cut_day]
+            if b_sub:
+                b_ind_sub = compute_all_indicators(b_sub[-HISTORY_BARS:])
+                b_reg_sub = classify_market_regime(b_sub[-STRUCT_DAYS:], b_ind_sub["snapshot"])
+                rs_sub, _ = _compute_relative_strength(sub_bars, b_sub, lookback=20)
+                bench_info_sub = {
+                    **benchmark_info,
+                    "regime": b_reg_sub["regime"],
+                    "regime_label_cn": b_reg_sub["label_cn"],
+                    "regime_score": b_reg_sub["regime_score"],
+                    "relative_strength_vs_index": rs_sub,
+                    "benchmark_missing": False,
+                }
         mtf_sub = compute_multi_timeframe_score(
-            sub_bars, ind_sub_win, wedge_sub, all_pats_sub, smc_sub, strat_sub, benchmark_info
+            sub_bars, ind_sub_win, wedge_sub, all_pats_sub, smc_sub, strat_sub, bench_info_sub
         )
         fc_sub = compute_conformal_forecast(sub_bars, meta=meta, horizon_bars=horizon_bars)
         realized_bars = completed[cut_idx + 1 : min(n, cut_idx + 1 + horizon_bars)]
@@ -185,6 +202,8 @@ def _build_replay_snapshots(
                 "base_close": round(float(sub_bars[-1]["close"]), sub_p_dec),
                 "regime": reg_sub["regime"],
                 "regime_score": reg_sub["regime_score"],
+                "benchmark_regime_score": bench_info_sub.get("regime_score"),
+                "benchmark_relative_strength": bench_info_sub.get("relative_strength_vs_index"),
                 "rule_score": mtf_sub["rule_score"],
                 "rating": mtf_sub["rating"],
                 "horizon_dates": fc_sub["horizon_dates"],
@@ -441,7 +460,14 @@ def analyze_bundle(
             )
 
     replay_snapshots = (
-        _build_replay_snapshots(completed, meta=meta, benchmark_info=benchmark_info, horizon_bars=horizon_bars, num_snapshots=5)
+        _build_replay_snapshots(
+            completed,
+            meta=meta,
+            benchmark_info=benchmark_info,
+            benchmark_bars=bench_bars_raw,
+            horizon_bars=horizon_bars,
+            num_snapshots=5,
+        )
         if include_replay
         else []
     )
