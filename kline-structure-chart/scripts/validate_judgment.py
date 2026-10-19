@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from contracts import compute_canonical_hash
-from judgment import build_judgment_pack, generate_constrained_judgment
+from judgment import build_judgment_pack, generate_constrained_judgment, judgment_origin
 
 _EVIDENCE_ID_RE = re.compile(r"\bE\d+\b")
 _CONFLICT_ID_RE = re.compile(r"\bC\d+\b")
@@ -33,7 +33,8 @@ _NON_PRICE_PATTERNS = (
     re.compile(r"[+-]?\d+(?:\.\d+)?\s*%"),
     re.compile(r"[+-]?\d+(?:\.\d+)?\s*个?百分点"),
     re.compile(r"\bn\s*=\s*\d+\b", re.I),
-    re.compile(r"\b\d+(?:\.\d+)?\s*(?:个?交易日|日|天|根|手|股|笔|次|浪|分|bps|倍)\b"),
+    # 中文单位后面通常紧跟汉字（\b 在两个汉字之间不成立），用前后断言代替 \b
+    re.compile(r"(?<![\d.])\d+(?:\.\d+)?\s*(?:个?交易日|日|天|根|手|股|笔|次|浪|分|bps|倍)(?![A-Za-z0-9])"),
     re.compile(r"\b\d+(?:\.\d+)?\s*个\s*ATR\b", re.I),
     re.compile(r"\b\d+(?:\.\d+)?\s*[×xX]\b"),
     re.compile(r"±\s*\d+(?:\.\d+)?"),
@@ -291,6 +292,8 @@ def build_judgment_log_entry(judgment: dict[str, Any], report: dict[str, Any]) -
     return {
         "judgment_id": f"{judgment['symbol']}_{judgment['as_of']}_{j_hash}",
         "logged_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        # AUTO_INIT_TEMPLATE = 未经改写的 --auto-init 预填模板，score_judgments 不把它计入 LLM 技能分
+        "origin": judgment_origin(judgment, report),
         **entry_core,
     }
 
@@ -374,6 +377,7 @@ def main() -> None:
                 "symbol": judgment["symbol"],
                 "as_of": judgment["as_of"],
                 "judgment_id": log_entry["judgment_id"],
+                "origin": log_entry["origin"],
                 "log_path": str(log_path.resolve()),
                 "report_md_updated": str(md_path.resolve()) if md_path.exists() else None,
             },

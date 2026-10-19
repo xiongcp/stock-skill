@@ -275,3 +275,57 @@ def test_o3_20_scenario_playbook_doc_matches_code_verbatim() -> None:
         )
     assert len(rows) == 8
     assert tuple(rows) == SCENARIO_PLAYBOOK
+
+
+def _all_command_docs() -> list[Path]:
+    extra = [REPO_DIR / "examples" / "README.md"]
+    return DOCS + [p for p in (AGENTS, README, *extra) if p.exists()]
+
+
+def test_documented_artifact_filenames_match_sanitize_filename() -> None:
+    """文档里的产物文件名必须与脚本实际生成的一致：sanitize_filename 保留代码中的点（600519.SH_result.json）。"""
+    import sys
+
+    scripts_dir = str(SKILL_DIR / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from contracts import sanitize_filename
+
+    assert sanitize_filename("600519.SH") == "600519.SH"
+    bad = re.compile(r"\b(?:\d{5,6}|[A-Z]{1,6})_(?:SH|SZ|BJ|HK|US)_(?:result|judgment|judgment_pack|report|backtest|preview|dashboard)\b")
+    for doc in _all_command_docs():
+        hits = bad.findall(doc.read_text(encoding="utf-8"))
+        assert not hits, f"{doc.name} 中的产物文件名与实际不符（应保留代码中的点）: {hits}"
+
+
+def test_uv_directory_commands_use_paths_relative_to_skill_dir() -> None:
+    """`uv run --directory kline-structure-chart` 会切换到技能目录，其后的相对路径参数不得再带 kline-structure-chart/ 前缀。"""
+    for doc in _all_command_docs():
+        text = doc.read_text(encoding="utf-8").replace("\\\n", " ")
+        for line in text.splitlines():
+            if "--directory kline-structure-chart" not in line:
+                continue
+            tail = line.split("--directory kline-structure-chart", 1)[1]
+            assert " kline-structure-chart/" not in tail, f"{doc.name} 命令路径会被解析成 kline-structure-chart/kline-structure-chart/…: {line.strip()}"
+
+
+def test_example_reply_passes_lint_and_counterexample_is_rejected() -> None:
+    """examples/ 的标准回复必须与同目录 result.json 一致并通过回复契约，反例必须被 lint 拦截。"""
+    import json
+    import sys
+
+    example_dir = REPO_DIR / "examples" / "600519.SH"
+    if not example_dir.exists():
+        pytest.skip("examples/ 不随 skill 分发，仅在源码仓库中检查")
+    scripts_dir = str(SKILL_DIR / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from lint_response import lint_agent_response
+
+    report = json.loads((example_dir / "600519.SH_result.json").read_text(encoding="utf-8"))
+    reply = (example_dir / "reply.md").read_text(encoding="utf-8")
+    good, _, counter = reply.partition("## 不合格的回复（反例）")
+    good_body = good.split("---", 1)[1]
+    assert lint_agent_response(good_body, report) == []
+    counter_quote = next(line[1:].strip() for line in counter.splitlines() if line.startswith(">"))
+    assert lint_agent_response(counter_quote, report)

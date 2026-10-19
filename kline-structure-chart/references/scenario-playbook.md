@@ -41,9 +41,15 @@
      - **先到目标（`HIT_TARGET`）**
      - **先到失效位（`HIT_INVALIDATION`）**（同根 K 线同时触及目标与失效时，按保守原则判先到失效）
      - **到期未触及任一屏障（`EXPIRED`）**
-2. **95% Wilson 置信区间与小样本 Beta-Binomial 收缩**：
+2. **标准化屏障事件（不是情景目标价）**：
+   - 事件研究的触发判定（`base_rates._scenario_triggered_at`）是上表前提的简化因果近似，结果标定以触发日 ATR 为单位：目标 / 失效距离取 `SCENARIO_BARRIER_ATR`（如突破回踩 `+1.55×ATR` / `−1.05×ATR`，区间震荡为收盘不越出 `±1.45×ATR`），每个情景的定义写入 `historical_frequency.event_definition_cn`。
+   - 因此历史条件频率回答的是「同类状态触发后，15 根K线内先走出标准化目标距离的比例」，**不是**本次报告中该情景目标价 / 失效价的到达频率，转述时不得说成"到达 X 价位的概率"。
+   - 同一情景相邻触发日至少间隔 `MIN_TRIGGER_GAP = 2` 根K线，结果期互相重叠，样本数 n 高估了独立样本数，Wilson 区间偏窄。
+3. **95% Wilson 置信区间与小样本 Beta-Binomial 收缩**：
    - 所有频率均附带样本数 `sample_size`（`n`）与 95% Wilson 置信区间 `target_ci_95`。
-   - 当 `n < 30` 时，`low_sample = true`，脚本使用 Beta-Binomial（等效先验强度 $M = 20$）向市场基准指数同一情景的历史频率收缩，同时输出原始频率 `raw_target_freq` 与收缩后频率 `shrunk_target_freq`。
-3. **对外表述铁律**：
+   - 当 `n < 30` 时，`low_sample = true`，脚本使用 Beta-Binomial（等效先验强度 $M = 20$）向市场基准指数同一情景的历史频率（再按当前趋势体制修正）收缩，同时输出原始频率 `raw_target_freq` 与收缩后频率 `shrunk_target_freq`。
+   - 当 `n >= 30` 时，`target_freq` 为体制加权估计：`0.35 × 原始频率 + 0.40 × 同趋势体制与近期样本加权频率 + 0.25 × 后验均值`，弱势体制下再对超跌反弹、破位下行等情景乘以折减/强化系数（`estimate_method = REGIME_WEIGHTED_BLEND`）。
+   - `target_freq` 是模型估计（风控守门、情景扇形与 L3 基准概率使用该值）；`display_cn` 的「历史条件频率」数字一律是实际观测频率 `raw_target_freq`，与 Wilson 区间同口径，模型估计在括号内标为「收缩后估计」或「体制加权估计」。
+4. **对外表述铁律**：
    - 写入 `rule_scenarios.scenarios[*].historical_frequency`（及 `rule_scenarios.{bull,neutral,bear}.historical_frequency`）。
-   - 对外统一表述为**「历史条件频率 X%（n = …，95% 区间 a%~b%）」**，低样本时必须同时注明「n < 30 低样本，已做 Beta-Binomial 收缩」，**严禁称为胜率或未来上涨概率**。
+   - 对外统一表述为**「历史条件频率 X%（n = …，95% 区间 a%~b%）」**（X 为观测频率），低样本时必须同时注明「n < 30 低样本，已做 Beta-Binomial 收缩」，引用模型估计时须注明「收缩后估计」或「体制加权估计」，**严禁称为胜率或未来上涨概率**。

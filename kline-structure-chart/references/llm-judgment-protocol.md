@@ -27,12 +27,12 @@
    - 指定 `primary_scenario_id`（主观研判概率最高的主情景）与 `alternate_scenario_id`（次高备选情景）；
    - 在 `key_levels_to_watch` 中列出需要观察的关键价位（只能从 `price_whitelist` 中选取）；
    - 在 `falsification_condition` 中明确写出「什么价格或收盘条件发生时说明主情景判断错了」。
-6. **写入并运行校验脚本（推荐 Flash 模型加 `--auto-init` 一键预填）**：将结果保存为 `<代码>_judgment.json`（若使用 Flash 模型，可直接传入 `--auto-init` 自动生成满足全部硬约束的预填 JSON，再按需微调），执行 `scripts/validate_judgment.py` 校验、记入 `judgment_log.jsonl` 并自动更新 `<代码>_report.md` 的第 8 节：
+6. **写入并运行校验脚本（可用 `--auto-init` 预填模板）**：将结果保存为 `<代码>_judgment.json`，执行 `scripts/validate_judgment.py` 校验、记入 `judgment_log.jsonl` 并自动更新 `<代码>_report.md` 的第 8 节。目标文件不存在时，`--auto-init` 先写入一份满足全部硬约束的预填模板（`generator = AUTO_INIT_TEMPLATE`，按偏多/偏空证据条数做 ±4 个百分点以内的机械零和调整）。模板**不是主观研判**：Agent 必须按第 3~5 步复核证据、改写概率与理由，并把 `judgment_type` 改为 `主观研判` 后重新校验。各情景概率与模板完全一致时，校验结果与日志记为 `origin = AUTO_INIT_TEMPLATE`，报告第 8 节显示为「情景研判模板（脚本预填，未经 Agent 主观研判）」，`score_judgments.py` 不把它计入 LLM 技能分（计入 `template_judgments_excluded`）：
 
 ```bash
 uv run --directory kline-structure-chart python scripts/validate_judgment.py \
-  --result kline-structure-chart/artifacts/<目录>/<代码>_result.json \
-  --judgment kline-structure-chart/artifacts/<目录>/<代码>_judgment.json \
+  --result artifacts/<目录>/<代码>_result.json \
+  --judgment artifacts/<目录>/<代码>_judgment.json \
   --auto-init
 ```
 
@@ -87,7 +87,9 @@ uv run --directory kline-structure-chart python scripts/validate_judgment.py \
 
 | 校验项 | 规则 | 失败处理 |
 | --- | --- | --- |
-| 主观标注 | `judgment_type` 与 `summary_cn` 均必须包含「主观研判」 | `[INVALID_JUDGMENT]` 非零退出 |
+| 主观标注 | `judgment_type` 与 `summary_cn` 均必须包含「主观研判」（预填模板写作「主观研判模板」） | `[INVALID_JUDGMENT]` 非零退出 |
+| 来源标注 | 各情景概率与 `--auto-init` 模板完全一致记为 `origin = AUTO_INIT_TEMPLATE`，否则为 `AGENT` | 不阻断；模板按「脚本预填模板」展示且不计入 LLM 技能分 |
+| 证伪方向 | 做多主情景以收盘跌破失效位或三重屏障止损为证伪；做空、假突破主情景以收盘反向收回失效位为证伪；震荡与双向情景以越出区间或始终未变盘为证伪 | 预填模板按此生成；Agent 改写时须保持方向一致 |
 | 概率归一 | 所有情景 `subjective_probability_pct` 之和必须等于 `100.0%`（±0.05%） | `[INVALID_JUDGMENT]` 非零退出 |
 | 调整上限 | `n >= 30` 时 `|adjustment_pct| <= 15.0`；`n < 30` 时 `|adjustment_pct| <= 10.0` | `[INVALID_JUDGMENT]` 非零退出 |
 | 证据溯源 | 引用的每个 `E*` / `C*` 编号必须在 `judgment_pack` 中存在，且每条 `rationale_cn` 至少引用一个 `E*` | `[INVALID_JUDGMENT]` 非零退出 |
@@ -97,7 +99,7 @@ uv run --directory kline-structure-chart python scripts/validate_judgment.py \
 
 ```bash
 uv run --directory kline-structure-chart python scripts/score_judgments.py \
-  --log kline-structure-chart/artifacts/judgment_log.jsonl
+  --log artifacts/<目录>/judgment_log.jsonl
 ```
 
 - 累计已到期研判样本 `matured_judgments >= 30` 后，报告会显示 `LLM 调整相对历史频率的技能分为 X（n = …）`。若 `BSS <= 0`，报告会明确提示「LLM 调整尚未显示增益」，并建议收紧调整上限。

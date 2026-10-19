@@ -74,8 +74,9 @@
 | `market_regime.regime` / `label_cn` | 标的自身状态：`TRENDING_BULL` 多头趋势、`TRENDING_BEAR` 空头趋势、`SQUEEZE_CONSOLIDATION` 收敛蓄势、`MEAN_REVERTING_RANGE` 区间震荡、`HIGH_VOLATILITY_CHAOS` 高波失序 | 枚举 | 否 | 用中文标签，只描述当下，不代表方向 |
 | `market_regime.regime_score` / `evidence` / `routed_strategy_family` | 状态分、判定证据（ADX、带宽分位、波动比、VIX 等）、路由到的策略族 | 5~95 | `evidence.vix` 可空 | 状态分不是概率 |
 | `strategy_signals[]` | 五个规则策略的状态：`strategy_id`、`name_cn`、`direction`、`state`（如 `LONG_ACTIVE`）、`formula_verified` | 枚举 | 否 | "某策略处于多头激活" |
-| `multi_timeframe_score.rule_score` | 四组各 25 分的确定性规则加权分 | 0~100 | 否 | "规则分 X / 100，不是胜率或概率" |
-| `multi_timeframe_score.rating` / `rating_cn` | `BULLISH_RESONANCE` 多周期多头共振 / `BEARISH_PRESSURE` 多周期空头承压 / `NEUTRAL_WATCH` 多空分歧 | 枚举 | 否 | 用中文标签 |
+| `multi_timeframe_score.rule_score` | 四组各 25 分的确定性规则加权分；均值回归体制（`regime_adjustment.applied = true`）下为反转调整后的分数，不再等于四组之和 | 0~100 | 否 | "规则分 X / 100，不是胜率或概率"；体制调整时同时转述 `regime_adjustment.note_cn` |
+| `multi_timeframe_score.components_total` / `regime_adjustment` | 四组分项合计（调整前）；体制调整说明：`applied`、`scoring_regime`、`components_total`、`adjusted_rule_score`、`causal_momentum_ic_15d`、`note_cn` | 0~100 / 对象 | 否（未调整时 `applied = false`） | 调整时原文转述 `note_cn`，不得把调整后的低分说成"多周期空头" |
+| `multi_timeframe_score.rating` / `rating_cn` | `BULLISH_RESONANCE` 多周期多头共振 / `BEARISH_PRESSURE` 多周期空头承压 / `NEUTRAL_WATCH` 多空分歧；均值回归体制下 `rating_cn` 改为"均值回归体制评分偏多/偏空/中性" | 枚举 | 否 | 用中文标签 |
 | `multi_timeframe_score.components` | 四组分项：`macro_trend_25`、`structure_pattern_25`、`strategy_trigger_25`、`volume_benchmark_25` | 0~25 | 否 | 追问时解释 |
 | `meta_labeling_decision.setup_type` / `setup_label_cn` | 计划类型：右侧突破、左侧回踩、等待确认等 | 枚举 | 否 | — |
 | `meta_labeling_decision.action` / `action_cn` | 动作标签：`LONG_CONFIRMED` 确认做多、`WATCH_LONG_SETUP` 条件观察、`NEUTRAL_HOLD_WAIT` 观望、`DEFENSIVE_AVOID` 防守回避 | 枚举 | 否 | 风控否决时只能说观察，不说买入 |
@@ -106,7 +107,7 @@
 | `breakout_level` / `breakdown_level` | 上攻触发位与下探触发位，带来源 `source` | 价格 | 否 | — |
 | `bull` / `neutral` / `bear` | 三条主路径：`name`、`trigger`（触发条件）、`target_price` 与 `target_source`、`invalidation`（失效条件）、`retest_hold` / `rebound_cap`、`range`（震荡区间）、`waypoints_offset` 与 `step_labels`（画图折点）、`historical_frequency`（历史条件频率） | 价格 / 文本 | 否 | 按"触发 → 目标 → 失效"转述；频率只能按 `historical_frequency.display_cn` 称"历史条件频率" |
 | `scenarios[]` | L1 多情景引擎从 8 类标准情景库（见 `references/scenario-playbook.md`）中筛出的 2~5 个适用情景：`id`、`name`、`direction`、`status`（`ACTIVE` 已在进行中 / `PENDING_TRIGGER` 待触发）、`trigger`、`target_price`、`target_source`、`invalidation`、`time_window_bars`（历史到达目标用时 `q25`/`median`/`q75`，截断在 `horizon_bars` 内）、`historical_frequency` | 价格 / 根 / 比例 | 否 | 按表格转述状态、触发、目标、失效、中位用时与 `historical_frequency.display_cn` |
-| `scenarios[*].historical_frequency` | L2 逐点无前视事件研究结果：`sample_size`（样本数 n）、`low_sample`（n < 30）、`target_freq`/`invalidated_freq`/`expired_freq`、`target_ci_95`（Wilson 95% 区间）、`raw_target_freq`/`shrunk_target_freq`（Beta-Binomial 向基准收缩值）、`bars_to_target`、`mae_pct`/`mfe_pct`、`display_cn` | 比例 / 根 / % | 否 | 原文引用 `display_cn`，称"历史条件频率"，不叫胜率或上涨概率 |
+| `scenarios[*].historical_frequency` | L2 逐点无前视事件研究结果：`sample_size`（样本数 n）、`low_sample`（n < 30）、`raw_target_freq`（实际观测频率，与 `target_ci_95` Wilson 95% 区间同口径）、`target_freq`/`invalidation_freq`/`expired_freq`（模型估计：n < 30 为 Beta-Binomial 向基准收缩值，n ≥ 30 为体制加权估计，见 `estimate_method`）、`shrunk_target_freq`、`event_definition_cn`（实际统计的标准化 ATR 屏障事件）、`bars_to_target`、`excursion_pct`、`display_cn` | 比例 / 根 / % | 否 | 原文引用 `display_cn`（首个数字为观测频率），称"历史条件频率"，不叫胜率或上涨概率；不得说成到达本情景目标价的概率 |
 | `scenario_count` / `scenario_signature` | 当前截面适用情景个数（2~5）与情景 ID 组合签名 | 整数 / 字符串 | 否 | — |
 | `impulse_wave` | 推动 5 浪识别结果（满足浪 2 不破浪 1 起点、浪 3 非最短、浪 4 不进入浪 1 区间时返回，含 `wave3_1618_target`） | 价格 / 文本 | 是（未形成推动浪时为空） | 有则说明推动浪进度与 1.618×浪 1 测算位 |
 | `atr_pct` / `sigma_1d_pct` | 计算时使用的 ATR 百分比；近 60 日日对数收益 RMS（折点时间用） | % | 否 | — |
@@ -177,7 +178,8 @@
 
 | 字段 | 含义 | 单位 / 取值 | 可空 | 对外怎么说 |
 | --- | --- | --- | --- | --- |
-| `judgment_type` / `summary_cn` | 固定含「主观研判」标识与一句话研判综述 | 文本 | 否 | 必须与确定性计算分开，明确说「主观研判，已记录待检验」 |
+| `judgment_type` / `summary_cn` | 固定含「主观研判」标识与一句话研判综述；`--auto-init` 预填模板为「主观研判模板（脚本预填，未经 Agent 调整）」 | 文本 | 否 | 必须与确定性计算分开，明确说「主观研判，已记录待检验」；模板只能称「脚本预填模板」 |
+| `generator` / 日志 `origin` | 预填模板写 `generator = AUTO_INIT_TEMPLATE`；校验时按各情景概率是否与模板一致记 `origin`（`AUTO_INIT_TEMPLATE` / `AGENT`） | 枚举 | 是（Agent 手写时可无 `generator`） | `origin = AUTO_INIT_TEMPLATE` 的记录不计入 LLM 技能分 |
 | `primary_scenario_id` / `alternate_scenario_id` | 主情景与备选情景 ID | 情景枚举 | 否 | 说明主情景、备选情景及切换条件 |
 | `scenario_judgments[]` | 各互斥情景的 `l2_historical_frequency_pct`、`baseline_probability_pct`（调整前）、`subjective_probability_pct`（调整后，总和=100%）、`adjustment_pct`（`n>=30` 不超 ±15%，`n<30` 不超 ±10%）、`supporting_evidence_ids`、`opposing_evidence_ids`、`rationale_cn` | % / 证据编号 | 否 | 同时展示调整前后数值与所引用的 `E1…En` 编号 |
 | `key_levels_to_watch[]` | 关键观察价位（`label`、`price`、`role`），价格必须来自 `price_whitelist` | 价格 | 否 | 只报白名单内的价格 |

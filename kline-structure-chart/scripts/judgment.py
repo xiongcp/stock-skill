@@ -13,6 +13,11 @@ from typing import Any
 
 _PATH_TOKEN_RE = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
 
+# validate_judgment --auto-init 生成的是按证据条数机械调整的预填模板，不是 Agent 的主观研判；
+# 日志与报告据此区分来源，score_judgments 只对 Agent 研判计算「LLM 调整」技能分
+AUTO_INIT_GENERATOR = "AUTO_INIT_TEMPLATE"
+AGENT_ORIGIN = "AGENT"
+
 
 def resolve_json_path(data: Any, path: str) -> tuple[bool, Any]:
     """按点号与下标路径（如 'algebraic_patterns_detected[0].formula_verified'）在 JSON 对象中取值。"""
@@ -39,6 +44,33 @@ def _fmt_price(val: float | int | None, p_dec: int) -> str:
     return f"{float(val):.{p_dec}f}"
 
 
+# 键名含这些片段的字段不是价格（频率、百分比、样本数、根数、比值、乘数、相似度等），不进入价格白名单
+_NON_PRICE_KEY_TOKENS = (
+    "freq",
+    "pct",
+    "ratio",
+    "sample",
+    "count",
+    "bars",
+    "hits",
+    "_ci",
+    "score",
+    "size",
+    "coverage",
+    "multiplier",
+    "sigma",
+    "weight",
+    "similarity",
+    "idx",
+    "distance",
+    "atr",
+    "return",
+    "slope",
+    "days",
+    "horizon",
+)
+
+
 def collect_price_whitelist(report: dict[str, Any]) -> dict[str, Any]:
     """从 result.json 的价格相关字段提取所有合法价格，构建白名单。"""
     meta = report.get("meta") or {}
@@ -56,6 +88,8 @@ def collect_price_whitelist(report: dict[str, Any]) -> dict[str, Any]:
         if isinstance(obj, dict):
             for k, val in obj.items():
                 kl = k.lower()
+                if any(tok in kl for tok in _NON_PRICE_KEY_TOKENS):
+                    continue  # 频率、百分比、样本数、根数、比值等不是价格，也不深入其子字段（如 bars_to_target.q25）
                 if any(
                     tok in kl
                     for tok in (
@@ -91,6 +125,11 @@ def collect_price_whitelist(report: dict[str, Any]) -> dict[str, Any]:
                         "q75",
                         "q90",
                         "band",
+                        "cap",
+                        "retest",
+                        "rebound",
+                        "range",
+                        "zone",
                     )
                 ):
                     if isinstance(val, (int, float)):
@@ -234,7 +273,8 @@ def build_judgment_pack(report: dict[str, Any]) -> dict[str, Any]:
         "SCORE",
         "multi_timeframe_score.rule_score",
         r_dir,
-        f"多周期规则综合分为 {r_score:.1f}/100，二阶段动作分类为「{decision.get('action_cn') or decision.get('action')}」",
+        f"多周期规则综合分为 {r_score:.1f}/100（{mtf.get('rating_cn')}），二阶段动作分类为「{decision.get('action_cn') or decision.get('action')}」"
+        + (f"；{(mtf.get('regime_adjustment') or {}).get('note_cn')}" if (mtf.get("regime_adjustment") or {}).get("applied") else ""),
     )
 
     # E6: Supertrend 与均线趋势
@@ -470,11 +510,52 @@ def build_judgment_pack(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def generate_constrained_judgment(report: dict[str, Any]) -> dict[str, Any]:
-    """按 references/llm-judgment-protocol.md 协议，基于 judgment_pack 生成合规的受约束研判 JSON。
+def build_falsification_text(
+    primary: dict[str, Any],
+    alternate: dict[str, Any],
+    stop_loss: float,
+    p_dec: int,
+    breakout: float | None = None,
+    breakdown: float | None = None,
+) -> str:
+    """按主情景方向写证伪条件：做多情景以失效位或三重屏障止损被收盘跌破为证伪；
+    做空/假突破情景以收盘反向收回失效位为证伪（跌破做多止损反而是确认）；震荡与双向情景以越出区间或始终未变盘为证伪。"""
+    name = primary["scenario_name"]
+    direction = str(primary.get("direction") or "")
+    inv_text = str(primary.get("invalidation") or "").strip()
+    inv_price = primary.get("invalidation_price")
+    if direction == "BULLISH":
+        inv_part = (
+            f"日线收盘跌破主情景「{name}」失效位 {_fmt_price(inv_price, p_dec)}"
+            if inv_price is not None
+            else f"出现主情景「{name}」的失效条件（{inv_text}）"
+        )
+        cond = f"{inv_part}，或收盘跌破三重屏障止损位 {_fmt_price(stop_loss, p_dec)}（见 E10）"
+    elif inv_text and inv_text != "—":
+        cond = f"出现主情景「{name}」的失效条件：{inv_text}"
+    elif breakout is not None and breakdown is not None:
+        cond = (
+            f"预测期内日线收盘既未站上 {_fmt_price(breakout, p_dec)} 也未跌破 {_fmt_price(breakdown, p_dec)}"
+            f"（主情景「{name}」所需的变盘没有发生）"
+        )
+    else:
+        cond = f"主情景「{name}」的目标位 {_fmt_price(primary.get('target_price'), p_dec)} 在预测期内未被触及"
+    trigger = str(primary.get("trigger") or "").strip()
+    if primary.get("status") == "PENDING_TRIGGER" and trigger:
+        # 待触发情景的失效条件只在触发之后才有意义（例如破位下行的「收回破位位上方」在触发前可能已经成立）
+        cond = f"预测期内始终未出现主情景「{name}」的触发条件（{trigger}），或触发后{cond}"
+    return (
+        f"若{cond}，则主情景判断证伪，应切换至备选情景「{alternate['scenario_name']}」"
+        f"（目标位 {_fmt_price(alternate.get('target_price'), p_dec)}）。"
+    )
 
-    用于生成 examples/ 示例与回放打分测试：严格从基准频率出发、引用证据编号 E1…En、
-    调整幅度不超上限、互斥情景概率之和等于 100%、所有价格取自白名单并标注「主观研判」。
+
+def generate_constrained_judgment(report: dict[str, Any]) -> dict[str, Any]:
+    """按 references/llm-judgment-protocol.md 的硬约束生成预填模板（validate_judgment --auto-init 使用）。
+
+    模板只按偏多/偏空证据条数做 ±4 个百分点以内的机械零和调整，不是 Agent 的主观研判：
+    输出带 generator = AUTO_INIT_TEMPLATE，标题、综述与理由都写明「脚本预填模板」；
+    Agent 必须复核证据并改写概率后，才可称为主观研判。
     """
     pack = report.get("judgment_pack") or build_judgment_pack(report)
     p_dec = int(pack.get("price_decimals") or 2)
@@ -539,9 +620,9 @@ def generate_constrained_judgment(report: dict[str, Any]) -> dict[str, Any]:
         cited = ", ".join(dict.fromkeys(sup + opp))
         l2_pct_txt = f"{a['l2_effective_pct']:.1f}%" if a.get("l2_effective_pct") is not None else "—"
         rationale = (
-            f"主观研判：L2 先到目标有效历史频率为 {l2_pct_txt}（样本 n={a['sample_size_n']}），"
-            f"归一化互斥基准概率为 {base_p:.2f}%；结合支持证据 {', '.join(sup)} 与反向约束 {', '.join(opp)}（引用 {cited}），"
-            f"将该情景主观研判概率调整 {adj_p:+.2f} 个百分点至 {subj_p:.2f}%（未超 ±{a['max_adjustment_pct']:.0f}% 上限）。"
+            f"脚本预填（按偏多/偏空证据条数机械调整，尚未经 Agent 研判）：L2 体制加权估计频率为 {l2_pct_txt}（样本 n={a['sample_size_n']}），"
+            f"归一化基准概率为 {base_p:.2f}%；支持证据 {', '.join(sup)}，反向约束 {', '.join(opp)}（引用 {cited}），"
+            f"预填调整 {adj_p:+.2f} 个百分点至 {subj_p:.2f}%（未超 ±{a['max_adjustment_pct']:.0f}% 上限）。"
         )
         scenario_judgments.append(
             {
@@ -578,16 +659,23 @@ def generate_constrained_judgment(report: dict[str, Any]) -> dict[str, Any]:
     if primary.get("target_price") is not None:
         key_levels.append({"label": f"主情景（{primary['scenario_name']}）目标位", "price": float(primary["target_price"]), "role": "PRIMARY_TARGET"})
 
-    falsification_price = primary.get("invalidation_price") or tb["stop_loss_barrier"]
-    falsification_text = (
-        f"主观研判证伪条件：若日线收盘触及主情景「{primary['scenario_name']}」失效位 {_fmt_price(falsification_price, p_dec)} "
-        f"或跌破三重屏障止损位 {_fmt_price(tb['stop_loss_barrier'], p_dec)}（见 E10），"
-        f"则主情景判断证伪，应切换至备选情景「{alternate['scenario_name']}」（目标位 {_fmt_price(alternate['target_price'], p_dec)}）。"
+    anchor_by_id = {a["scenario_id"]: a for a in anchors}
+    rs = report.get("rule_scenarios") or {}
+    falsification_text = build_falsification_text(
+        {
+            **primary,
+            **{k: anchor_by_id.get(primary["scenario_id"], {}).get(k) for k in ("invalidation", "status", "trigger")},
+        },
+        alternate,
+        float(tb["stop_loss_barrier"]),
+        p_dec,
+        breakout=(rs.get("breakout_level") or {}).get("price"),
+        breakdown=(rs.get("breakdown_level") or {}).get("price"),
     )
 
     veto_prefix = "【风控已否决做多，以下仅作结构观察】" if pack.get("risk_officer_veto") else ""
     summary_cn = (
-        f"{veto_prefix}主观研判（基于 L2 历史条件频率锚点与证据 {', '.join(all_eids[:6])} 的有界调整）："
+        f"{veto_prefix}【脚本预填模板，尚未经 Agent 主观研判】主观研判模板（基于 L2 锚点与证据 {', '.join(all_eids[:6])} 的条数机械调整）："
         f"主情景为「{primary['scenario_name']}」（基准 {primary['baseline_probability_pct']:.2f}% → 主观研判 {primary['subjective_probability_pct']:.2f}%，"
         f"目标位 {_fmt_price(primary['target_price'], p_dec)}），"
         f"备选情景为「{alternate['scenario_name']}」（基准 {alternate['baseline_probability_pct']:.2f}% → 主观研判 {alternate['subjective_probability_pct']:.2f}%，"
@@ -601,7 +689,8 @@ def generate_constrained_judgment(report: dict[str, Any]) -> dict[str, Any]:
         "market": pack["market"],
         "as_of": pack["as_of"],
         "horizon_bars": pack["horizon_bars"],
-        "judgment_type": "主观研判",
+        "judgment_type": "主观研判模板（脚本预填，未经 Agent 调整）",
+        "generator": AUTO_INIT_GENERATOR,
         "summary_cn": summary_cn,
         "primary_scenario_id": primary["scenario_id"],
         "alternate_scenario_id": alternate["scenario_id"],
@@ -609,5 +698,23 @@ def generate_constrained_judgment(report: dict[str, Any]) -> dict[str, Any]:
         "conflicting_signals_reviewed": [c["id"] for c in pack.get("conflicting_signals") or []],
         "key_levels_to_watch": key_levels,
         "falsification_condition": falsification_text,
-        "disclaimer_cn": "本节为锚定 L2 历史条件频率的受约束主观研判，已记入日志待到期按 Brier 分数与 BSS 检验，不构成投资建议。",
+        "disclaimer_cn": "本节为脚本按证据条数预填的研判模板（非 Agent 主观研判），记入日志时单独标注来源、不计入 LLM 技能分，不构成投资建议。",
     }
+
+
+def judgment_origin(judgment: dict[str, Any], report: dict[str, Any]) -> str:
+    """判定研判来源：各情景主观概率与 --auto-init 模板完全一致即视为模板（无论是否改过文字），否则为 Agent 研判。"""
+    try:
+        template = generate_constrained_judgment(report)
+    except (KeyError, ValueError, IndexError, TypeError):
+        return AGENT_ORIGIN
+    tmpl = {sj["scenario_id"]: float(sj["subjective_probability_pct"]) for sj in template["scenario_judgments"]}
+    got: dict[str, float] = {}
+    for sj in judgment.get("scenario_judgments") or []:
+        try:
+            got[str(sj["scenario_id"])] = float(sj["subjective_probability_pct"])
+        except (KeyError, TypeError, ValueError):
+            return AGENT_ORIGIN
+    if set(got) == set(tmpl) and all(abs(got[k] - tmpl[k]) <= 0.005 for k in tmpl):
+        return AUTO_INIT_GENERATOR
+    return AGENT_ORIGIN

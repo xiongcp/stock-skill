@@ -452,6 +452,22 @@ def label_scenario_event(
     }
 
 
+def _event_definition_cn(scenario_id: str, direction: str, horizon_bars: int) -> str:
+    """说明 L2 实际统计的标准化事件（与 label_scenario_event 同口径），避免把频率误读为情景目标价的到达频率。"""
+    tgt, inv = SCENARIO_BARRIER_ATR.get(scenario_id, (1.40, 1.05))
+    tail = "；以触发日 ATR 为单位的标准化屏障，不是本情景目标价/失效价的到达频率"
+    if scenario_id in ("RANGE_OSCILLATION", "neutral"):
+        return f"标准化事件：触发后 {horizon_bars} 根K线内收盘始终未越出触发日收盘 ±{inv:.2f}×ATR{tail}"
+    if scenario_id == "APEX_BREAKOUT":
+        return f"标准化事件：触发后 {horizon_bars} 根K线内向任一方向先推进 {tgt:.2f}×ATR、且未反向越过 {inv:.2f}×ATR{tail}"
+    is_bear = direction == "BEARISH" or scenario_id in ("FALSE_BREAKOUT_REVERSAL", "BREAKDOWN_DECLINE", "bear")
+    sign_t, sign_i = ("−", "+") if is_bear else ("+", "−")
+    return (
+        f"标准化事件：触发后 {horizon_bars} 根K线内先触及 {sign_t}{tgt:.2f}×ATR（目标）而非 {sign_i}{inv:.2f}×ATR（失效），"
+        f"同根同时触及按失效计{tail}"
+    )
+
+
 def _scan_events(
     feat: dict[str, list[float]],
     scenario_id: str,
@@ -631,13 +647,19 @@ def compute_scenario_frequency(
     ci_hi_pct = round(ci_tgt[1] * 100.0, 1)
     shrunk_tgt_pct = round(shrunk_tgt * 100.0, 1)
     raw_tgt_pct = round(raw_tgt * 100.0, 1)
+    # 「历史条件频率」一词只用于实际观测频率 k/n（与 Wilson 区间同口径）；收缩或体制加权后的模型估计单独标注
     if low_sample:
         display_cn = (
-            f"历史条件频率 {shrunk_tgt_pct:.1f}%（原始 {raw_tgt_pct:.1f}%，n = {n} 低样本，已做 Beta-Binomial 收缩；"
-            f"95% 区间 {ci_lo_pct:.1f}%~{ci_hi_pct:.1f}%）"
+            f"历史条件频率 {raw_tgt_pct:.1f}%（n = {n} 低样本，95% 区间 {ci_lo_pct:.1f}%~{ci_hi_pct:.1f}%；"
+            f"已向市场基准做 Beta-Binomial 收缩，收缩后估计 {shrunk_tgt_pct:.1f}%）"
+        )
+    elif abs(shrunk_tgt_pct - raw_tgt_pct) >= 0.05:
+        display_cn = (
+            f"历史条件频率 {raw_tgt_pct:.1f}%（n = {n}，95% 区间 {ci_lo_pct:.1f}%~{ci_hi_pct:.1f}%；"
+            f"体制加权估计 {shrunk_tgt_pct:.1f}%）"
         )
     else:
-        display_cn = f"历史条件频率 {shrunk_tgt_pct:.1f}%（n = {n}，95% 区间 {ci_lo_pct:.1f}%~{ci_hi_pct:.1f}%）"
+        display_cn = f"历史条件频率 {raw_tgt_pct:.1f}%（n = {n}，95% 区间 {ci_lo_pct:.1f}%~{ci_hi_pct:.1f}%）"
 
     return {
         "scenario_id": scenario_id,
@@ -696,6 +718,10 @@ def compute_scenario_frequency(
             "mean_mae_pct": mean_mae,
         },
         "display_cn": display_cn,
+        "estimate_method": (
+            "BETA_BINOMIAL_SHRINKAGE" if low_sample else ("REGIME_WEIGHTED_BLEND" if abs(shrunk_tgt_pct - raw_tgt_pct) >= 0.05 else "RAW")
+        ),
+        "event_definition_cn": _event_definition_cn(scenario_id, direction, horizon_bars),
     }
 
 

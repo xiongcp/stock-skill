@@ -26,17 +26,17 @@ metadata:
 
 1. **先查代码，不凭记忆猜后缀**：只要用户未提供带 `.SH` / `.SZ` / `.BJ` / `.HK` / `.US` 的完整代码，必须先运行 `scripts/resolve_symbol.py`；多候选时原样列出请用户选择。
 2. **运行主脚本生成同源产物**：运行 `scripts/analyze_and_forecast.py`，生成 `*_report.md`、`*_result.json`、`*_judgment_pack.json`、`*_preview.png` 与 `*_dashboard.html`（需要回测时加 `--backtest`）。
-3. **需要 L3 情景研判时一键预填校验**：切勿从零手写复杂的 `*_judgment.json`（极易因概率和不为 100.0% 或价格不在白名单报错）。直接运行带 `--auto-init` 的校验命令自动生成合规研判并合入报告第 8 节：
+3. **需要 L3 情景研判时先预填模板再研判**：切勿从零手写复杂的 `*_judgment.json`（极易因概率和不为 100.0% 或价格不在白名单报错）。先运行带 `--auto-init` 的校验命令生成满足全部硬约束的**预填模板**（脚本按偏多/偏空证据条数机械调整，不是主观研判）：
    ```bash
-   uv run python scripts/validate_judgment.py --result artifacts/cn_stock/600519_SH_result.json --judgment artifacts/cn_stock/600519_SH_judgment.json --auto-init
+   uv run python scripts/validate_judgment.py --result artifacts/cn_stock/600519.SH_result.json --judgment artifacts/cn_stock/600519.SH_judgment.json --auto-init
    ```
-   如需微调各情景主观研判概率，在该预填 JSON 上修改（保持总和 `100.0%`、调整幅度不超 `±15%` / 低样本 `±10%`）后再次运行上述命令校验。
+   要给出主观研判，必须复核证据后在该 JSON 上改写各情景概率与理由（保持总和 `100.0%`、调整幅度不超 `±15%` / 低样本 `±10%`），并把 `judgment_type` 改为 `主观研判` 后再次运行上述命令校验。概率与模板完全相同时，校验输出 `origin = AUTO_INIT_TEMPLATE`，报告第 8 节标题为「情景研判模板（脚本预填，未经 Agent 主观研判）」，回复中只能称「脚本预填模板」，不得称主观研判概率；该记录也不计入 LLM 技能分。
 4. **原样采用 `*_report.md` 骨架与「直出摘要」**：
    - 回复第一段直接使用 `*_report.md` 第 1 节中的 `- 直出摘要（供 Agent / Flash 模型首段原样引用）`（当 `risk_officer_veto == true` 时已自动将 `【风控否决】` 置顶）。
    - 正文各节直接复制 `*_report.md` 的表格与点位，**严禁四舍五入或改写任何价格数字**（例如把 `1349.43` 改成 `1349.4` 或 `1350` 会触发价格白名单拦截），**严禁删减 `historical_frequency.display_cn` 中的样本数 `(n = ...)` 与 `95% 区间`**。
 5. **发出回复前必跑 `lint_response.py` 自检**：将拟发送的中文回复保存到临时文件，执行：
    ```bash
-   uv run python scripts/lint_response.py --result artifacts/cn_stock/600519_SH_result.json --response artifacts/cn_stock/reply_draft.md
+   uv run python scripts/lint_response.py --result artifacts/cn_stock/600519.SH_result.json --response artifacts/cn_stock/reply_draft.md
    ```
    确认输出 `"status": "OK"` 后再发送给用户。
 
@@ -120,7 +120,7 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 1. **数据说明**：数据源（`meta.data_source`）、截止日（`meta.as_of`）、复权口径（`meta.adjustment`），以及上一步需要转述的告警或备注。
 2. **大盘先行**：基准的 `market_benchmark.regime`、`regime_score`，以及个股的 `relative_strength_vs_index`。
 3. **结构与规则**：
-   - `multi_timeframe_score.rule_score` 是 0~100 的确定性规则分，不是胜率或概率。
+   - `multi_timeframe_score.rule_score` 是 0~100 的确定性规则分，不是胜率或概率。`multi_timeframe_score.regime_adjustment.applied = true`（均值回归体制）时，规则分已按反转规则调整、不等于四组分项之和，必须原文转述 `regime_adjustment.note_cn`，不得把调整后的低分说成"多周期空头"。
    - `rule_scenarios` 按"触发条件 → 目标位 → 失效条件"转述，同时转述 `rule_scenarios.scenarios` 中 2~5 个适用情景的状态（`已在进行中` / `待触发`）、到达目标用时中位数（`time_window_bars.median`）和历史条件频率（`historical_frequency.display_cn`）；报告里的"现价附近正在争夺的价位"（`contested_levels`）不作触发条件，路径时间尺度只说时间量级，目标超出预测期时照实说明。
    - 浪型先说主计数，再说 `wave_counts` 里的备选数法及各自的否定条件；备选数法不代表可能性大小。形态为"形态不明确"时不套用教科书形态。
    - 形态只引用 `algebraic_patterns_detected` 里的 `name_cn` 和 `formula_verified`。
@@ -139,7 +139,7 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
    - 必须同时给出 `calibration_audit` 的实测覆盖率与 `effective_independent_samples`。
    - `promotion_status` 为 `RESEARCH_CALIBRATION_WARMUP` 时称"校准观察期"，不得把覆盖率说成区间已验证可靠；有效独立样本低于 `min_effective_independent_samples`（20）时不会晋级（判定见 `references/math-patterns.md` 第 5 节）。
 6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率（带 95% 区间）、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。规则分 IC 的结论（`rule_score_ic.verdict`）原文转述，`informative = false` 时说明规则分在该标的上只作描述。同时转述 `scenario_frequency_brier` 的样本外 Brier 分数、全样本基准率 Brier 分数与技能分 `brier_skill_score`（仅当 `brier_skill_score > 0` 时才说"历史频率具有区分度"）。
-7. **L3 受约束情景研判（可选，按 `references/llm-judgment-protocol.md` 执行）**：读取 `*_judgment_pack.json`，以 L2 基准概率为起点、引用 `E1…En` 证据编号做有界调整（`n>=30` 最多 ±15%，`n<30` 最多 ±10%，互斥情景概率和 = 100%），写出 `*_judgment.json` 并运行 `uv run python scripts/validate_judgment.py --result <..._result.json> --judgment <..._judgment.json> --auto-init` 校验通过后，在「LLM 情景研判（主观判断，已记录待检验）」章节同时展示调整前后数值、证据编号与证伪条件。可用 `scripts/lint_response.py` 校验最终回复文本，用 `scripts/score_judgments.py` 对到期研判打分。
+7. **L3 受约束情景研判（可选，按 `references/llm-judgment-protocol.md` 执行）**：读取 `*_judgment_pack.json`，以 L2 基准概率为起点、引用 `E1…En` 证据编号做有界调整（`n>=30` 最多 ±15%，`n<30` 最多 ±10%，互斥情景概率和 = 100%），写出 `*_judgment.json`（可先用 `--auto-init` 生成预填模板再改写）并运行 `uv run python scripts/validate_judgment.py --result <..._result.json> --judgment <..._judgment.json>` 校验通过后，在「LLM 情景研判（主观判断，已记录待检验）」章节同时展示调整前后数值、证据编号与证伪条件；校验输出 `origin = AUTO_INIT_TEMPLATE`（未改写模板）时只能按「脚本预填模板」转述。可用 `scripts/lint_response.py` 校验最终回复文本，用 `scripts/score_judgments.py` 对到期研判打分。
 8. **文件**：给出 `result.json` 与 `dashboard.html` 的路径；客户端能显示图片时再内嵌 `preview.png`，否则只给路径。
 9. **免责声明**：结尾注明"以上为规则化技术分析，仅供研究参考，不构成投资建议"。
 
@@ -147,7 +147,7 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 
 - `rule_score`、`regime_score`、过滤分都是确定性规则打分，**不是**胜率、概率或置信度；Volume Profile 是成交分布近似，不是真实持仓筹码。
 - 只允许两类概率，而且**只有 JSON 中存在对应字段时才能说出数字**：
-  1. **历史条件频率**：脚本在该标的自身历史上无前视统计的"情景触发后先到目标 / 先到失效 / 到期"频率（字段 `rule_scenarios.scenarios[*].historical_frequency` 及 `rule_scenarios.{bull,neutral,bear}.historical_frequency`，已提供）。必须直接引用 `display_cn` 或写成"历史条件频率 X%（n = …，95% 区间 a%~b%）"，样本数 n < 30 时带"低样本，已向市场基准收缩"说明，不叫胜率、不叫上涨概率。
+  1. **历史条件频率**：脚本在该标的自身历史上无前视统计的"情景触发后先到目标 / 先到失效 / 到期"频率（字段 `rule_scenarios.scenarios[*].historical_frequency` 及 `rule_scenarios.{bull,neutral,bear}.historical_frequency`，已提供）。必须直接引用 `display_cn` 或写成"历史条件频率 X%（n = …，95% 区间 a%~b%）"，样本数 n < 30 时带"低样本，已向市场基准收缩"说明，不叫胜率、不叫上涨概率。它统计的是以 ATR 为单位的标准化屏障事件（`historical_frequency.event_definition_cn`），不是本情景目标价的到达概率；括号内的「体制加权估计」「收缩后估计」是模型估计，引用时必须带上这个名称。
   2. **主观研判概率**：由你（运行技能的 agent）按 `references/llm-judgment-protocol.md` 以 `*_judgment_pack.json` 中的基准概率为锚点做有界调整，引用证据编号 `E1…En`、不超过调整上限、写入 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验后才能给出，必须标注"主观研判，已记录待检验"。
 - **严禁无依据概率**：除上述 `historical_frequency`、回测成交胜率（附 95% 区间与样本量提示）和区间覆盖率外，回答中不得出现"上涨概率 60%""胜算七成""大概率突破"等未经校验的概率数字或等价说法。
 - 推演路径只写"触发条件 → 目标位 → 失效条件"；15 个交易日的方向本身接近随机，不得承诺涨跌。
@@ -175,13 +175,13 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 
 > 风控已否决做多：大盘环境评分偏弱（沪深300 状态分 16.0 < 35），以下点位只用于观察，不构成做多建议。
 >
-> 数据为新浪日线，截至 2026-10-16，前复权含分红，数据质量 OK。规则分 81.0/100（多周期多头共振），这是规则加权分，不是胜率。结构上是扩散喇叭形，10-16 起收盘站上上轨 1 个交易日：上攻需日线放量收盘站上 1358.18，目标 1381.97，收盘跌回 1349.43 下方视为假突破；下探以收盘跌破 1314.37 为触发，目标 1291.44。现价附近的 1338.86、1329.88、1320.43 是正在争夺的价位，不作触发条件。浪型主计数为上涨 ABC（收盘跌破 1228.10 失效），备选为下跌 ABC（收盘站上 1363.35 失效）。……（大盘、风控与持仓防守、区间、回测与 IC、文件、免责声明依次展开）
+> 数据为新浪日线，截至 2026-10-16，前复权含分红，数据质量 OK。规则分 28.5/100（均值回归体制评分偏空）：近 240 日均线偏离与随后 15 日收益负相关，四组规则分项合计 81.0 经反转调整为 28.5，衡量的是追高风险，不代表多周期空头；这是规则加权分，不是胜率。结构上是扩散喇叭形，10-16 起收盘站上上轨 1 个交易日：上攻需日线放量收盘站上 1358.18，目标 1381.97，收盘跌回 1349.43 下方视为假突破（突破回踩历史条件频率 30.6%，n = 49，95% 区间 19.5%~44.5%；统计的是 ATR 标准化事件，不是到达目标价的概率）；下探以收盘跌破 1314.37 为触发，目标 1291.44。现价附近的 1338.86、1329.88、1320.43 是正在争夺的价位，不作触发条件。浪型主计数为上涨 ABC（收盘跌破 1228.10 失效），备选为下跌 ABC（收盘站上 1363.35 失效）。……（大盘、风控与持仓防守、区间、回测与 IC、文件、免责声明依次展开）
 
 错误的回复（不得这样写）：
 
 > ~~茅台已经向上突破，上涨概率约 70%，建议 1330 附近买入，目标 1440。~~
 
-错在：没有置顶风控否决；编造了概率；把浪型测算位 1440.44 说成目标价；给出了个性化买入建议。
+错在：没有置顶风控否决；编造了概率；把浪型测算位 1440.44 说成目标价；给出了个性化买入建议。`scripts/lint_response.py` 会拦截其中的概率措辞与"1330 附近买入""目标 1440"。
 
 ## 八、参考文档（按需读取）
 

@@ -96,10 +96,12 @@ def render_report_markdown(
         if debate.get("risk_officer_veto")
         else ""
     )
+    mr_adj = mtf.get("regime_adjustment") or {}
+    mr_note = f"{mr_adj['note_cn']}。" if mr_adj.get("applied") else ""
     flash_digest = (
         f"{veto_prefix}数据截至 {meta['as_of']}（数据源 {meta['data_source']}，{ADJUSTMENT_CN.get(meta.get('adjustment'), meta.get('adjustment'))}，质量 {quality['status']}）。"
         f"基准 {bench['index_name']}（{bench['index_symbol']}）处于{bench['regime_label_cn']}（状态分 {bench['regime_score']:.1f}/100）。"
-        f"本标的规则分 {mtf['rule_score']:.1f}/100（{mtf['rating_cn']}，确定性规则加权分，不是胜率或上涨概率），"
+        f"本标的规则分 {mtf['rule_score']:.1f}/100（{mtf['rating_cn']}，确定性规则加权分，不是胜率或上涨概率），{mr_note}"
         f"当前评级为「{decision['action_cn']}」（{decision['setup_label_cn']}），最新收盘 {price(last_close)}，"
         f"三重屏障计划入场区 {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])}、止损 {price(plan['stop_loss_barrier'])}、"
         f"TP1 {price(plan['take_profit_1'])}（扣费后净盈亏比 {plan['risk_reward_ratio']:.2f}）；"
@@ -110,7 +112,8 @@ def render_report_markdown(
         "",
         f"- 直出摘要（供 Agent / Flash 模型首段原样引用）：{flash_digest}",
         f"- 结论：{debate['final_verdict_cn']}",
-        f"- 规则分：**{mtf['rule_score']:.1f} / 100**（{mtf['rating_cn']}）。这是确定性规则加权分，不是胜率，也不是上涨概率。",
+        f"- 规则分：**{mtf['rule_score']:.1f} / 100**（{mtf['rating_cn']}）。这是确定性规则加权分，不是胜率，也不是上涨概率。"
+        + (f"{mr_note}" if mr_note else ""),
         f"- 最新收盘：{price(last_close)}；计划类型：{decision['setup_label_cn']}。",
         "",
     ]
@@ -181,7 +184,11 @@ def render_report_markdown(
             ]
         lines += [
             "",
-            "- 口径说明：历史条件频率是在本标的自身历史上逐日无前视统计「同情景触发后先触及目标 / 先触及失效 / 到期」的频率（只消费当时已成熟的样本）；样本数 n < 30 时向市场基准指数同情景频率做 Beta-Binomial 收缩并标为低样本。该数字称为「历史条件频率」，不是交易胜率，也不是未来上涨概率。",
+            "- 口径说明：历史条件频率是在本标的自身历史上逐日无前视统计的实际观测频率（只消费当时已成熟的样本，与括号内 Wilson 95% 区间同口径）。"
+            "它统计的是以触发日 ATR 为单位的**标准化屏障事件**（如「15 根K线内先触及 +1.55×ATR 而非 −1.05×ATR」，各情景定义见 `historical_frequency.event_definition_cn`），"
+            "**不是表中目标价的到达频率**；同一情景相邻触发日只间隔 2 根K线，结果期互相重叠，n 高估了独立样本数。"
+            "括号内的「体制加权估计」「收缩后估计」是按趋势体制、近期样本或市场基准修正后的模型估计（风控守门与研判锚点使用该值），不是观测频率。"
+            "该数字不是交易胜率，也不是未来上涨概率。",
             "",
         ]
     imp = sc.get("impulse_wave")
@@ -457,11 +464,24 @@ def render_report_markdown(
     active_judgment = judgment or report.get("llm_judgment")
     jpack = report.get("judgment_pack") or {}
     if active_judgment:
+        from judgment import AUTO_INIT_GENERATOR, judgment_origin
+
+        if judgment_origin(active_judgment, report) == AUTO_INIT_GENERATOR:
+            lines += [
+                "## 8. 情景研判模板（脚本预填，未经 Agent 主观研判）",
+                "",
+                "> **模板声明**：本节由 `validate_judgment.py --auto-init` 按偏多/偏空证据条数机械预填（每情景调整不超过 ±4 个百分点），"
+                "不是 Agent 的主观研判；对外转述时只能称「脚本预填模板」，不得称为主观研判概率。日志中单独标注来源，不计入 LLM 技能分。",
+                "",
+            ]
+        else:
+            lines += [
+                "## 8. LLM 情景研判（主观判断，已记录待检验）",
+                "",
+                "> **主观研判声明**：本节为锚定 L2 历史条件频率的受约束主观研判（非确定性公式计算），调整幅度受样本量上限约束，且已记入日志待到期按 Brier 分数与技能分 BSS 检验。",
+                "",
+            ]
         lines += [
-            "## 8. LLM 情景研判（主观判断，已记录待检验）",
-            "",
-            "> **主观研判声明**：本节为锚定 L2 历史条件频率的受约束主观研判（非确定性公式计算），调整幅度受样本量上限约束，且已记入日志待到期按 Brier 分数与技能分 BSS 检验。",
-            "",
             f"- 研判综述：{active_judgment.get('summary_cn', '')}",
             "",
             "| 情景 | L2 历史条件频率 | 基准概率（调整前） | 主观研判概率（调整后） | 调整幅度（上限） | 支持证据 | 反对/约束证据 | 调整理由 |",

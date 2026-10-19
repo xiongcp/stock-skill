@@ -30,69 +30,69 @@
     },
     "entry_rule": "决策日收盘给出 LONG_CONFIRMED/WATCH_LONG_SETUP 时，次日开盘价落在计划入场区内才成交；出场 = 计划止损 / TP1 / 时间屏障（无移动止损）",
     "actions_seen": {
-      "NEUTRAL_HOLD_WAIT": 156,
-      "DEFENSIVE_AVOID": 103,
-      "WATCH_LONG_SETUP": 30,
-      "LONG_CONFIRMED": 12
+      "NEUTRAL_HOLD_WAIT": 165,
+      "DEFENSIVE_AVOID": 116,
+      "WATCH_LONG_SETUP": 17,
+      "LONG_CONFIRMED": 3
     },
-    "no_fill_outside_entry_zone": 1,
+    "no_fill_outside_entry_zone": 6,
     "all_long_signals": {
-      "trades": 16,
-      "cumulative_return_pct": -0.62,
-      "win_rate_pct": 43.75,
+      "trades": 8,
+      "cumulative_return_pct": 3.32,
+      "win_rate_pct": 50.0,
       "win_rate_95ci_pct": [
-        23.1,
-        66.82
+        21.52,
+        78.48
       ],
       "mean_return_95ci_pct": [
-        -1.43,
-        1.44
+        -1.69,
+        2.33
       ],
-      "sharpe": 0.01,
-      "max_drawdown_pct": 8.23,
-      "profit_factor": 1.0
+      "sharpe": 0.4,
+      "max_drawdown_pct": 5.09,
+      "profit_factor": 1.4
     },
     "long_confirmed": {
-      "trades": 3,
-      "cumulative_return_pct": 4.48,
-      "win_rate_pct": 66.67,
+      "trades": 2,
+      "cumulative_return_pct": 6.21,
+      "win_rate_pct": 100.0,
       "win_rate_95ci_pct": [
-        20.77,
-        93.85
+        34.24,
+        100.0
       ],
       "mean_return_95ci_pct": [
-        -3.69,
-        4.32
+        2.14,
+        3.98
       ],
-      "sharpe": 0.54,
-      "max_drawdown_pct": 3.69,
-      "profit_factor": 2.25
+      "sharpe": 3.04,
+      "max_drawdown_pct": 0.0,
+      "profit_factor": 9.99
     },
     "watch_long_setup": {
-      "trades": 13,
-      "cumulative_return_pct": -4.88,
-      "win_rate_pct": 38.46,
+      "trades": 6,
+      "cumulative_return_pct": -2.73,
+      "win_rate_pct": 33.33,
       "win_rate_95ci_pct": [
-        17.71,
-        64.48
+        9.68,
+        70.0
       ],
       "mean_return_95ci_pct": [
-        -1.71,
-        1.39
+        -2.37,
+        1.56
       ],
-      "sharpe": -0.4,
-      "max_drawdown_pct": 10.97,
-      "profit_factor": 0.77
+      "sharpe": -0.34,
+      "max_drawdown_pct": 5.4,
+      "profit_factor": 0.71
     },
     "buy_and_hold_return_pct": -7.11,
     "veto_reason_counts": {
-      "RR_INSUFFICIENT": 170,
+      "RR_INSUFFICIENT": 197,
       "BELOW_LOWER_RAIL": 58,
       "BREAKOUT_LOW_VOLUME": 32,
       "BENCHMARK_WEAK": 32
     },
     "rule_score_ic": {
-      "spearman": 0.152,
+      "spearman": 0.261,
       "decisions": 301,
       "effective_independent_samples": 20,
       "forward_horizon_bars": 15,
@@ -105,74 +105,74 @@
           0.0,
           38.0
         ],
-        "decisions": 49,
-        "mean_forward_return_pct": -2.46,
-        "median_forward_return_pct": -2.79,
-        "up_share_pct": 24.5
+        "decisions": 110,
+        "mean_forward_return_pct": -1.13,
+        "median_forward_return_pct": -1.93,
+        "up_share_pct": 35.5
       },
       {
         "range": [
           38.0,
           52.0
         ],
-        "decisions": 98,
+        "decisions": 106,
         "mean_forward_return_pct": -0.67,
         "median_forward_return_pct": -1.13,
-        "up_share_pct": 34.7
+        "up_share_pct": 34.9
       },
       {
         "range": [
           52.0,
           65.0
         ],
-        "decisions": 102,
-        "mean_forward_return_pct": 1.64,
-        "median_forward_return_pct": 1.07,
-        "up_share_pct": 65.7
+        "decisions": 73,
+        "mean_forward_return_pct": 1.45,
+        "median_forward_return_pct": 1.19,
+        "up_share_pct": 64.4
       },
       {
         "range": [
           65.0,
           100.0
         ],
-        "decisions": 52,
-        "mean_forward_return_pct": -1.19,
-        "median_forward_return_pct": -2.6,
-        "up_share_pct": 32.7
+        "decisions": 12,
+        "mean_forward_return_pct": 0.71,
+        "median_forward_return_pct": 0.29,
+        "up_share_pct": 58.3
       }
     ],
     "action_forward_returns": {
       "LONG_CONFIRMED": {
-        "decisions": 12,
-        "mean_forward_return_pct": 1.19,
-        "median_forward_return_pct": -0.9,
-        "up_share_pct": 50.0
+        "decisions": 3,
+        "mean_forward_return_pct": 2.71,
+        "median_forward_return_pct": 4.28,
+        "up_share_pct": 66.7
       },
       "WATCH_LONG_SETUP": {
-        "decisions": 30,
-        "mean_forward_return_pct": 0.96,
-        "median_forward_return_pct": -0.22,
-        "up_share_pct": 46.7
+        "decisions": 17,
+        "mean_forward_return_pct": 0.59,
+        "median_forward_return_pct": -0.3,
+        "up_share_pct": 41.2
       },
       "NEUTRAL_HOLD_WAIT": {
-        "decisions": 156,
-        "mean_forward_return_pct": 0.56,
-        "median_forward_return_pct": 0.05,
-        "up_share_pct": 50.6
+        "decisions": 165,
+        "mean_forward_return_pct": 0.17,
+        "median_forward_return_pct": -0.12,
+        "up_share_pct": 49.1
       },
       "DEFENSIVE_AVOID": {
-        "decisions": 103,
-        "mean_forward_return_pct": -2.05,
-        "median_forward_return_pct": -2.43,
-        "up_share_pct": 30.1
+        "decisions": 116,
+        "mean_forward_return_pct": -1.1,
+        "median_forward_return_pct": -2.0,
+        "up_share_pct": 34.5
       }
     },
     "scenario_frequency_brier": {
       "samples": 848,
-      "brier_score": 0.2219,
+      "brier_score": 0.2239,
       "climatology_base_rate": 0.3679,
       "climatology_brier_score": 0.2326,
-      "brier_skill_score": 0.0459,
+      "brier_skill_score": 0.0371,
       "discriminative": true,
       "reliability_buckets": [
         {
@@ -181,10 +181,10 @@
             0.2
           ],
           "bucket_pct": "0%~20%",
-          "count": 175,
-          "mean_predicted_freq": 0.1612,
-          "empirical_hit_rate": 0.0914,
-          "calibration_gap": -0.0698
+          "count": 178,
+          "mean_predicted_freq": 0.1321,
+          "empirical_hit_rate": 0.0899,
+          "calibration_gap": -0.0422
         },
         {
           "bucket": [
@@ -192,10 +192,10 @@
             0.4
           ],
           "bucket_pct": "20%~40%",
-          "count": 255,
-          "mean_predicted_freq": 0.3577,
-          "empirical_hit_rate": 0.5137,
-          "calibration_gap": 0.156
+          "count": 220,
+          "mean_predicted_freq": 0.3433,
+          "empirical_hit_rate": 0.5591,
+          "calibration_gap": 0.2158
         },
         {
           "bucket": [
@@ -203,10 +203,10 @@
             0.6
           ],
           "bucket_pct": "40%~60%",
-          "count": 328,
-          "mean_predicted_freq": 0.4621,
-          "empirical_hit_rate": 0.3445,
-          "calibration_gap": -0.1176
+          "count": 378,
+          "mean_predicted_freq": 0.4606,
+          "empirical_hit_rate": 0.3439,
+          "calibration_gap": -0.1167
         },
         {
           "bucket": [
@@ -214,10 +214,10 @@
             0.8
           ],
           "bucket_pct": "60%~80%",
-          "count": 51,
-          "mean_predicted_freq": 0.6233,
-          "empirical_hit_rate": 0.4118,
-          "calibration_gap": -0.2115
+          "count": 33,
+          "mean_predicted_freq": 0.6373,
+          "empirical_hit_rate": 0.3636,
+          "calibration_gap": -0.2737
         },
         {
           "bucket": [
@@ -226,143 +226,143 @@
           ],
           "bucket_pct": "80%~100%",
           "count": 39,
-          "mean_predicted_freq": 0.8489,
+          "mean_predicted_freq": 0.8499,
           "empirical_hit_rate": 0.7949,
-          "calibration_gap": -0.054
+          "calibration_gap": -0.055
         }
       ],
       "per_scenario": {
         "APEX_BREAKOUT": {
           "samples": 39,
-          "mean_predicted_freq": 0.8489,
+          "mean_predicted_freq": 0.8499,
           "empirical_hit_rate": 0.7949,
-          "brier_score": 0.1682
+          "brier_score": 0.1673
         },
         "BREAKDOWN_DECLINE": {
           "samples": 209,
-          "mean_predicted_freq": 0.4013,
+          "mean_predicted_freq": 0.4411,
           "empirical_hit_rate": 0.4067,
-          "brier_score": 0.2605
+          "brier_score": 0.2719
         },
         "BREAKOUT_RETEST": {
           "samples": 181,
-          "mean_predicted_freq": 0.3783,
+          "mean_predicted_freq": 0.3766,
           "empirical_hit_rate": 0.453,
-          "brier_score": 0.2546
+          "brier_score": 0.2563
         },
         "C_WAVE_REVERSAL": {
           "samples": 76,
-          "mean_predicted_freq": 0.475,
+          "mean_predicted_freq": 0.4227,
           "empirical_hit_rate": 0.3947,
-          "brier_score": 0.2936
+          "brier_score": 0.2778
         },
         "FALSE_BREAKOUT_REVERSAL": {
           "samples": 87,
-          "mean_predicted_freq": 0.5364,
+          "mean_predicted_freq": 0.5614,
           "empirical_hit_rate": 0.4368,
-          "brier_score": 0.2603
+          "brier_score": 0.2718
         },
         "OVERSOLD_BOUNCE": {
           "samples": 47,
-          "mean_predicted_freq": 0.5713,
+          "mean_predicted_freq": 0.3689,
           "empirical_hit_rate": 0.4894,
-          "brier_score": 0.2917
+          "brier_score": 0.2868
         },
         "RANGE_OSCILLATION": {
           "samples": 179,
-          "mean_predicted_freq": 0.162,
+          "mean_predicted_freq": 0.1325,
           "empirical_hit_rate": 0.0894,
-          "brier_score": 0.0893
+          "brier_score": 0.0866
         },
         "TREND_CONTINUATION": {
           "samples": 30,
-          "mean_predicted_freq": 0.3931,
+          "mean_predicted_freq": 0.3928,
           "empirical_hit_rate": 0.2333,
-          "brier_score": 0.2141
+          "brier_score": 0.2139
         }
       },
-      "verdict": "样本外 Brier = 0.2219，优于全样本基准率 Brier = 0.2326（技能分 BSS = +0.046 > 0，历史频率具有区分度）"
+      "verdict": "样本外 Brier = 0.2239，优于全样本基准率 Brier = 0.2326（技能分 BSS = +0.037 > 0，历史频率具有区分度）"
     },
     "sample_trades": [
       {
         "tradable": true,
-        "entry_idx": 670,
-        "entry_day": "2026-06-04",
-        "entry_price": 1278.99,
-        "exit_idx": 680,
-        "exit_day": "2026-06-18",
-        "exit_price": 1233.4,
-        "holding_bars": 11,
-        "outcome": "SL_BARRIER",
-        "barrier_label": -1,
-        "gross_return": -0.03565,
-        "net_return": -0.03685,
-        "signal_day": "2026-06-03",
+        "entry_idx": 623,
+        "entry_day": "2026-03-25",
+        "entry_price": 1410.11,
+        "exit_idx": 627,
+        "exit_day": "2026-03-31",
+        "exit_price": 1468.0,
+        "holding_bars": 5,
+        "outcome": "TP_BARRIER",
+        "barrier_label": 1,
+        "gross_return": 0.04105,
+        "net_return": 0.03985,
+        "signal_day": "2026-03-24",
         "action": "LONG_CONFIRMED",
         "setup_type": "LEFT_SIDE_PULLBACK",
         "plan_entry_zone": [
-          1269.49,
-          1287.43
+          1394.22,
+          1413.16
         ],
-        "plan_stop_loss": 1233.4,
-        "plan_take_profit_1": 1340.57
+        "plan_stop_loss": 1370.58,
+        "plan_take_profit_1": 1452.66
       },
       {
         "tradable": true,
-        "entry_idx": 682,
-        "entry_day": "2026-06-23",
-        "entry_price": 1239.0,
-        "exit_idx": 684,
-        "exit_day": "2026-06-25",
-        "exit_price": 1201.11,
+        "entry_idx": 647,
+        "entry_day": "2026-04-29",
+        "entry_price": 1405.0,
+        "exit_idx": 649,
+        "exit_day": "2026-05-06",
+        "exit_price": 1365.1,
         "holding_bars": 3,
         "outcome": "SL_BARRIER",
         "barrier_label": -1,
-        "gross_return": -0.03058,
-        "net_return": -0.03178,
-        "signal_day": "2026-06-22",
+        "gross_return": -0.0284,
+        "net_return": -0.0296,
+        "signal_day": "2026-04-28",
         "action": "WATCH_LONG_SETUP",
         "setup_type": "LEFT_SIDE_PULLBACK",
         "plan_entry_zone": [
-          1229.73,
-          1246.6
+          1399.74,
+          1414.21
         ],
-        "plan_stop_loss": 1201.11,
-        "plan_take_profit_1": 1293.75
+        "plan_stop_loss": 1371.99,
+        "plan_take_profit_1": 1455.98
       },
       {
         "tradable": true,
-        "entry_idx": 687,
-        "entry_day": "2026-06-30",
-        "entry_price": 1187.0,
-        "exit_idx": 698,
-        "exit_day": "2026-07-15",
-        "exit_price": 1251.02,
-        "holding_bars": 12,
-        "outcome": "TP_BARRIER",
-        "barrier_label": 1,
-        "gross_return": 0.05393,
-        "net_return": 0.05273,
-        "signal_day": "2026-06-29",
+        "entry_idx": 667,
+        "entry_day": "2026-06-01",
+        "entry_price": 1327.0,
+        "exit_idx": 669,
+        "exit_day": "2026-06-03",
+        "exit_price": 1299.46,
+        "holding_bars": 3,
+        "outcome": "SL_BARRIER",
+        "barrier_label": -1,
+        "gross_return": -0.02075,
+        "net_return": -0.02195,
+        "signal_day": "2026-05-29",
         "action": "WATCH_LONG_SETUP",
         "setup_type": "LEFT_SIDE_PULLBACK",
         "plan_entry_zone": [
-          1181.41,
-          1200.98
+          1320.48,
+          1335.67
         ],
-        "plan_stop_loss": 1151.31,
-        "plan_take_profit_1": 1251.02
+        "plan_stop_loss": 1299.46,
+        "plan_take_profit_1": 1371.0
       }
     ],
-    "sample_size_warning": "成交仅 16 笔（少于 30），胜率/夏普等统计量置信度很低，仅供参考",
+    "sample_size_warning": "成交仅 8 笔（少于 30），胜率/夏普等统计量置信度很低，仅供参考",
     "conformal_forecast_oos": {
       "evaluated_cutoffs": 21,
-      "nominal_50pct_coverage": 0.524,
-      "nominal_80pct_coverage": 0.905,
+      "nominal_50pct_coverage": 0.571,
+      "nominal_80pct_coverage": 0.952,
       "q50_mae_pct": 2.84,
       "random_walk_mae_pct": 2.84,
-      "rolling_all_cutoffs_coverage_50": 0.501,
-      "rolling_all_cutoffs_coverage_80": 0.783,
+      "rolling_all_cutoffs_coverage_50": 0.525,
+      "rolling_all_cutoffs_coverage_80": 0.832,
       "rolling_evaluation_samples": 631,
       "note": "evaluated_cutoffs 为按步长 H 抽样的无重叠独立截面子集；rolling_all_cutoffs_* 与主报告 calibration_audit 完全一致。q50 采用最新收盘价（无漂移），因此与随机游走误差一致。"
     }

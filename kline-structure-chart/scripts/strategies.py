@@ -401,6 +401,7 @@ def compute_multi_timeframe_score(
     res_pts = max(0.0, min(25.0, res_pts))
 
     total_score = round(macro_pts + struct_pts + strat_pts + res_pts, 1)
+    components_total = total_score
 
     # 5. 无前视动量/反转体制自适应旋转与周线 60 周结构位置协同
     mom_ic = compute_causal_momentum_ic(daily_bars, horizon=15)
@@ -441,10 +442,35 @@ def compute_multi_timeframe_score(
         rating = "NEUTRAL_WATCH"
         rating_cn = "多空分歧/等待确认"
 
+    # 均值回归体制下 rule_score 已按反转规则旋转，四组分项之和不再等于 rule_score；
+    # 中文标签不能再沿用「多周期共振/承压」（周线、结构可能仍偏多），必须写明体制与调整前后数值
+    regime_adjustment: dict[str, Any] = {"applied": False}
+    if is_mr_regime:
+        mr_label = {
+            "BULLISH_RESONANCE": "偏多（价格回落至均值附近）",
+            "BEARISH_PRESSURE": "偏空（短期偏离均值过大，防追高）",
+            "NEUTRAL_WATCH": "中性",
+        }[rating]
+        rating_cn = f"均值回归体制评分{mr_label}"
+        regime_adjustment = {
+            "applied": True,
+            "scoring_regime": "MEAN_REVERSION_ADAPTED",
+            "components_total": components_total,
+            "adjusted_rule_score": total_score,
+            "causal_momentum_ic_15d": round(mom_ic, 3),
+            "note_cn": (
+                f"均值回归体制：近 240 日 20 日均线偏离与随后 15 日收益的秩相关为 {mom_ic:.3f}（≤ -0.10）且长期均线偏弱，"
+                f"四组规则分项合计 {components_total:.1f} 经反转调整为 {total_score:.1f}；"
+                "该分数衡量的是均值回归下的追高/回落位置，不代表多周期共振或承压"
+            ),
+        }
+
     return {
         "rule_score": total_score,
         "rating": rating,
         "rating_cn": rating_cn,
+        "components_total": components_total,
+        "regime_adjustment": regime_adjustment,
         "components": {
             "macro_trend_25": round(macro_pts, 1),
             "structure_pattern_25": round(struct_pts, 1),

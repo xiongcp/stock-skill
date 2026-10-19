@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from base_rates import _get_or_build_causal_features, label_scenario_event
+from judgment import AUTO_INIT_GENERATOR
 
 MIN_MATURED_FOR_VERDICT = 30
 _EPS = 1e-6
@@ -87,7 +88,12 @@ def score_judgment_entries(
     # (p_llm, y_win) 对，用于可靠性分桶
     pred_outcome_pairs: list[tuple[float, int]] = []
 
+    template_excluded = 0
     for entry in entries:
+        if entry.get("origin") == AUTO_INIT_GENERATOR:
+            # 未经 Agent 改写的 --auto-init 预填模板不是 LLM 研判，不计入 LLM 技能分
+            template_excluded += 1
+            continue
         sym = str(entry.get("symbol") or "")
         as_of = str(entry.get("as_of") or "")
         horizon = int(entry.get("horizon_bars") or 15)
@@ -152,6 +158,7 @@ def score_judgment_entries(
         return {
             "matured_judgments": 0,
             "pending_judgments": len(pending_ids),
+            "template_judgments_excluded": template_excluded,
             "evaluated_scenario_pairs": 0,
             "llm_brier_score": None,
             "baseline_brier_score": None,
@@ -199,6 +206,7 @@ def score_judgment_entries(
     return {
         "matured_judgments": matured_n,
         "pending_judgments": len(pending_ids),
+        "template_judgments_excluded": template_excluded,
         "evaluated_scenario_pairs": eval_pairs_n,
         "llm_brier_score": round(llm_brier, 6),
         "baseline_brier_score": round(base_brier, 6),

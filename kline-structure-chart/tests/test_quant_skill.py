@@ -1371,6 +1371,18 @@ def test_o3_23_and_o3_24_renderers_and_scenario_conditional_fan(replay_recorded,
         assert f"n = {sc_item['historical_frequency']['sample_size']}" in md_text
 
 
+def _shift_two_scenarios(judgment: dict, delta: float) -> dict:
+    """模拟 Agent 在预填模板上改写概率：前两个情景零和互调 delta 个百分点。"""
+    out = copy.deepcopy(judgment)
+    sjs = out["scenario_judgments"]
+    for sj, d in ((sjs[0], delta), (sjs[1], -delta)):
+        sj["subjective_probability_pct"] = round(sj["subjective_probability_pct"] + d, 2)
+        sj["adjustment_pct"] = round(sj["subjective_probability_pct"] - sj["baseline_probability_pct"], 2)
+    out["judgment_type"] = "主观研判"
+    out["summary_cn"] = "主观研判：" + out["summary_cn"]
+    return out
+
+
 def test_o3_30_to_o3_34_judgment_layer_and_scoring(replay_recorded, tmp_path: Path) -> None:
     from judgment import build_judgment_pack, generate_constrained_judgment, resolve_json_path
     from render_report_md import render_report_markdown
@@ -1441,12 +1453,17 @@ def test_o3_30_to_o3_34_judgment_layer_and_scoring(replay_recorded, tmp_path: Pa
     errs_bad_label = validate_judgment_data(bad_label, rep, pack)
     assert any("主观研判" in e for e in errs_bad_label)
 
-    # O3-33: Markdown 报告合入「七、LLM 情景研判（主观判断，已记录待检验）」章节
+    # O3-33: 未改写的 --auto-init 预填模板只能以「脚本预填模板」章节合入报告；Agent 改写概率后才是主观研判章节
     md_with_j = render_report_markdown(rep, None, valid_judgment)
-    assert "LLM 情景研判（主观判断，已记录待检验）" in md_with_j
+    assert "情景研判模板（脚本预填，未经 Agent 主观研判）" in md_with_j
+    assert "LLM 情景研判（主观判断，已记录待检验）" not in md_with_j
     assert "证伪条件" in md_with_j
     for sj in valid_judgment["scenario_judgments"]:
         assert sj["scenario_name"] in md_with_j
+    agent_judgment = _shift_two_scenarios(valid_judgment, 0.5)
+    assert validate_judgment_data(agent_judgment, rep, pack) == []
+    md_agent = render_report_markdown(rep, None, agent_judgment)
+    assert "LLM 情景研判（主观判断，已记录待检验）" in md_agent
 
     # O3-34: 将历史截面研判写入日志并用真实录制行情回放打分（Brier + 对数损失 + 可靠性分桶 + BSS）
     req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
@@ -1460,12 +1477,16 @@ def test_o3_30_to_o3_34_judgment_layer_and_scoring(replay_recorded, tmp_path: Pa
     hist_rep = analyze_bundle(hist_bundle, req, include_replay=False)
     hist_judg = generate_constrained_judgment(hist_rep)
     log_file = tmp_path / "judgment_log.jsonl"
-    append_judgment_log(hist_judg, hist_rep, log_file)
+    tmpl_entry = append_judgment_log(hist_judg, hist_rep, log_file)
+    agent_entry = append_judgment_log(_shift_two_scenarios(hist_judg, 0.5), hist_rep, log_file)
+    assert tmpl_entry["origin"] == "AUTO_INIT_TEMPLATE" and agent_entry["origin"] == "AGENT"
     entries = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
     score_res = score_judgment_entries(
         entries,
         bars_by_symbol={"600519.SH": bundle_full["target"]["bars"]},
     )
+    # 未改写的预填模板不计入 LLM 技能分
+    assert score_res["template_judgments_excluded"] == 1
     assert score_res["matured_judgments"] == 1
     assert score_res["pending_judgments"] == 0
     assert score_res["evaluated_scenario_pairs"] >= 2
@@ -1598,6 +1619,150 @@ def test_flash_model_digest_and_validate_judgment_auto_init_cli(replay_recorded,
     assert cli.returncode == 0, cli.stderr
     out = json.loads(cli.stdout)
     assert out["status"] == "VALID"
+    assert out["origin"] == "AUTO_INIT_TEMPLATE"
     assert jud_path.exists()
+    assert json.loads(jud_path.read_text(encoding="utf-8"))["generator"] == "AUTO_INIT_TEMPLATE"
     updated_md = md_path.read_text(encoding="utf-8")
-    assert "LLM 情景研判（主观判断，已记录待检验）" in updated_md
+    assert "情景研判模板（脚本预填，未经 Agent 主观研判）" in updated_md
+    log_line = json.loads((tmp_path / "judgment_log.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert log_line["origin"] == "AUTO_INIT_TEMPLATE"
+    # 合入预填模板章节后的报告仍须通过回复契约校验
+    assert lint_agent_response(updated_md, rep) == []
+
+
+def test_p0_mean_reversion_rule_score_adjustment_is_disclosed(replay_recorded, tmp_path: Path) -> None:
+    """均值回归体制下 rule_score 被旋转：必须保留四组分项合计、改用体制标签并在直出摘要中披露调整前后数值。"""
+    rep = run_pipeline(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        output_dir=tmp_path,
+        run_backtest=False,
+    )
+    mtf = rep["multi_timeframe_score"]
+    assert mtf["components_total"] == round(sum(mtf["components"].values()), 1)
+    adj = mtf["regime_adjustment"]
+    # 录制的茅台行情（截至 2026-10-15）处于均值回归体制
+    assert mtf["timeframes_aligned"]["scoring_regime"] == "MEAN_REVERSION_ADAPTED"
+    assert adj["applied"] is True
+    assert adj["components_total"] == mtf["components_total"] and adj["adjusted_rule_score"] == mtf["rule_score"]
+    assert "多周期" not in mtf["rating_cn"] and mtf["rating_cn"].startswith("均值回归体制")
+    md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    digest = next(line for line in md.splitlines() if "直出摘要" in line)
+    assert f"四组规则分项合计 {mtf['components_total']:.1f} 经反转调整为 {mtf['rule_score']:.1f}" in digest
+    e5 = next(e for e in rep["judgment_pack"]["evidence_items"] if e["json_path"] == "multi_timeframe_score.rule_score")
+    assert "均值回归体制" in e5["summary_cn"]
+
+
+def test_p0_falsification_condition_follows_primary_direction() -> None:
+    """证伪条件按主情景方向书写：做空情景不得以「跌破做多止损」为证伪（那是确认）。"""
+    from judgment import build_falsification_text
+
+    alt = {"scenario_name": "假突破回落", "target_price": 1314.37}
+    bull = {"scenario_name": "突破回踩", "direction": "BULLISH", "invalidation_price": 1347.47,
+            "invalidation": "收盘跌回轨道内超过 0.5 个 ATR（跌破 1347.47）", "target_price": 1418.46}
+    bear = {"scenario_name": "破位下行", "direction": "BEARISH", "invalidation_price": 1322.94,
+            "invalidation": "收盘收回破位位 1322.94 上方", "target_price": 1291.44}
+    neut = {"scenario_name": "区间震荡", "direction": "NEUTRAL", "invalidation_price": 1314.37,
+            "invalidation": "收盘越出任一侧（站上 1358.18 或跌破 1314.37）", "target_price": 1329.87}
+    apex = {"scenario_name": "收敛末端变盘", "direction": "BIDIRECTIONAL", "invalidation_price": 1329.87,
+            "invalidation": "—", "target_price": 1400.0}
+
+    t_bull = build_falsification_text(bull, alt, 1308.80, 2)
+    assert "跌破主情景「突破回踩」失效位 1347.47" in t_bull and "跌破三重屏障止损位 1308.80" in t_bull
+    t_bear = build_falsification_text(bear, alt, 1308.80, 2)
+    assert "收盘收回破位位 1322.94 上方" in t_bear
+    assert "止损" not in t_bear and "跌破" not in t_bear
+    t_neut = build_falsification_text(neut, alt, 1308.80, 2)
+    assert "收盘越出任一侧" in t_neut and "止损" not in t_neut
+    t_apex = build_falsification_text(apex, alt, 1308.80, 2, breakout=1358.18, breakdown=1314.37)
+    assert "既未站上 1358.18 也未跌破 1314.37" in t_apex
+    # 待触发情景：失效条件只在触发之后才适用
+    pending = {**bear, "status": "PENDING_TRIGGER", "trigger": "日线收盘跌破 1314.37"}
+    t_pending = build_falsification_text(pending, alt, 1308.80, 2)
+    assert "始终未出现主情景「破位下行」的触发条件（日线收盘跌破 1314.37）" in t_pending
+    assert t_pending.index("触发后") < t_pending.index("收盘收回破位位 1322.94 上方")
+
+
+def test_p0_auto_init_template_is_labeled_and_bearish_primary_falsification_is_consistent(replay_recorded) -> None:
+    from judgment import AUTO_INIT_GENERATOR, generate_constrained_judgment, judgment_origin
+    from validate_judgment import validate_judgment_data
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    rep = analyze_bundle(load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC)), req, include_replay=False)
+    tmpl = generate_constrained_judgment(rep)
+    assert tmpl["generator"] == AUTO_INIT_GENERATOR
+    assert "脚本预填" in tmpl["judgment_type"] and "脚本预填模板" in tmpl["summary_cn"]
+    assert all("脚本预填" in sj["rationale_cn"] for sj in tmpl["scenario_judgments"])
+    assert judgment_origin(tmpl, rep) == AUTO_INIT_GENERATOR
+    assert validate_judgment_data(tmpl, rep) == []
+    primary = next(sj for sj in tmpl["scenario_judgments"] if sj["scenario_id"] == tmpl["primary_scenario_id"])
+    if primary["direction"] != "BULLISH":
+        assert "止损" not in tmpl["falsification_condition"]
+    edited = _shift_two_scenarios(tmpl, 1.0)
+    assert judgment_origin(edited, rep) == "AGENT"
+
+
+def test_p0_l2_display_leads_with_observed_frequency_inside_its_wilson_interval(replay_recorded) -> None:
+    """「历史条件频率」数字必须是实际观测频率（与 Wilson 区间同口径）；收缩/体制加权估计单独标注，并写明标准化事件定义。"""
+    import re as _re
+
+    from base_rates import _build_causal_features, compute_scenario_frequency
+
+    bars = load_recorded("sina_daily/sh600519.json")
+    bench = load_recorded("sina_daily/sh000300.json")
+    checked = blended = 0
+    for cut in range(480, len(bars), 60):
+        feat = _build_causal_features(bars[: cut + 1])
+        bfeat = _build_causal_features([b for b in bench if b["day"] <= bars[cut]["day"]])
+        for sc_id, direction in (("OVERSOLD_BOUNCE", "BULLISH"), ("BREAKDOWN_DECLINE", "BEARISH"),
+                                 ("RANGE_OSCILLATION", "NEUTRAL"), ("BREAKOUT_RETEST", "BULLISH")):
+            hf = compute_scenario_frequency(feat, sc_id, horizon_bars=15, direction=direction, bench_feat=bfeat)
+            if hf["sample_size"] == 0:
+                continue
+            checked += 1
+            m = _re.match(r"历史条件频率 (\d+\.\d)%", hf["display_cn"])
+            assert m and float(m.group(1)) == hf["raw_target_freq_pct"], hf["display_cn"]
+            lo, hi = hf["target_ci_95_pct"]
+            assert lo - 0.05 <= hf["raw_target_freq_pct"] <= hi + 0.05
+            assert "标准化事件" in hf["event_definition_cn"] and "不是本情景目标价" in hf["event_definition_cn"]
+            if hf["low_sample"]:
+                assert "收缩后估计" in hf["display_cn"] and hf["estimate_method"] == "BETA_BINOMIAL_SHRINKAGE"
+            elif hf["estimate_method"] == "REGIME_WEIGHTED_BLEND":
+                blended += 1
+                assert f"体制加权估计 {hf['target_freq_pct']:.1f}%" in hf["display_cn"]
+    assert checked >= 10 and blended >= 1
+
+
+def test_p0_lint_rejects_skill_md_counterexample_and_unvalidated_probabilities(replay_recorded, tmp_path: Path) -> None:
+    """SKILL.md 自己列出的错误回复必须被 lint 拦截；合规的报告、否定式说明与带 95% 区间的回测胜率不得误报。"""
+    from judgment import collect_price_whitelist
+    from lint_response import lint_agent_response
+
+    rep = run_pipeline(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        output_dir=tmp_path,
+        run_backtest=False,
+    )
+    assert rep["debate_and_veto"]["risk_officer_veto"] is True
+    md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    assert lint_agent_response(md, rep) == []
+
+    disclaimer = "以上为规则化技术分析，仅供研究参考，不构成投资建议。"
+    counter = f"风控否决：大盘偏弱。茅台已经向上突破，上涨概率约 70%，胜算七成，大概率突破，建议 1330 附近买入，目标 1440。\n{disclaimer}"
+    errs = lint_agent_response(counter, rep)
+    for token in ("上涨概率", "概率约 70%", "胜算", "大概率", "七成", "1330", "1440"):
+        assert any(token in e for e in errs), (token, errs)
+
+    ok_text = (
+        "风控否决：大盘环境评分偏弱。规则分不是胜率或上涨概率，回复里不得出现「大概率突破」之类的说法。"
+        "回测全部做多信号胜率 50.0%（95% 区间 21.5% ~ 78.5%），成交仅 8 笔。" + disclaimer
+    )
+    assert lint_agent_response(ok_text, rep) == []
+
+    late_veto = "茅台的结构说明。" * 60 + "风控否决：大盘偏弱。" + disclaimer
+    assert any("置顶" in e for e in lint_agent_response(late_veto, rep))
+
+    # 价格白名单只收价格字段：频率、根数、比值、百分比不能让捏造的"价格"蒙混过关
+    wl = collect_price_whitelist(rep)["prices"]
+    sc0 = rep["rule_scenarios"]["scenarios"][0]
+    assert all(abs(p - sc0["historical_frequency"]["target_freq"]) > 1e-9 for p in wl if p < 1.0)
+    assert any(abs(p - rep["rule_scenarios"]["bear"]["rebound_cap"]) <= 0.01 for p in wl)
