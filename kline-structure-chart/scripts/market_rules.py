@@ -123,6 +123,37 @@ MARKET_SESSIONS: dict[str, tuple[str, time]] = {
     "US": ("America/New_York", time(16, 0)),
 }
 
+# 港股半日市（除夕、圣诞前夕、新年前夕，12:08-12:10 随机收市竞价）与美股提前收市日（13:00 收市）
+HK_HALF_DAY_SESSIONS: frozenset[str] = frozenset(
+    {
+        "2025-01-28",
+        "2025-12-24",
+        "2025-12-31",
+        "2026-02-16",
+        "2026-12-24",
+        "2026-12-31",
+    }
+)
+US_EARLY_CLOSE_SESSIONS: frozenset[str] = frozenset(
+    {
+        "2025-07-03",
+        "2025-11-28",
+        "2025-12-24",
+        "2026-11-27",
+        "2026-12-24",
+    }
+)
+
+
+def session_close_time(market: str, day_str: str) -> time:
+    """返回指定交易日的收盘时间（支持港股半日市 12:10 与美股提前收市日 13:00）。"""
+    day = day_str[:10]
+    if market == "HK" and (day in HK_HALF_DAY_SESSIONS or day[5:] in ("12-24", "12-31")):
+        return time(12, 10)
+    if market == "US" and day in US_EARLY_CLOSE_SESSIONS:
+        return time(13, 0)
+    return MARKET_SESSIONS[market][1]
+
 
 def sina_symbol_for(symbol: str) -> str:
     """由交易所后缀推导新浪代码：600519.SH -> sh600519，000001.SZ -> sz000001，830799.BJ -> bj830799。"""
@@ -183,7 +214,7 @@ def yahoo_events_symbol_for(symbol: str) -> str:
 
 def is_daily_bar_complete(day_str: str, market: str, now: datetime | None = None) -> bool:
     """按交易所时区判断某日日线是否已收盘：早于交易所本地今日为已收盘，今日需过收盘时间。"""
-    tz_name, close_time = MARKET_SESSIONS[market]
+    tz_name, _ = MARKET_SESSIONS[market]
     now_local = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo(tz_name))
     today = now_local.date().isoformat()
     day = day_str[:10]
@@ -191,15 +222,15 @@ def is_daily_bar_complete(day_str: str, market: str, now: datetime | None = None
         return True
     if day > today:
         return False
-    return now_local.time() >= close_time
+    return now_local.time() >= session_close_time(market, day)
 
 
 def latest_closed_session(market: str, now: datetime | None = None) -> str:
     """交易所本地时间下最近一个已收盘的交易日（按休市表判断，超出覆盖范围时按工作日估算）。"""
-    tz_name, close_time = MARKET_SESSIONS[market]
+    tz_name, _ = MARKET_SESSIONS[market]
     now_local = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo(tz_name))
     day = now_local.date()
-    if not (is_trading_day(day, market) and now_local.time() >= close_time):
+    if not (is_trading_day(day, market) and now_local.time() >= session_close_time(market, day.isoformat())):
         day -= timedelta(days=1)
         while not is_trading_day(day, market):
             day -= timedelta(days=1)
@@ -406,6 +437,27 @@ _CN_20PCT_SZSE_ETF_CODES: frozenset[str] = frozenset(
     }
 )
 _CN_20PCT_ETF_NAME_RE = re.compile(r"(科创|创业|双创|创50|创成长|创蓝筹|创大盘|创中盘|创科技|创医药|创精选)")
+_CN_T0_ETF_NAME_RE = re.compile(
+    r"(恒生|港股|恒科|H股|中概|纳指|纳斯达克|标普|道琼斯|日经|德国|法国|美国|沙特|东南亚|QDII|"
+    r"国债|政金债|地方债|可转债|转债|城投债|公司债|短融|债券|黄金|上海金|货币|添益|银华日利|华宝添益|豆粕)"
+)
+
+
+def is_cn_t0_etf(symbol: str, name: str = "") -> bool:
+    """识别沪深交易所实行当日回转交易（T+0）的 ETF 品种：
+    跨境/港股/QDII ETF（513xxx/520xxx 等）、债券 ETF（5110xx~5115xx 等）、黄金 ETF（5188xx 等）、货币 ETF（5116xx~5119xx/15900x）。
+    """
+    upper = symbol.strip().upper()
+    code, _, suffix = upper.partition(".")
+    if suffix and suffix not in ("SH", "SZ"):
+        return False
+    if code.startswith(("511", "513", "5188", "520", "15900")):
+        return True
+    if code in {"159920", "159934", "159937", "159941", "159954", "159960", "159972", "159980", "159981", "159985"}:
+        return True
+    if name and (code.startswith(("15", "51", "52", "56", "58")) or suffix in ("SH", "SZ")) and _CN_T0_ETF_NAME_RE.search(name):
+        return True
+    return False
 
 
 def is_cn_20pct_etf(symbol: str, name: str = "") -> bool:
@@ -580,14 +632,15 @@ def get_market_microstructure_rules(
             elif is_cn_20pct_etf(symbol, name):
                 board = "CHINEXT"
         lot_size, min_order_shares, lot_step = _cn_lot_rules(asset_type, board)
+        cn_t0 = bool(tradable and asset_type == "etf" and is_cn_t0_etf(symbol, name))
         return {
             "market": "CN",
             "board": board,
             "is_st": st_flag,
             "is_ipo_no_limit": is_ipo_no_limit,
-            "settlement": "T+1" if tradable else "INDEX_NON_TRADABLE",
+            "settlement": ("T+0_TRADING_T+1_CLEARING" if cn_t0 else "T+1") if tradable else "INDEX_NON_TRADABLE",
             "settlement_note": "跨境/债券/黄金/货币类 ETF 为 T+0，需按品种核对" if asset_type == "etf" else None,
-            "can_intraday_roundtrip": False,
+            "can_intraday_roundtrip": cn_t0,
             "daily_price_limit_pct": limit_pct,
             "lot_size": lot_size,
             "min_order_shares": min_order_shares,

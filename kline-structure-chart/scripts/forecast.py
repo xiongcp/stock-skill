@@ -419,7 +419,7 @@ def compute_conformal_forecast(
                 asset_type=asset_type,
                 symbol=symbol,
                 is_st=is_st,
-                is_ipo_no_limit=is_ipo_no_limit,
+                is_ipo_no_limit=bool(is_ipo_no_limit and e < 5),
                 day_str=e_day,
                 name=str(meta.get("name") or ""),
             )

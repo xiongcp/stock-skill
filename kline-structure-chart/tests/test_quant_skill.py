@@ -1602,7 +1602,7 @@ def test_o3_30_to_o3_34_judgment_layer_and_scoring(replay_recorded, tmp_path: Pa
 
 
 def test_hk_etp_auto_detection_and_stamp_duty_exemption() -> None:
-    from market_rules import get_market_microstructure_rules, is_hk_etp_code
+    from market_rules import get_market_microstructure_rules, is_cn_t0_etf, is_daily_bar_complete, is_hk_etp_code
     from resolve_symbol import parse_search_response, to_candidate
 
     assert is_hk_etp_code("02800.HK") is True
@@ -1610,6 +1610,20 @@ def test_hk_etp_auto_detection_and_stamp_duty_exemption() -> None:
     assert is_hk_etp_code("07788.HK") is True
     assert is_hk_etp_code("09067.HK") is True
     assert is_hk_etp_code("00700.HK") is False
+
+    # 验证港股半日市（12:10 HKT 收市）与美股提前收市日（13:00 ET 收市）判定
+    assert is_daily_bar_complete("2026-12-24", "HK", now=datetime(2026, 12, 24, 4, 15, tzinfo=UTC)) is True
+    assert is_daily_bar_complete("2026-12-24", "HK", now=datetime(2026, 12, 24, 3, 50, tzinfo=UTC)) is False
+    assert is_daily_bar_complete("2026-11-27", "US", now=datetime(2026, 11, 27, 18, 5, tzinfo=UTC)) is True
+    assert is_daily_bar_complete("2026-11-27", "US", now=datetime(2026, 11, 27, 17, 30, tzinfo=UTC)) is False
+
+    # 验证 A 股跨境/债券/黄金/货币 ETF 自动识别为 T+0 回转交易
+    assert is_cn_t0_etf("513050.SH", "中概互联网ETF") is True
+    assert is_cn_t0_etf("511880.SH", "银华日利ETF") is True
+    assert is_cn_t0_etf("518880.SH", "黄金ETF") is True
+    assert is_cn_t0_etf("510300.SH", "沪深300ETF") is False
+    assert get_market_microstructure_rules("CN", "etf", "513050.SH", name="中概互联网ETF")["can_intraday_roundtrip"] is True
+    assert get_market_microstructure_rules("CN", "etf", "510300.SH", name="沪深300ETF")["can_intraday_roundtrip"] is False
 
     # 即使调用方传入 asset_type="equity"，港交所 ETF 代码段也自动享受印花税豁免 (0 bps)
     rules_2800 = get_market_microstructure_rules("HK", "equity", "02800.HK")

@@ -590,6 +590,7 @@ def run_plan_backtest(
     t = start
     while t < end:
         cut_day = bars[t]["day"]
+        ipo_at_t = bool(is_ipo_no_limit and t < 5)
         pit_bars = rescale_bars_as_of(bars[: min(n, t + horizon_bars + 10)], t)
         sub_bundle = {
             "schema_version": "5.3.0",
@@ -597,7 +598,7 @@ def run_plan_backtest(
             "target": {"instrument": inst, "bars": pit_bars[: t + 1], "intraday": None},
             "benchmark": {**bench, "bars": [b for b in bench["bars"] if b["day"] <= cut_day]} if bench else None,
             # 历史 VIX 不可得，回放中不使用当前 VIX，避免前视
-            "extra_context": {"vix": None, "earnings_date": None, "is_st": is_st, "is_ipo_no_limit": is_ipo_no_limit},
+            "extra_context": {"vix": None, "earnings_date": None, "is_st": is_st, "is_ipo_no_limit": ipo_at_t},
             "provenance": bundle.get("provenance", {}),
         }
         rep = analyze_bundle(sub_bundle, sub_request, include_replay=False, include_forecast=False)
@@ -642,7 +643,7 @@ def run_plan_backtest(
                     asset_type=asset_type,
                     symbol=symbol,
                     is_st=is_st,
-                    is_ipo_no_limit=is_ipo_no_limit,
+                    is_ipo_no_limit=ipo_at_t,
                     trailing_stop=bool(ratchet.get("enabled", True)),
                     trigger_r=float(ratchet.get("trigger_r", 0.90)),
                     confirm_close_r=float(ratchet.get("confirm_close_r", 0.30)),
@@ -689,7 +690,11 @@ def run_plan_backtest(
     }
     for cut in eval_cuts:
         pit_sub = rescale_bars_as_of(bars[: cut + horizon_bars + 1], cut)
-        fc = compute_conformal_forecast(pit_sub[: cut + 1], meta=meta_stub, horizon_bars=horizon_bars)
+        fc = compute_conformal_forecast(
+            pit_sub[: cut + 1],
+            meta={**meta_stub, "is_ipo_no_limit": bool(is_ipo_no_limit and cut < 5)},
+            horizon_bars=horizon_bars,
+        )
         actual = round_to_tick(float(pit_sub[cut + horizon_bars]["close"]), market, asset_type, pit_sub[cut + horizon_bars]["day"])
         base_c = float(pit_sub[cut]["close"])
         b50_lo, b50_hi = fc["conformal_50pct_band"][-1]
