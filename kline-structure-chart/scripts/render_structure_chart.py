@@ -629,10 +629,11 @@ def render(
         freq = max(0.0, min(1.0, float(hf["target_freq"])))
         n_samp = int(hf.get("sample_size") or 0)
         low_s = bool(hf.get("low_sample", n_samp < 30))
-        pct = int(round(freq * 100))
+        raw_freq = float(hf["raw_target_freq"]) if hf.get("raw_target_freq") is not None else freq
+        pct_str = f"{raw_freq * 100:.1f}%" if n_samp > 0 else f"先验{freq * 100:.0f}%"
         w_val = round(1.8 + 2.2 * freq, 2)
         a_val = max(135, min(255, int(round((145 if low_s else 175) + 80 * freq))))
-        return f" {pct}%(n={n_samp})", w_val, a_val, (True if low_s else default_dashed)
+        return f" {pct_str}(n={n_samp})", w_val, a_val, (True if low_s else default_dashed)
 
     bull_ftag, bull_w, bull_a, bull_dash = _branch_freq_style("bull", False)
     neut_ftag, neut_w, neut_a, neut_dash = _branch_freq_style("neutral", True)

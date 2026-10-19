@@ -925,7 +925,9 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
           const endY = yOfPrice(lastWp[1]);
           ctx.fillStyle = 'rgba(' + rgb + ', ' + Math.min(1, alpha + 0.1).toFixed(2) + ')';
           ctx.font = 'bold 11px sans-serif';
-          const tag = sc.name + ' ' + Math.round(freq * 100) + '%(n=' + nSamp + (lowSample ? ',低样本' : '') + ')';
+          const rawFreq = typeof hf.raw_target_freq === 'number' ? hf.raw_target_freq : freq;
+          const pctStr = nSamp > 0 ? (rawFreq * 100).toFixed(1) + '%' : ('先验' + Math.round(freq * 100) + '%');
+          const tag = sc.name + ' ' + pctStr + '(n=' + nSamp + (lowSample ? ',低样本' : '') + ')';
           ctx.fillText(tag, Math.max(divX + 6, endX - 110), endY - 6 - (idxSc % 2) * 12);
         }}
         ctx.restore();

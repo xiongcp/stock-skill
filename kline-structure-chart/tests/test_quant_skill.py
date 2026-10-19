@@ -1369,6 +1369,15 @@ def test_o3_21_base_rates_point_in_time_no_lookahead_and_beta_binomial_shrinkage
     ) / (f_low["sample_size"] + PRIOR_STRENGTH)
     assert f_low["shrunk_target_freq"] == pytest.approx(round(expected_post, 4), abs=1e-4)
 
+    # 3. 零样本 (n == 0) 与无市场基准 (UNIFORM_PRIOR) 时，raw_target_freq 不把先验伪装成观测频率，且文案写温和先验
+    f_zero = compute_scenario_frequency(
+        short_feat, "OVERSOLD_BOUNCE", horizon_bars=horizon, direction="BULLISH", bench_feat=None, max_cutoff_idx=65
+    )
+    assert f_zero["sample_size"] == 0
+    assert f_zero["raw_target_freq"] == 0.0
+    assert f_zero["shrinkage"]["prior_source"] == "UNIFORM_PRIOR"
+    assert "温和先验" in f_zero["display_cn"] and "市场基准" not in f_zero["display_cn"]
+
 
 def test_o3_22_backtest_scenario_frequency_brier_and_reliability_buckets(replay_recorded) -> None:
     from evaluation import _evaluate_scenario_brier

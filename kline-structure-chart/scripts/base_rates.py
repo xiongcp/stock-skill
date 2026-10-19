@@ -19,13 +19,13 @@ DEFAULT_PRIOR_FREQS: dict[str, tuple[float, float, float]] = {
     "TREND_CONTINUATION": (0.46, 0.38, 0.16),
     "BREAKOUT_RETEST": (0.42, 0.42, 0.16),
     "FALSE_BREAKOUT_REVERSAL": (0.48, 0.36, 0.16),
-    "RANGE_OSCILLATION": (0.56, 0.30, 0.14),
+    "RANGE_OSCILLATION": (0.38, 0.36, 0.26),
     "BREAKDOWN_DECLINE": (0.44, 0.40, 0.16),
     "C_WAVE_REVERSAL": (0.45, 0.39, 0.16),
     "OVERSOLD_BOUNCE": (0.50, 0.34, 0.16),
     "APEX_BREAKOUT": (0.47, 0.35, 0.18),
     "bull": (0.44, 0.40, 0.16),
-    "neutral": (0.56, 0.30, 0.14),
+    "neutral": (0.38, 0.36, 0.26),
     "bear": (0.44, 0.40, 0.16),
 }
 
@@ -542,7 +542,7 @@ def compute_scenario_frequency(
         raw_inv = k_inv / n
         raw_exp = k_exp / n
     else:
-        raw_tgt, raw_inv, raw_exp = prior_tgt, prior_inv, prior_exp
+        raw_tgt, raw_inv, raw_exp = 0.0, 0.0, 0.0
 
     low_sample = n < MIN_RELIABLE_SAMPLES
     # Beta-Binomial / Dirichlet-Multinomial 后验均值：(k + M * p_prior) / (n + M)
@@ -582,11 +582,17 @@ def compute_scenario_frequency(
     ci_hi_pct = round(ci_tgt[1] * 100.0, 1)
     shrunk_tgt_pct = round(shrunk_tgt * 100.0, 1)
     raw_tgt_pct = round(raw_tgt * 100.0, 1)
+    prior_label = "市场基准" if prior_source == "BENCHMARK_INDEX" else "温和先验"
     # 「历史条件频率」一词只用于实际观测频率 k/n（与 Wilson 区间同口径）；n < 30 时的收缩后估计单独标注
-    if low_sample:
+    if n == 0:
+        display_cn = (
+            f"历史条件频率 —（n = 0 低样本，95% 区间 {ci_lo_pct:.1f}%~{ci_hi_pct:.1f}%；"
+            f"已向{prior_label}做 Beta-Binomial 收缩，收缩后估计 {shrunk_tgt_pct:.1f}%）"
+        )
+    elif low_sample:
         display_cn = (
             f"历史条件频率 {raw_tgt_pct:.1f}%（n = {n} 低样本，95% 区间 {ci_lo_pct:.1f}%~{ci_hi_pct:.1f}%；"
-            f"已向市场基准做 Beta-Binomial 收缩，收缩后估计 {shrunk_tgt_pct:.1f}%）"
+            f"已向{prior_label}做 Beta-Binomial 收缩，收缩后估计 {shrunk_tgt_pct:.1f}%）"
         )
     else:
         display_cn = f"历史条件频率 {raw_tgt_pct:.1f}%（n = {n}，95% 区间 {ci_lo_pct:.1f}%~{ci_hi_pct:.1f}%）"
