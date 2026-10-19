@@ -129,20 +129,14 @@ def _local_sigma(log_rets: list[float], end: int) -> float:
     win = log_rets[max(0, end - SIGMA_LOOKBACK) : end]
     if not win:
         return 0.015
-    sig60 = math.sqrt(sum(r * r for r in win) / len(win))
-    win15 = win[-15:]
-    sig15 = math.sqrt(sum(r * r for r in win15) / len(win15)) if win15 else sig60
-    if sig15 > sig60:
-        sig = 0.45 * sig60 + 0.55 * sig15
-    else:
-        sig = max(0.88 * sig60, 0.72 * sig60 + 0.28 * sig15)
+    sig = math.sqrt(sum(r * r for r in win) / len(win))
     return max(SIGMA_FLOOR, min(SIGMA_CAP, sig))
 
 
 def _conformal_quantile(sorted_scores: list[float], level: float) -> float:
-    """split-conformal 有限样本分位（含多步重叠残差自相关自由度修正）：取第 ceil((n+10)·level) 个次序统计量。"""
+    """split-conformal 有限样本分位：取第 ceil((n+1)·level) 个次序统计量（超出时取最大值）。"""
     n = len(sorted_scores)
-    k = min(n, max(1, math.ceil((n + 10.0) * level)))
+    k = min(n, max(1, math.ceil((n + 1) * level)))
     return sorted_scores[k - 1]
 
 
@@ -227,7 +221,8 @@ def _build_scenario_conditional_fan(
     raw_weights: list[float] = []
     for s in items:
         hf = s.get("historical_frequency") or {}
-        w = float(hf.get("target_freq") or hf.get("shrunk_target_freq") or 0.25)
+        raw_w = hf.get("target_freq") if hf.get("target_freq") is not None else hf.get("shrunk_target_freq")
+        w = float(raw_w) if raw_w is not None else 0.25
         raw_weights.append(max(0.05, w))
     w_sum = sum(raw_weights) or 1.0
     norm_weights = [w / w_sum for w in raw_weights]
@@ -340,6 +335,7 @@ def compute_conformal_forecast(
         is_st=is_st,
         is_ipo_no_limit=is_ipo_no_limit,
         day_str=last_day,
+        name=str(meta.get("name") or ""),
     )
 
     closes = [float(b["close"]) for b in bars]
@@ -425,6 +421,7 @@ def compute_conformal_forecast(
                 is_st=is_st,
                 is_ipo_no_limit=is_ipo_no_limit,
                 day_str=e_day,
+                name=str(meta.get("name") or ""),
             )
             _, _, e_q50, _, _, e_b50, e_b80 = _build_bands_from_multipliers(
                 closes[e], e_day, sigmas[e], mult_e, max_mature_h, market, asset_type, e_limit

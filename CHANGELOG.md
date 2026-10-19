@@ -4,12 +4,18 @@
 
 ## [Unreleased]
 
-### 修复（深度审查 P0）
+### 修复（深度审查 P0 / P1）
 
 - 文档命令路径：`SKILL.md` Flash SOP 中的产物文件名改为脚本实际生成的 `600519.SH_result.json`（`sanitize_filename` 保留代码中的点）；`references/llm-judgment-protocol.md` 中 `uv run --directory kline-structure-chart` 之后的相对路径去掉多余的 `kline-structure-chart/` 前缀。新增文档契约测试守护两类错误。
 - 均值回归体制规则分披露（`scripts/strategies.py`、`scripts/render_report_md.py`、`scripts/judgment.py`）：`multi_timeframe_score` 新增 `components_total`（四组分项合计）与 `regime_adjustment`（调整前后分数、动量 IC 与 `note_cn`）；体制调整时 `rating_cn` 改为「均值回归体制评分偏多/偏空/中性」，不再沿用「多周期共振/承压」；直出摘要、结论速览与证据 E5 同步写明调整。
 - `--auto-init` 预填模板（`scripts/judgment.py`、`scripts/validate_judgment.py`、`scripts/score_judgments.py`、`scripts/render_report_md.py`）：模板带 `generator = AUTO_INIT_TEMPLATE`，标题、综述与理由写明「脚本预填模板，尚未经 Agent 主观研判」；校验与日志按各情景概率是否与模板一致记 `origin`，未改写的模板在报告第 8 节显示为「情景研判模板」且不计入 LLM 技能分（`template_judgments_excluded`）。证伪条件改为按主情景方向生成：做空/假突破主情景以收盘反向收回失效位为证伪，不再写「跌破做多止损即证伪」。
-- L2 历史条件频率展示口径（`scripts/base_rates.py`）：`display_cn` 的「历史条件频率」数字一律为实际观测频率 `raw_target_freq`，与 Wilson 区间同口径；收缩或体制加权后的模型估计在括号内标为「收缩后估计」「体制加权估计」，并新增 `estimate_method` 与 `event_definition_cn`（标准化 ATR 屏障事件，不是情景目标价的到达频率）。`target_freq` 数值与下游用法不变。
+- L2 历史条件频率展示口径与 Brier 检验基准修正（`scripts/base_rates.py`、`scripts/evaluation.py`、`scripts/render_report_md.py`）：`display_cn` 的「历史条件频率」数字一律为实际观测频率 `raw_target_freq`，与 Wilson 区间同口径；`n >= 30` 时直接使用观测频率 `k / n`（移除未经样本外数据集验证的体制加权混合与先验乘数），`n < 30` 时在括号内标明「收缩后估计」；`scenario_frequency_brier` 改为按各情景自身基准率（per-scenario climatology）加权计算基准 Brier 分数与技能分 `BSS`，仅在 `precondition_met = true` 的情景上评估，且仅当相对各情景自身基准率的 `BSS > 0` 时才判定 `discriminative = true`。
+- 回测与线上计划同源对齐（`scripts/risk.py`、`scripts/evaluation.py`、`scripts/render_report_md.py`、`assets/analysis.schema.json`）：`triple_barrier_plan` 新增 `breakeven_ratchet` 字段（`+0.90R` 盘中触发、当日收盘 `≥ +0.30R` 确认、自次日起保护性止损上移至 `+0.08R` 保本位及对应价格），回测直接读取计划中的 `breakeven_ratchet` 参数并修正 `entry_rule` 中“无移动止损”的错误描述；统一硬止损屏障 `stop_loss_barrier` 为盘中最低价触及离场（A 股受 T+1 约束自入场次日起生效），结构触发位与减仓位保持日线收盘判定。
+- 多情景前提诚实判定与标注（`scripts/structure.py`、`scripts/scenarios.py`）：修正 `scenarios.py` 中 `st_code == "breakout_up"` / `"breakdown_down"` 与 `structure.py`（实际为 `"above"` / `"below"`）不一致的缺陷；移除将补足情景强制改写为 `precondition_met = true` 的逻辑，不足 2 个时补充的备选情景保持 `precondition_met = false` 并标注 `selection_role = "CONDITIONAL_FALLBACK"` 与 `status_cn = "待触发（前提未成立，条件备选）"`。
+- `--as-of` 当日未收盘 K 线隔离（`scripts/data_gateway.py`）：无论是否指定 `--as-of`（含本地文件输入），统一执行 `split_incomplete_last_bar`，确保盘中未收盘 K 线绝不进入已收盘计算序列。
+- 科创板、创业板及双创 ETF 涨跌幅限制修正（`scripts/market_rules.py`、`references/cn-market.md`）：新增 `is_cn_20pct_etf`，识别上交所 `588xxx`/`589xxx.SH` 科创板/双创 ETF 与深交所跟踪创业板/双创指数的 `159xxx.SZ` ETF（代码表与名称匹配），自 `2020-08-24` 起按 `±20%` 计算涨跌停限制。
+- 风控守门频率零值回退与均值回归左侧回踩参数同源（`scripts/risk.py`）：将 `float(bull_hf.get(...) or 0.45)` 改为显式 `None` 判断，避免 `0.0` 频率被误当缺失值回退为 `0.45`；均值回归体制（`MEAN_REVERSION_ADAPTED`）的 `LEFT_SIDE_PULLBACK` 判定移至入场区与止损位计算之前，并增加 `RVOL20 <= 1.10` 缩量条件检查。
+- 移除无脚本/无数据可复现的“1,500 股盲测”调参与引用（`scripts/base_rates.py`、`scripts/forecast.py`、`scripts/strategies.py`、`SKILL.md`、`references/interpretation-guide.md`）：恢复 `forecast.py` 为 `references/math-patterns.md` 第 5 节定义的 60 日对数收益 RMS 与 $\lceil (n+1)\alpha \rceil$ 次序统计量，清理文档中无法核实的盲测统计数字。
 - `scripts/lint_response.py` 加强：拦截「上涨概率 70%」「大概率」「胜算」「七成」等未经校验的概率措辞（否定式说明与带 95% 区间的回测胜率、历史条件频率、主观研判、模板数字除外）；价格检查扩展到交易动作前后的数字（如「1330 附近买入」「目标 1440」）；风控否决须出现在回复前 400 个字符内；价格白名单不再收录频率、百分比、根数、比值等非价格字段，并补收反抽上限、回踩位、区间与缺口区等价格字段。`SKILL.md` 自己列出的错误回复示例现在会被拦截。同时修正价格识别会把「1 个交易日」等中文单位前的数字误当价格的问题，并让「规则分不是胜率或上涨概率」之类的否定说明不再误报。
 - 待触发主情景的证伪条件写明「预测期内始终未触发，或触发后出现失效条件」，避免把触发前已经成立的失效条件当成证伪。
 - `examples/` 以 `--as-of 2026-10-16` 用实时行情重新生成；茅台 `judgment.json` 改为 Agent 在预填模板上改写的主观研判（`origin = AGENT`），`reply.md` 与 `SKILL.md` 回复示例同步为新的规则分披露、频率口径与回测数字。
@@ -20,7 +26,7 @@
 
 - `scripts/scenarios.py` 与 `references/scenario-playbook.md`（`O3-20`）：8 类标准情景库（趋势延续、突破回踩、假突破回落、区间震荡、破位下行、C 浪末端反转、超跌反弹、收敛末端变盘），代码 `SCENARIO_PLAYBOOK` 与文档表格逐字一一对应；新增推动 5 浪硬规则识别（浪 2 不破浪 1 起点、浪 3 非最短、浪 4 不进入浪 1 区间）；每个截面动态输出 `2~5` 个前提成立的情景，触发位距现价不足 0.5 ATR 时归为「已在进行中」（`status = "ACTIVE"`），时间窗取历史到达目标用时分位数并截断在预测期内。
 - `scripts/base_rates.py`（`O3-21`）：在标的自身历史上对每个情景规则做逐点无前视事件研究（只消费结果期已完全成熟的样本 `t + H <= t_now`），输出先到目标 / 先到失效 / 到期的频率、样本数 `n`、95% Wilson 置信区间、到达目标用时分位数与 MAE/MFE；当 `n < 30` 时通过 Beta-Binomial 向市场基准指数同情景频率收缩并标注「低样本」。
-- `scripts/evaluation.py`（`O3-22`）：回测新增 `scenario_frequency_brier`，输出历史条件频率的样本外 Brier 分数、对照全样本基准率（climatology）的 Brier 分数、技能分 `BSS` 与 5 档可靠性分桶表；仅当 `brier_skill_score > 0` 时才输出「历史频率具有区分度」。无前视审计同步覆盖多情景与历史条件频率。
+- `scripts/evaluation.py`（`O3-22`）：回测新增 `scenario_frequency_brier`，输出历史条件频率的样本外 Brier 分数、对照各情景自身基准率（per-scenario climatology）的 Brier 分数、技能分 `BSS` 与 5 档可靠性分桶表；仅当 `brier_skill_score > 0` 时才输出「历史频率具有区分度」。无前视审计同步覆盖多情景与历史条件频率。
 - `scripts/render_structure_chart.py`、`scripts/render_html.py`、`scripts/render_report_md.py`（`O3-23`）：PNG 与 HTML 按历史频率区分推演折线线宽与透明度，图例与标签写出频率与样本数 `n`，低样本（`n < 30`）强制使用虚线；报告第 3 节与第 7 节同步输出多情景历史频率表与 Brier 检验。
 - `scripts/forecast.py`（`O3-24`）：新增仅供展示的情景条件扇形 `scenario_conditional_fan`（`display_only = True, calibrated = False`，图例标明「情景混合（非校准区间）」），默认鞅中心分期限保形区间保持不变。
 
@@ -34,11 +40,9 @@
 - `scripts/lint_response.py`（`O3-35`）：新增 Agent 最终回复文本契约校验器，自动检查 `UNAVAILABLE` 零价格、`PARTIAL` 告警置顶、风控否决置顶、禁用概率术语、价格白名单与免责声明。
 - 港股 ETF 自动识别与回测加速：`market_rules.py` 与 `resolve_symbol.py` 新增 `is_hk_etp_code`，自动识别港交所 ETF/ETP 代码段并豁免双边印花税；`evaluation.run_plan_backtest` 在逐日回放中传入 `include_forecast=False` 跳过冗余保形区间校准计算；`render_html.py` 将交收制度枚举转为中文说明。
 - 三重屏障几何修正与多标的全量回测校准（`scripts/risk.py`、`scripts/evaluation.py`）：收紧 `entry_zone` 围绕最新收盘价可成交带（消除因把上方远端阻力 `r1` 作为入场区上沿导致的 `entry_mid` 偏移与 `TP1` 虚高），将 `TP1` 锚定于结构阻力与 15 日有效摆动空间，使 `RR_INSUFFICIENT` 真实生效；回测默认 `decision_window` 扩至 300 日（满足 15 日期限下有效独立样本 $\ge 20$ 的 IC 显著性门限）。17 个真实录制标的全量回测总胜率由 `38.1%` 提升至 `45.0%`，平均累计收益由 `-2.34%` 提升至 `+3.10%`。
-- 因果动量/反转体制自适应评分、L2 历史频率守门与保本移损（`scripts/strategies.py`、`scripts/risk.py`、`scripts/evaluation.py`）：无前视计算过去 240 根成熟样本的 20 日均线偏离与 15 日前瞻收益秩相关 `causal_momentum_ic_15d`，在长期均线空头排列且自相关 $\le -0.10$ 时自动切换为均值回归体制（`MEAN_REVERSION_ADAPTED`）；接入 L2 历史频率守门与 $+0.90R \to +0.08R$ 保本移损。17 个真实录制标的全量回测（步长 5 日）总胜率进一步提升至 `52.8%`（75/142）、平均累计净收益提升至 `+6.36%`（`LONG_CONFIRMED` 胜率 `52.4%`、平均累计净收益 `+2.34%`）；茅台（`600519.SH` 逐日回放）规则分 IC 由 `-0.320` 转为 `+0.152`（步长 5 日为 `+0.268`），确认做多胜率达 `66.7%`（累计 `+4.48%`），四档动作前瞻 15 日收益严格单调递增（`+1.19% > +0.96% > +0.56% > -2.05%`）。
-- 1,500 股跨板块/跨题材样本外盲测调优与 Flash 模型零失误增强（`scripts/risk.py`、`scripts/base_rates.py`、`scripts/forecast.py`、`scripts/validate_judgment.py`、`scripts/render_report_md.py`、`SKILL.md`）：
-  - 剔除弱势观察股（`WATCH_LONG_SETUP`）的左侧低开挂单并新增 60 日巨幅乖离回落（`climax_distribution`）高位派发过滤；
-  - `base_rates.py` 引入当前空头/高波趋势体制先验与近期同体制样本权重修正，1,500 只真实股票（4,247 个截面、11,744 次情景推演）样本外 Brier 技能分达 `BSS = +12.03%`，5 档可靠性分桶严格单调递增；
-  - `forecast.py` 引入近 15 日/60 日非对称波动率响应与多步重叠残差自由度修正，1,500 股 50% / 80% 保形区间实测覆盖率达 `50.67%` / `82.11%`；
+- 因果动量/反转体制自适应评分、L2 历史频率守门与保本移损（`scripts/strategies.py`、`scripts/risk.py`、`scripts/evaluation.py`）：无前视计算过去 240 根成熟样本的 20 日均线偏离与 15 日前瞻收益秩相关 `causal_momentum_ic_15d`，在长期均线空头排列且自相关 $\le -0.10$ 时自动切换为均值回归体制（`MEAN_REVERSION_ADAPTED`）；接入 L2 历史频率守门与 $+0.90R \to +0.08R$ 保本移损。
+- 高位派发过滤与 Flash 模型零失误增强（`scripts/risk.py`、`scripts/validate_judgment.py`、`scripts/render_report_md.py`、`SKILL.md`）：
+  - 新增 60 日巨幅乖离回落（`climax_distribution`）高位派发过滤；
   - `validate_judgment.py` 新增 `--auto-init` 一键预填合规研判模板，`render_report_md.py` 新增首段「直出摘要」，`SKILL.md` 与 `references/failure-modes.md` 补充 Flash / 轻量模型 5 步零失误执行 SOP 与 8 项必过自检表。
 - 跨 Agent 生态扩展：`install.sh`、`install.ps1`、`scripts/doctor.py` 与 `SKILL.md` 新增对 **Hermes Agent**（`~/.hermes/skills` 与项目级 `<project>/.hermes/skills`）及跨工作目录 `--directory` 调用的原生支持。
 

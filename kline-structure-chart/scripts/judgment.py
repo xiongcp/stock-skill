@@ -68,6 +68,7 @@ _NON_PRICE_KEY_TOKENS = (
     "slope",
     "days",
     "horizon",
+    "_r",
 )
 
 

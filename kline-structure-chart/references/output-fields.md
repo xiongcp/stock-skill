@@ -87,13 +87,14 @@
 | 字段 | 含义 | 单位 / 取值 | 可空 | 对外怎么说 |
 | --- | --- | --- | --- | --- |
 | `entry_zone` | 入场区 `[下沿, 上沿]` | 价格 | 否 | 风控否决时称"观察区" |
-| `stop_loss_barrier` | 止损屏障（收盘跌破离场） | 价格 | 否 | — |
+| `stop_loss_barrier` | 硬止损屏障（盘中最低价触及离场；A 股受 T+1 约束自入场次日起生效） | 价格 | 否 | — |
 | `take_profit_1` / `take_profit_2` | 第一、第二止盈屏障 | 价格 | 否 | — |
 | `time_barrier_bars` / `time_stop_rule` | 时间屏障：持仓满 N 根仍未到 TP1 且偏离不足时离场 | 根 | 否 | — |
 | `risk_reward_ratio` | 扣除佣金、印花税后的 TP1 净盈亏比 | 比值，低于 1.20 风控否决 | 否 | "扣费后盈亏比 X" |
+| `breakeven_ratchet` | 移动保本规则（与回测同源）：`enabled`、`trigger_r`（0.90）、`confirm_close_r`（0.30）、`lock_r`（0.08）、`trigger_price`、`confirm_close_price`、`breakeven_stop_price`、`rule_cn` | 价格 / R 倍数 / 文本 | 否 | 原文转述 `rule_cn` |
 | `left_side_constraints` / `right_side_constraints` | 左侧（回踩）与右侧（突破）计划的必要证据、失效位、假突破规则 | 文本 / 价格 | 否 | 原文转述 |
 | `market_microstructure.*` | 交易制度：`settlement`、`can_intraday_roundtrip`、`daily_price_limit_pct`（A 股为小数，如 0.1；港美股为空）、`lot_size`/`min_order_shares`/`lot_step`、`tick_size`、`session_hours_local`、`commission_bps`、`stamp_duty_buy_bps`/`stamp_duty_sell_bps`、港股 `lot_size_source`、美股 `day_trading_rule` | — | 部分可空 | 按市场转述，规则来源见 `references/{cn,hk,us}-market.md` |
-| `holder_defense_plan` | 已持仓者的防守计划：`reduce_level`（收盘跌破减仓）、`exit_level`（硬止损离场）、`rebound_cap`（跌破后反抽上限）、`downside_reference`、`rules[]`（中文规则原文）、`note`（A 股 T+1 提示）；指数为 `available = false` | 价格 / 文本 | 否 | 用户说"已经持有"时转述 `rules`；不是卖出建议 |
+| `holder_defense_plan` | 已持仓者的防守计划：`reduce_level`（收盘跌破减仓）、`exit_level`（盘中触及硬止损屏障离场）、`rebound_cap`（跌破后反抽上限）、`downside_reference`、`rules[]`（中文规则原文）、`note`（A 股 T+1 提示）；指数为 `available = false` | 价格 / 文本 | 否 | 用户说"已经持有"时转述 `rules`；不是卖出建议 |
 | `short_plan` | 破位做空计划，仅港股、美股的股票/ETF（A 股与指数 `available = false` 并给出 `reason`）：`trigger`、`entry_zone`、`stop_loss_barrier`、`take_profit_1/2`、`time_barrier_bars`、`risk_reward_ratio`（扣交易成本，**未计融券费**）、`invalidation`、`constraints`（卖空制度限制）、`warnings`（大盘偏强、盈亏比不足） | 价格 / 文本 | 否 | 必须同时转述 `constraints` 与 `warnings`；不得给出报告里没有的做空点位 |
 | `position_sizing.*` | 仓位：`tradable`、`account_equity`、`max_risk_pct`（%）、`risk_budget_amount`、`recommended_shares`、`estimated_notional` | 股 / 货币 | 未传账户净值或指数时不给股数 | "按止损距离计算为 X 股"，不是个性化建议 |
 | `debate_and_veto.bull_case` / `bear_case` | 多空两方的规则化证据句 | 文本 | 否 | 可作为证据列举 |
@@ -106,9 +107,9 @@
 | --- | --- | --- | --- | --- |
 | `breakout_level` / `breakdown_level` | 上攻触发位与下探触发位，带来源 `source` | 价格 | 否 | — |
 | `bull` / `neutral` / `bear` | 三条主路径：`name`、`trigger`（触发条件）、`target_price` 与 `target_source`、`invalidation`（失效条件）、`retest_hold` / `rebound_cap`、`range`（震荡区间）、`waypoints_offset` 与 `step_labels`（画图折点）、`historical_frequency`（历史条件频率） | 价格 / 文本 | 否 | 按"触发 → 目标 → 失效"转述；频率只能按 `historical_frequency.display_cn` 称"历史条件频率" |
-| `scenarios[]` | L1 多情景引擎从 8 类标准情景库（见 `references/scenario-playbook.md`）中筛出的 2~5 个适用情景：`id`、`name`、`direction`、`status`（`ACTIVE` 已在进行中 / `PENDING_TRIGGER` 待触发）、`trigger`、`target_price`、`target_source`、`invalidation`、`time_window_bars`（历史到达目标用时 `q25`/`median`/`q75`，截断在 `horizon_bars` 内）、`historical_frequency` | 价格 / 根 / 比例 | 否 | 按表格转述状态、触发、目标、失效、中位用时与 `historical_frequency.display_cn` |
-| `scenarios[*].historical_frequency` | L2 逐点无前视事件研究结果：`sample_size`（样本数 n）、`low_sample`（n < 30）、`raw_target_freq`（实际观测频率，与 `target_ci_95` Wilson 95% 区间同口径）、`target_freq`/`invalidation_freq`/`expired_freq`（模型估计：n < 30 为 Beta-Binomial 向基准收缩值，n ≥ 30 为体制加权估计，见 `estimate_method`）、`shrunk_target_freq`、`event_definition_cn`（实际统计的标准化 ATR 屏障事件）、`bars_to_target`、`excursion_pct`、`display_cn` | 比例 / 根 / % | 否 | 原文引用 `display_cn`（首个数字为观测频率），称"历史条件频率"，不叫胜率或上涨概率；不得说成到达本情景目标价的概率 |
-| `scenario_count` / `scenario_signature` | 当前截面适用情景个数（2~5）与情景 ID 组合签名 | 整数 / 字符串 | 否 | — |
+| `scenarios[]` | L1 多情景引擎从 8 类标准情景库（见 `references/scenario-playbook.md`）中筛出的 2~5 个情景：`id`、`name`、`direction`、`precondition_met`（当前截面是否满足前提；不足 2 个时补充的备选情景保留 `precondition_met = false` 并标 `selection_role = CONDITIONAL_FALLBACK`）、`status`（`ACTIVE` 已在进行中 / `PENDING_TRIGGER` 待触发）、`trigger`、`target_price`、`target_source`、`invalidation`、`time_window_bars`（历史到达目标用时 `q25`/`median`/`q75`，截断在 `horizon_bars` 内）、`historical_frequency` | 价格 / 根 / 比例 | 否 | 按表格转述状态、触发、目标、失效、中位用时与 `historical_frequency.display_cn` |
+| `scenarios[*].historical_frequency` | L2 逐点无前视事件研究结果：`sample_size`（样本数 n）、`low_sample`（n < 30）、`raw_target_freq`（实际观测频率，与 `target_ci_95` Wilson 95% 区间同口径）、`target_freq`/`invalidation_freq`/`expired_freq`（n < 30 为 Beta-Binomial 向基准收缩值，n ≥ 30 等于观测频率，见 `estimate_method`）、`shrunk_target_freq`、`event_definition_cn`（实际统计的标准化 ATR 屏障事件）、`bars_to_target`、`excursion_pct`、`display_cn` | 比例 / 根 / % | 否 | 原文引用 `display_cn`（首个数字为观测频率），称"历史条件频率"，不叫胜率或上涨概率；不得说成到达本情景目标价的概率 |
+| `scenario_count` / `precondition_met_count` / `scenario_signature` | 当前截面输出情景个数（2~5）、实际满足前提的情景个数与情景 ID 组合签名 | 整数 / 字符串 | 否 | — |
 | `impulse_wave` | 推动 5 浪识别结果（满足浪 2 不破浪 1 起点、浪 3 非最短、浪 4 不进入浪 1 区间时返回，含 `wave3_1618_target`） | 价格 / 文本 | 是（未形成推动浪时为空） | 有则说明推动浪进度与 1.618×浪 1 测算位 |
 | `atr_pct` / `sigma_1d_pct` | 计算时使用的 ATR 百分比；近 60 日日对数收益 RMS（折点时间用） | % | 否 | — |
 | `min_trigger_distance_atr` | 触发位距最新收盘价的最小距离（0.5 个 ATR） | ATR 倍数 | 否 | — |
@@ -171,7 +172,7 @@
 | `backtest.veto_reason_counts` | 回放期间各否决编码出现次数 | 次 | 否（可为空对象） | — |
 | `backtest.sample_trades[]` | 成交样例：入场/出场日与价、`outcome`（`TP_BARRIER` / `SL_BARRIER` / `TIME_BARRIER` 等）、`net_return` | — | 否 | — |
 | `backtest.sample_size_warning` | 成交少于 30 笔时的提示 | 文本 | 是 | 有则原文转述 |
-| `backtest.scenario_frequency_brier` | 历史条件频率的样本外 Brier 检验：`evaluated_events`、`brier_score`、`climatology_base_rate`、`climatology_brier_score`（全样本基准率 Brier）、`brier_skill_score`（BSS）、`discriminative`（BSS > 0）、`reliability_buckets[]`（5 档分桶表）、`per_scenario`、`verdict` | 分数 / 比例 | `brier_score` 在无事件时可空 | 原文转述 `verdict`；只有 `brier_skill_score > 0` 时才能说"历史频率具有区分度" |
+| `backtest.scenario_frequency_brier` | 历史条件频率的样本外 Brier 检验：`samples`、`brier_score`、`climatology_brier_score`（各情景自身基准率加权 Brier）、`brier_skill_score`（相对各情景自身基准率的技能分 BSS）、`pooled_climatology_brier_score` / `pooled_brier_skill_score`（混合基准率对照）、`discriminative`（BSS > 0）、`reliability_buckets[]`（5 档分桶表）、`per_scenario`（含各情景自身 `climatology_brier_score` 与 `brier_skill_score`）、`verdict` | 分数 / 比例 | `brier_score` 在无事件时可空 | 原文转述 `verdict`；只有相对各情景自身基准率的 `brier_skill_score > 0` 时才能说"历史频率具有区分度" |
 | `backtest.conformal_forecast_oos.*` | 区间样本外覆盖：无重叠截面 `evaluated_cutoffs` 与覆盖率，以及与主报告一致的滚动全截面覆盖率 | 比例 | 否 | — |
 
 ## 12. `*_judgment.json` 与 `judgment_log.jsonl`（L3 受约束主观研判）

@@ -129,6 +129,10 @@ def label_triple_barrier_event(
     is_st: bool = False,
     is_ipo_no_limit: bool = False,
     trailing_stop: bool = True,
+    trigger_r: float = 0.90,
+    confirm_close_r: float = 0.30,
+    lock_r: float = 0.08,
+    name: str = "",
 ) -> dict[str, Any]:
     """三重屏障事件标定器（López de Prado, 2018）：
     - 在 signal_idx 收盘触发后，于 entry_idx = signal_idx + 1 开盘执行入场。
@@ -146,13 +150,13 @@ def label_triple_barrier_event(
     entry_open = float(entry_bar["open"])
 
     limit_pct = get_daily_price_limit_pct(
-        market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=entry_bar["day"]
+        market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=entry_bar["day"], name=name
     )
     if limit_pct is not None and entry_open >= prev_close * (1.0 + limit_pct - 0.001):
         return {"tradable": False, "reason": "LIMIT_UP_NO_FILL", "entry_day": entry_bar["day"]}
 
     rules = get_market_microstructure_rules(
-        market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=entry_bar["day"]
+        market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=entry_bar["day"], name=name
     )
     start_exit_idx = entry_idx + 1 if not rules["can_intraday_roundtrip"] else entry_idx
     end_idx = min(n - 1, max(start_exit_idx, entry_idx + max(1, horizon_bars) - 1))
@@ -197,8 +201,12 @@ def label_triple_barrier_event(
 
         # ATR Trailing Stop update at bar close (Alorse-style dynamic stop ratchet, applied from next bar)
         highest_since_entry = max(highest_since_entry, hi)
-        if trailing_stop and highest_since_entry >= entry_open + 0.90 * unit_risk and cl >= entry_open + 0.30 * unit_risk:
-            active_sl = max(active_sl, entry_open + 0.08 * unit_risk)
+        if (
+            trailing_stop
+            and highest_since_entry >= entry_open + trigger_r * unit_risk
+            and cl >= entry_open + confirm_close_r * unit_risk
+        ):
+            active_sl = max(active_sl, entry_open + lock_r * unit_risk)
 
     if outcome == "TIME_BARRIER":
         label = 1 if exit_price > entry_open else -1
@@ -321,10 +329,11 @@ RELIABILITY_BUCKETS = ((0.0, 0.2), (0.2, 0.4), (0.4, 0.6), (0.6, 0.8), (0.8, 1.0
 def _evaluate_scenario_brier(
     records: list[tuple[str, float, int]],
 ) -> dict[str, Any]:
-    """检验 L2 历史条件频率的样本外 Brier 分数、对照全样本基准率（climatology）的技能分 BSS 与 5 档可靠性分桶。
+    """检验 L2 历史条件频率的样本外 Brier 分数、对照各情景自身基准率（per-scenario climatology）的技能分 BSS 与 5 档可靠性分桶。
 
     records 每项为 (scenario_id, predicted_target_freq, actual_hit_target_0_or_1)。
-    只有样本外 Brier 技能分 BSS > 0 时，才允许输出「历史频率具有区分度」。
+    不同情景的屏障几何与基础命中率不同，必须与各情景自身的经验基准率对比；
+    只有相对各情景自身基准率的技能分 BSS > 0 时，才允许输出「历史频率具有区分度」。
     """
     n = len(records)
     if n == 0:
@@ -333,7 +342,9 @@ def _evaluate_scenario_brier(
             "brier_score": None,
             "climatology_base_rate": None,
             "climatology_brier_score": None,
+            "pooled_climatology_brier_score": None,
             "brier_skill_score": None,
+            "pooled_brier_skill_score": None,
             "discriminative": False,
             "reliability_buckets": [],
             "per_scenario": {},
@@ -342,11 +353,8 @@ def _evaluate_scenario_brier(
 
     brier = sum((p - y) ** 2 for _, p, y in records) / n
     clim_rate = sum(y for _, _, y in records) / n
-    clim_brier = sum((clim_rate - y) ** 2 for _, _, y in records) / n
-    if clim_brier > 1e-9:
-        bss = 1.0 - (brier / clim_brier)
-    else:
-        bss = 0.0
+    pooled_clim_brier = sum((clim_rate - y) ** 2 for _, _, y in records) / n
+    pooled_bss = (1.0 - (brier / pooled_clim_brier)) if pooled_clim_brier > 1e-9 else 0.0
 
     buckets: list[dict[str, Any]] = []
     for lo, hi in RELIABILITY_BUCKETS:
@@ -369,26 +377,39 @@ def _evaluate_scenario_brier(
     for sc_id, p, y in records:
         by_sc.setdefault(sc_id, []).append((p, y))
     per_scenario: dict[str, Any] = {}
+    sc_clim_weighted_sum = 0.0
     for sc_id, items in sorted(by_sc.items()):
         m = len(items)
         sc_brier = sum((p - y) ** 2 for p, y in items) / m
+        sc_emp = sum(y for _, y in items) / m
+        sc_clim = sum((sc_emp - y) ** 2 for _, y in items) / m
+        sc_bss = (1.0 - (sc_brier / sc_clim)) if sc_clim > 1e-9 else 0.0
+        sc_clim_weighted_sum += m * sc_clim
         per_scenario[sc_id] = {
             "samples": m,
             "mean_predicted_freq": round(sum(p for p, _ in items) / m, 4),
-            "empirical_hit_rate": round(sum(y for _, y in items) / m, 4),
+            "empirical_hit_rate": round(sc_emp, 4),
             "brier_score": round(sc_brier, 4),
+            "climatology_brier_score": round(sc_clim, 4),
+            "brier_skill_score": round(sc_bss, 4),
         }
+
+    clim_brier = sc_clim_weighted_sum / n
+    if clim_brier > 1e-9:
+        bss = 1.0 - (brier / clim_brier)
+    else:
+        bss = 0.0
 
     discriminative = bool(n >= 10 and bss > 0.0)
     if discriminative:
         verdict = (
-            f"样本外 Brier = {brier:.4f}，优于全样本基准率 Brier = {clim_brier:.4f}"
-            f"（技能分 BSS = {bss:+.3f} > 0，历史频率具有区分度）"
+            f"样本外 Brier = {brier:.4f}，优于各情景自身基准率加权 Brier = {clim_brier:.4f}"
+            f"（相对各情景基准率的技能分 BSS = {bss:+.3f} > 0，历史频率具有区分度）"
         )
     else:
         verdict = (
-            f"样本外 Brier = {brier:.4f}，全样本基准率 Brier = {clim_brier:.4f}"
-            f"（技能分 BSS = {bss:+.3f} ≤ 0，尚未优于全样本基准率，仅作背景参考）"
+            f"样本外 Brier = {brier:.4f}，各情景自身基准率加权 Brier = {clim_brier:.4f}"
+            f"（相对各情景基准率的技能分 BSS = {bss:+.3f} ≤ 0，尚未优于各情景自身基准率，仅作历史统计参考）"
         )
 
     return {
@@ -396,7 +417,9 @@ def _evaluate_scenario_brier(
         "brier_score": round(brier, 4),
         "climatology_base_rate": round(clim_rate, 4),
         "climatology_brier_score": round(clim_brier, 4),
+        "pooled_climatology_brier_score": round(pooled_clim_brier, 4),
         "brier_skill_score": round(bss, 4),
+        "pooled_brier_skill_score": round(pooled_bss, 4),
         "discriminative": discriminative,
         "reliability_buckets": buckets,
         "per_scenario": per_scenario,
@@ -475,6 +498,7 @@ def run_plan_backtest(
     bars = bundle["target"]["bars"]
     inst = bundle["target"]["instrument"]
     market, asset_type, symbol = inst["market"], inst["asset_type"], inst["symbol"]
+    inst_name = str(inst.get("name") or request.get("name") or "")
     is_st = bool(inst.get("is_st") or request.get("is_st", False))
     is_ipo_no_limit = bool(request.get("is_ipo_no_limit") or (bundle.get("extra_context") or {}).get("is_ipo_no_limit", False))
     n = len(bars)
@@ -519,9 +543,12 @@ def run_plan_backtest(
             (float(rep["multi_timeframe_score"]["rule_score"]), action, float(bars[t + horizon_bars]["close"]) / float(bars[t]["close"]) - 1.0)
         )
         for sc_item in rep["rule_scenarios"].get("scenarios") or []:
+            if not sc_item.get("precondition_met", True):
+                continue
             sc_id = str(sc_item["id"])
             sc_dir = str(sc_item.get("direction") or "BULLISH")
-            p_pred = float((sc_item.get("historical_frequency") or {}).get("target_freq") or 0.0)
+            hf_sc = sc_item.get("historical_frequency") or {}
+            p_pred = float(hf_sc["target_freq"]) if hf_sc.get("target_freq") is not None else 0.0
             ev_res = label_scenario_event(full_causal_feat, t, sc_id, horizon_bars, direction=sc_dir)
             y_hit = 1 if ev_res["outcome"] == "HIT_TARGET" else 0
             brier_records.append((sc_id, p_pred, y_hit))
@@ -532,6 +559,7 @@ def run_plan_backtest(
             plan = rep["triple_barrier_plan"]
             entry_low, entry_high = plan["entry_zone"]
             stop_loss = float(plan["stop_loss_barrier"])
+            ratchet = plan.get("breakeven_ratchet") or {}
             entry_open = float(pit_bars[t + 1]["open"])
             if entry_low <= entry_open <= entry_high and entry_open > stop_loss:
                 res = label_triple_barrier_event(
@@ -545,7 +573,11 @@ def run_plan_backtest(
                     symbol=symbol,
                     is_st=is_st,
                     is_ipo_no_limit=is_ipo_no_limit,
-                    trailing_stop=True,
+                    trailing_stop=bool(ratchet.get("enabled", True)),
+                    trigger_r=float(ratchet.get("trigger_r", 0.90)),
+                    confirm_close_r=float(ratchet.get("confirm_close_r", 0.30)),
+                    lock_r=float(ratchet.get("lock_r", 0.08)),
+                    name=inst_name,
                 )
                 if res.get("tradable"):
                     trades[action].append(
@@ -557,6 +589,7 @@ def run_plan_backtest(
                             "plan_entry_zone": [entry_low, entry_high],
                             "plan_stop_loss": stop_loss,
                             "plan_take_profit_1": float(plan["take_profit_1"]),
+                            "plan_breakeven_ratchet": ratchet,
                         }
                     )
                     busy_until = int(res["exit_idx"])
@@ -574,7 +607,14 @@ def run_plan_backtest(
     hit_50 = hit_80 = 0
     q50_err: list[float] = []
     rw_err: list[float] = []
-    meta_stub = {"market": market, "asset_type": asset_type, "symbol": symbol, "is_st": is_st, "is_ipo_no_limit": is_ipo_no_limit}
+    meta_stub = {
+        "market": market,
+        "asset_type": asset_type,
+        "symbol": symbol,
+        "name": inst_name,
+        "is_st": is_st,
+        "is_ipo_no_limit": is_ipo_no_limit,
+    }
     for cut in eval_cuts:
         pit_sub = rescale_bars_as_of(bars[: cut + horizon_bars + 1], cut)
         fc = compute_conformal_forecast(pit_sub[: cut + 1], meta=meta_stub, horizon_bars=horizon_bars)
@@ -597,7 +637,10 @@ def run_plan_backtest(
         "total_bars": n,
         "method": "LIVE_PLAN_REPLAY_V6",
         "decision_window": {"start_day": bars[start]["day"], "end_day": bars[end]["day"], "decisions": decisions, "step_bars": step},
-        "entry_rule": "决策日收盘给出 LONG_CONFIRMED/WATCH_LONG_SETUP 时，次日开盘价落在计划入场区内才成交；出场 = 计划止损 / TP1 / 时间屏障（无移动止损）",
+        "entry_rule": (
+            "决策日收盘给出 LONG_CONFIRMED/WATCH_LONG_SETUP 时，次日开盘价落在计划入场区内才成交；"
+            "出场 = 盘中触及计划硬止损或 TP1 / 盘中触及 +0.90R 且收盘 ≥ +0.30R 后次日起止损上移至 +0.08R 保本位 / 持仓满期触发时间屏障"
+        ),
         "actions_seen": actions_seen,
         "no_fill_outside_entry_zone": no_fill,
         "all_long_signals": _summarize_returns([float(x["net_return"]) for x in all_trades], years),

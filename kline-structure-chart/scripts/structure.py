@@ -358,6 +358,7 @@ def compute_structure(view: list[dict], pivots: list[dict], cur_idx: int, ref: f
         "pattern": pattern,
         "fitted": fitted,
         "status": status,
+        "status_run_bars": run,
         "status_text": status_text,
         "status_short": status_short,
         "upper": pack(upper),
@@ -967,6 +968,7 @@ def compute_structure_layer(
     projections["bear"]["historical_frequency"] = scen_bundle["bear_frequency"]
     projections["scenarios"] = scen_bundle["scenarios"]
     projections["scenario_count"] = scen_bundle["scenario_count"]
+    projections["precondition_met_count"] = scen_bundle["precondition_met_count"]
     projections["scenario_signature"] = scen_bundle["scenario_signature"]
     projections["impulse_wave"] = scen_bundle["impulse_wave"]
     # 展示用波段骨架：同一阈值在全部已收盘K线上的 ZigZag，下标换算到主图

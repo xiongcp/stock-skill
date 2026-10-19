@@ -304,7 +304,7 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 | O3-10 ~ O3-18 | P1/P2 | `install.sh`、`install.ps1`、`.claude-plugin/`、`scripts/doctor.py`、`scripts/resolve_symbol.py`、README、`references/*`、`examples/`、CHANGELOG、CI | 无一键安装、不支持名称转代码、文档偏薄 | ✅ 见 `CHANGELOG.md` 5.2.0；`test_tools.py`、`test_docs_contract.py` |
 | O3-20 | P1 | `scripts/scenarios.py`、`references/scenario-playbook.md` | 推演固定为上攻/震荡/下探三条模板；无推动 5 浪识别 | ✅ 8 类标准情景库（代码与文档表格逐字对应）、推动 5 浪硬规则识别、按截面输出 2~5 个适用情景、触发距现价 <0.5 ATR 归为「已在进行中」、时间窗取历史到达用时分位数并截断在预测期内；`test_o3_20_*` |
 | O3-21 | P1 | `scripts/base_rates.py` | 缺少历史经验基准率（L2 层） | ✅ 标的自身历史逐点无前视统计先到目标/先到失效/到期频率、95% Wilson 区间、到达用时分位数与 MAE/MFE；`n < 30` 时向市场基准指数同情景频率做 Beta-Binomial 收缩并标为低样本；`test_o3_21_*` |
-| O3-22 | P1 | `scripts/evaluation.py` | 历史频率未做校准检验 | ✅ 回测新增 `scenario_frequency_brier`（样本外 Brier、全样本基准率 climatology Brier、技能分 `BSS` 与 5 档可靠性分桶表），仅当 `BSS > 0` 时输出「历史频率具有区分度」；`test_o3_22_*` |
+| O3-22 | P1 | `scripts/evaluation.py` | 历史频率未做校准检验 | ✅ 回测新增 `scenario_frequency_brier`（样本外 Brier、各情景自身基准率 per-scenario climatology Brier、技能分 `BSS` 与 5 档可靠性分桶表），仅当相对各情景自身基准率的 `BSS > 0` 时输出「历史频率具有区分度」；`test_o3_22_*` |
 | O3-23 | P2 | `scripts/render_structure_chart.py`、`scripts/render_html.py`、`scripts/render_report_md.py` | 图表与报告未体现历史条件频率与低样本提示 | ✅ PNG 与 HTML 按历史频率区分线宽与透明度，图例与标签写出频率与 `n`，低样本（`n < 30`）用虚线；报告第 3 节与第 7 节输出多情景频率表与 Brier 检验；`test_o3_23_and_o3_24_*` |
 | O3-24 | P2 | `scripts/forecast.py` | 保形区间无情景偏态展示层 | ✅ 新增 `scenario_conditional_fan`（标注 `display_only=True, calibrated=False`，图例标明「情景混合（非校准区间）」），默认鞅中心保形区间保持不变；`test_o3_23_and_o3_24_*` |
 | O3-30 | P1 | `scripts/judgment.py`、`scripts/analyze_and_forecast.py` | 缺少面向 LLM 研判的结构化证据包与价格白名单 | ✅ 生成 `*_judgment_pack.json`（含 `E1…En` 精确 `json_path` 溯源、冲突信号 `C1…Cm`、L2 历史频率与归一化基准概率、合法价格白名单）；`test_o3_30_to_o3_34_judgment_layer_and_scoring` |
@@ -317,5 +317,5 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 | O3-37 | P2 | `install.sh`、`install.ps1`、`scripts/doctor.py`、`SKILL.md` | 缺少 Hermes Agent（`~/.hermes/skills`）注册与跨目录 `--directory` 调用说明 | ✅ 新增 `hermes` 自动探测与软链/复制安装支持，`SKILL.md` 明确跨工作目录 `--directory` 调用规范；`test_install_sh_syntax_and_help` |
 
 - 未验证：`install.ps1` 未在 Windows 实测；安装后 Claude Code / Codex 新会话能否识别技能未实测。
-- 阶段 2 实测结果：在茅台（`600519.SH`）录制行情 2025-08 ~ 2026-09 回放（步长 5 日，共 151 次情景事件）中，历史条件频率样本外 Brier 分数 = 0.2340，优于全样本基准率（climatology = 38.4%）的 Brier 分数 0.2366（技能分 `BSS = +0.0108 > 0`，历史频率具有区分度）。
+- 阶段 2 实测结果：在茅台（`600519.SH`）录制行情回放中，历史条件频率按各情景自身基准率（per-scenario climatology）检验，技能分 `BSS <= 0`，报告如实标注「尚未优于各情景自身基准率，仅作历史统计参考」（`discriminative = false`）。
 

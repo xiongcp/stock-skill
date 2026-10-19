@@ -23,76 +23,76 @@
     "total_bars": 760,
     "method": "LIVE_PLAN_REPLAY_V6",
     "decision_window": {
-      "start_day": "2025-06-26",
-      "end_day": "2026-09-17",
+      "start_day": "2025-06-25",
+      "end_day": "2026-09-16",
       "decisions": 301,
       "step_bars": 1
     },
-    "entry_rule": "决策日收盘给出 LONG_CONFIRMED/WATCH_LONG_SETUP 时，次日开盘价落在计划入场区内才成交；出场 = 计划止损 / TP1 / 时间屏障（无移动止损）",
+    "entry_rule": "决策日收盘给出 LONG_CONFIRMED/WATCH_LONG_SETUP 时，次日开盘价落在计划入场区内才成交；出场 = 盘中触及计划硬止损或 TP1 / 盘中触及 +0.90R 且收盘 ≥ +0.30R 后次日起止损上移至 +0.08R 保本位 / 持仓满期触发时间屏障",
     "actions_seen": {
-      "NEUTRAL_HOLD_WAIT": 165,
-      "DEFENSIVE_AVOID": 116,
-      "WATCH_LONG_SETUP": 17,
-      "LONG_CONFIRMED": 3
+      "NEUTRAL_HOLD_WAIT": 158,
+      "DEFENSIVE_AVOID": 102,
+      "WATCH_LONG_SETUP": 28,
+      "LONG_CONFIRMED": 13
     },
-    "no_fill_outside_entry_zone": 6,
+    "no_fill_outside_entry_zone": 2,
     "all_long_signals": {
-      "trades": 8,
-      "cumulative_return_pct": 3.32,
-      "win_rate_pct": 50.0,
+      "trades": 14,
+      "cumulative_return_pct": -1.08,
+      "win_rate_pct": 42.86,
       "win_rate_95ci_pct": [
-        21.52,
-        78.48
+        21.38,
+        67.41
       ],
       "mean_return_95ci_pct": [
-        -1.69,
-        2.33
+        -1.58,
+        1.57
       ],
-      "sharpe": 0.4,
-      "max_drawdown_pct": 5.09,
-      "profit_factor": 1.4
+      "sharpe": -0.03,
+      "max_drawdown_pct": 7.45,
+      "profit_factor": 0.98
     },
     "long_confirmed": {
-      "trades": 2,
-      "cumulative_return_pct": 6.21,
-      "win_rate_pct": 100.0,
+      "trades": 3,
+      "cumulative_return_pct": 4.48,
+      "win_rate_pct": 66.67,
       "win_rate_95ci_pct": [
-        34.24,
-        100.0
+        20.77,
+        93.85
       ],
       "mean_return_95ci_pct": [
-        2.14,
-        3.98
+        -3.69,
+        4.32
       ],
-      "sharpe": 3.04,
-      "max_drawdown_pct": 0.0,
-      "profit_factor": 9.99
+      "sharpe": 0.54,
+      "max_drawdown_pct": 3.69,
+      "profit_factor": 2.25
     },
     "watch_long_setup": {
-      "trades": 6,
-      "cumulative_return_pct": -2.73,
-      "win_rate_pct": 33.33,
+      "trades": 11,
+      "cumulative_return_pct": -5.32,
+      "win_rate_pct": 36.36,
       "win_rate_95ci_pct": [
-        9.68,
-        70.0
+        15.17,
+        64.62
       ],
       "mean_return_95ci_pct": [
-        -2.37,
-        1.56
+        -1.95,
+        1.28
       ],
-      "sharpe": -0.34,
-      "max_drawdown_pct": 5.4,
-      "profit_factor": 0.71
+      "sharpe": -0.49,
+      "max_drawdown_pct": 11.42,
+      "profit_factor": 0.69
     },
-    "buy_and_hold_return_pct": -7.11,
+    "buy_and_hold_return_pct": -6.99,
     "veto_reason_counts": {
-      "RR_INSUFFICIENT": 197,
-      "BELOW_LOWER_RAIL": 58,
+      "RR_INSUFFICIENT": 182,
+      "BELOW_LOWER_RAIL": 57,
       "BREAKOUT_LOW_VOLUME": 32,
-      "BENCHMARK_WEAK": 32
+      "BENCHMARK_WEAK": 31
     },
     "rule_score_ic": {
-      "spearman": 0.261,
+      "spearman": 0.348,
       "decisions": 301,
       "effective_independent_samples": 20,
       "forward_horizon_bars": 15,
@@ -105,75 +105,77 @@
           0.0,
           38.0
         ],
-        "decisions": 110,
-        "mean_forward_return_pct": -1.13,
-        "median_forward_return_pct": -1.93,
-        "up_share_pct": 35.5
+        "decisions": 97,
+        "mean_forward_return_pct": -2.08,
+        "median_forward_return_pct": -2.44,
+        "up_share_pct": 30.9
       },
       {
         "range": [
           38.0,
           52.0
         ],
-        "decisions": 106,
-        "mean_forward_return_pct": -0.67,
-        "median_forward_return_pct": -1.13,
-        "up_share_pct": 34.9
+        "decisions": 99,
+        "mean_forward_return_pct": -0.7,
+        "median_forward_return_pct": -1.14,
+        "up_share_pct": 34.3
       },
       {
         "range": [
           52.0,
           65.0
         ],
-        "decisions": 73,
-        "mean_forward_return_pct": 1.45,
-        "median_forward_return_pct": 1.19,
-        "up_share_pct": 64.4
+        "decisions": 83,
+        "mean_forward_return_pct": 1.8,
+        "median_forward_return_pct": 1.2,
+        "up_share_pct": 65.1
       },
       {
         "range": [
           65.0,
           100.0
         ],
-        "decisions": 12,
-        "mean_forward_return_pct": 0.71,
+        "decisions": 22,
+        "mean_forward_return_pct": 1.67,
         "median_forward_return_pct": 0.29,
-        "up_share_pct": 58.3
+        "up_share_pct": 54.5
       }
     ],
     "action_forward_returns": {
       "LONG_CONFIRMED": {
-        "decisions": 3,
-        "mean_forward_return_pct": 2.71,
-        "median_forward_return_pct": 4.28,
-        "up_share_pct": 66.7
+        "decisions": 13,
+        "mean_forward_return_pct": 1.38,
+        "median_forward_return_pct": 0.43,
+        "up_share_pct": 53.8
       },
       "WATCH_LONG_SETUP": {
-        "decisions": 17,
-        "mean_forward_return_pct": 0.59,
-        "median_forward_return_pct": -0.3,
-        "up_share_pct": 41.2
+        "decisions": 28,
+        "mean_forward_return_pct": 1.1,
+        "median_forward_return_pct": 0.22,
+        "up_share_pct": 50.0
       },
       "NEUTRAL_HOLD_WAIT": {
-        "decisions": 165,
-        "mean_forward_return_pct": 0.17,
-        "median_forward_return_pct": -0.12,
-        "up_share_pct": 49.1
+        "decisions": 158,
+        "mean_forward_return_pct": 0.52,
+        "median_forward_return_pct": -0.02,
+        "up_share_pct": 50.0
       },
       "DEFENSIVE_AVOID": {
-        "decisions": 116,
-        "mean_forward_return_pct": -1.1,
-        "median_forward_return_pct": -2.0,
-        "up_share_pct": 34.5
+        "decisions": 102,
+        "mean_forward_return_pct": -2.11,
+        "median_forward_return_pct": -2.44,
+        "up_share_pct": 29.4
       }
     },
     "scenario_frequency_brier": {
-      "samples": 848,
-      "brier_score": 0.2239,
-      "climatology_base_rate": 0.3679,
-      "climatology_brier_score": 0.2326,
-      "brier_skill_score": 0.0371,
-      "discriminative": true,
+      "samples": 832,
+      "brier_score": 0.2235,
+      "climatology_base_rate": 0.3702,
+      "climatology_brier_score": 0.2069,
+      "pooled_climatology_brier_score": 0.2331,
+      "brier_skill_score": -0.0804,
+      "pooled_brier_skill_score": 0.0414,
+      "discriminative": false,
       "reliability_buckets": [
         {
           "bucket": [
@@ -181,10 +183,10 @@
             0.2
           ],
           "bucket_pct": "0%~20%",
-          "count": 178,
-          "mean_predicted_freq": 0.1321,
-          "empirical_hit_rate": 0.0899,
-          "calibration_gap": -0.0422
+          "count": 139,
+          "mean_predicted_freq": 0.1664,
+          "empirical_hit_rate": 0.0791,
+          "calibration_gap": -0.0873
         },
         {
           "bucket": [
@@ -192,10 +194,10 @@
             0.4
           ],
           "bucket_pct": "20%~40%",
-          "count": 220,
-          "mean_predicted_freq": 0.3433,
-          "empirical_hit_rate": 0.5591,
-          "calibration_gap": 0.2158
+          "count": 182,
+          "mean_predicted_freq": 0.3617,
+          "empirical_hit_rate": 0.4945,
+          "calibration_gap": 0.1328
         },
         {
           "bucket": [
@@ -203,10 +205,10 @@
             0.6
           ],
           "bucket_pct": "40%~60%",
-          "count": 378,
-          "mean_predicted_freq": 0.4606,
-          "empirical_hit_rate": 0.3439,
-          "calibration_gap": -0.1167
+          "count": 375,
+          "mean_predicted_freq": 0.4707,
+          "empirical_hit_rate": 0.3627,
+          "calibration_gap": -0.108
         },
         {
           "bucket": [
@@ -214,10 +216,10 @@
             0.8
           ],
           "bucket_pct": "60%~80%",
-          "count": 33,
-          "mean_predicted_freq": 0.6373,
-          "empirical_hit_rate": 0.3636,
-          "calibration_gap": -0.2737
+          "count": 99,
+          "mean_predicted_freq": 0.6215,
+          "empirical_hit_rate": 0.4242,
+          "calibration_gap": -0.1973
         },
         {
           "bucket": [
@@ -225,144 +227,190 @@
             1.0
           ],
           "bucket_pct": "80%~100%",
-          "count": 39,
-          "mean_predicted_freq": 0.8499,
-          "empirical_hit_rate": 0.7949,
-          "calibration_gap": -0.055
+          "count": 37,
+          "mean_predicted_freq": 0.8489,
+          "empirical_hit_rate": 0.7838,
+          "calibration_gap": -0.0651
         }
       ],
       "per_scenario": {
         "APEX_BREAKOUT": {
-          "samples": 39,
-          "mean_predicted_freq": 0.8499,
-          "empirical_hit_rate": 0.7949,
-          "brier_score": 0.1673
+          "samples": 37,
+          "mean_predicted_freq": 0.8489,
+          "empirical_hit_rate": 0.7838,
+          "brier_score": 0.176,
+          "climatology_brier_score": 0.1695,
+          "brier_skill_score": -0.0385
         },
         "BREAKDOWN_DECLINE": {
-          "samples": 209,
-          "mean_predicted_freq": 0.4411,
-          "empirical_hit_rate": 0.4067,
-          "brier_score": 0.2719
+          "samples": 138,
+          "mean_predicted_freq": 0.4031,
+          "empirical_hit_rate": 0.3333,
+          "brier_score": 0.2489,
+          "climatology_brier_score": 0.2222,
+          "brier_skill_score": -0.1202
         },
         "BREAKOUT_RETEST": {
-          "samples": 181,
-          "mean_predicted_freq": 0.3766,
-          "empirical_hit_rate": 0.453,
-          "brier_score": 0.2563
+          "samples": 59,
+          "mean_predicted_freq": 0.3744,
+          "empirical_hit_rate": 0.3051,
+          "brier_score": 0.2169,
+          "climatology_brier_score": 0.212,
+          "brier_skill_score": -0.0232
         },
         "C_WAVE_REVERSAL": {
-          "samples": 76,
-          "mean_predicted_freq": 0.4227,
-          "empirical_hit_rate": 0.3947,
-          "brier_score": 0.2778
+          "samples": 102,
+          "mean_predicted_freq": 0.473,
+          "empirical_hit_rate": 0.4608,
+          "brier_score": 0.2758,
+          "climatology_brier_score": 0.2485,
+          "brier_skill_score": -0.1102
         },
         "FALSE_BREAKOUT_REVERSAL": {
-          "samples": 87,
-          "mean_predicted_freq": 0.5614,
-          "empirical_hit_rate": 0.4368,
-          "brier_score": 0.2718
+          "samples": 196,
+          "mean_predicted_freq": 0.5429,
+          "empirical_hit_rate": 0.4439,
+          "brier_score": 0.2611,
+          "climatology_brier_score": 0.2469,
+          "brier_skill_score": -0.0577
         },
         "OVERSOLD_BOUNCE": {
-          "samples": 47,
-          "mean_predicted_freq": 0.3689,
-          "empirical_hit_rate": 0.4894,
-          "brier_score": 0.2868
+          "samples": 44,
+          "mean_predicted_freq": 0.5759,
+          "empirical_hit_rate": 0.5,
+          "brier_score": 0.2901,
+          "climatology_brier_score": 0.25,
+          "brier_skill_score": -0.1605
         },
         "RANGE_OSCILLATION": {
-          "samples": 179,
-          "mean_predicted_freq": 0.1325,
-          "empirical_hit_rate": 0.0894,
-          "brier_score": 0.0866
+          "samples": 142,
+          "mean_predicted_freq": 0.1671,
+          "empirical_hit_rate": 0.0775,
+          "brier_score": 0.0786,
+          "climatology_brier_score": 0.0715,
+          "brier_skill_score": -0.1002
         },
         "TREND_CONTINUATION": {
-          "samples": 30,
-          "mean_predicted_freq": 0.3928,
-          "empirical_hit_rate": 0.2333,
-          "brier_score": 0.2139
+          "samples": 114,
+          "mean_predicted_freq": 0.3995,
+          "empirical_hit_rate": 0.4211,
+          "brier_score": 0.2548,
+          "climatology_brier_score": 0.2438,
+          "brier_skill_score": -0.0452
         }
       },
-      "verdict": "样本外 Brier = 0.2239，优于全样本基准率 Brier = 0.2326（技能分 BSS = +0.037 > 0，历史频率具有区分度）"
+      "verdict": "样本外 Brier = 0.2235，各情景自身基准率加权 Brier = 0.2069（相对各情景基准率的技能分 BSS = -0.080 ≤ 0，尚未优于各情景自身基准率，仅作历史统计参考）"
     },
     "sample_trades": [
       {
         "tradable": true,
-        "entry_idx": 623,
-        "entry_day": "2026-03-25",
-        "entry_price": 1410.11,
-        "exit_idx": 627,
-        "exit_day": "2026-03-31",
-        "exit_price": 1468.0,
-        "holding_bars": 5,
-        "outcome": "TP_BARRIER",
-        "barrier_label": 1,
-        "gross_return": 0.04105,
-        "net_return": 0.03985,
-        "signal_day": "2026-03-24",
+        "entry_idx": 671,
+        "entry_day": "2026-06-04",
+        "entry_price": 1278.99,
+        "exit_idx": 681,
+        "exit_day": "2026-06-18",
+        "exit_price": 1233.4,
+        "holding_bars": 11,
+        "outcome": "SL_BARRIER",
+        "barrier_label": -1,
+        "gross_return": -0.03565,
+        "net_return": -0.03685,
+        "signal_day": "2026-06-03",
         "action": "LONG_CONFIRMED",
         "setup_type": "LEFT_SIDE_PULLBACK",
         "plan_entry_zone": [
-          1394.22,
-          1413.16
+          1269.49,
+          1287.43
         ],
-        "plan_stop_loss": 1370.58,
-        "plan_take_profit_1": 1452.66
+        "plan_stop_loss": 1233.4,
+        "plan_take_profit_1": 1340.57,
+        "plan_breakeven_ratchet": {
+          "enabled": true,
+          "trigger_r": 0.9,
+          "confirm_close_r": 0.3,
+          "lock_r": 0.08,
+          "trigger_price": 1319.01,
+          "confirm_close_price": 1291.98,
+          "breakeven_stop_price": 1282.06,
+          "rule_cn": "盘中最高价触及 +0.90R（以入场区中值计约 1319.01）且当日收盘高于 +0.30R（约 1291.98）后，自次日起将保护性止损上移至 +0.08R 保本位（约 1282.06）"
+        }
       },
       {
         "tradable": true,
-        "entry_idx": 647,
-        "entry_day": "2026-04-29",
-        "entry_price": 1405.0,
-        "exit_idx": 649,
-        "exit_day": "2026-05-06",
-        "exit_price": 1365.1,
+        "entry_idx": 683,
+        "entry_day": "2026-06-23",
+        "entry_price": 1239.0,
+        "exit_idx": 685,
+        "exit_day": "2026-06-25",
+        "exit_price": 1201.11,
         "holding_bars": 3,
         "outcome": "SL_BARRIER",
         "barrier_label": -1,
-        "gross_return": -0.0284,
-        "net_return": -0.0296,
-        "signal_day": "2026-04-28",
+        "gross_return": -0.03058,
+        "net_return": -0.03178,
+        "signal_day": "2026-06-22",
         "action": "WATCH_LONG_SETUP",
         "setup_type": "LEFT_SIDE_PULLBACK",
         "plan_entry_zone": [
-          1399.74,
-          1414.21
+          1229.73,
+          1246.6
         ],
-        "plan_stop_loss": 1371.99,
-        "plan_take_profit_1": 1455.98
+        "plan_stop_loss": 1201.11,
+        "plan_take_profit_1": 1293.75,
+        "plan_breakeven_ratchet": {
+          "enabled": true,
+          "trigger_r": 0.9,
+          "confirm_close_r": 0.3,
+          "lock_r": 0.08,
+          "trigger_price": 1271.51,
+          "confirm_close_price": 1249.28,
+          "breakeven_stop_price": 1241.13,
+          "rule_cn": "盘中最高价触及 +0.90R（以入场区中值计约 1271.51）且当日收盘高于 +0.30R（约 1249.28）后，自次日起将保护性止损上移至 +0.08R 保本位（约 1241.13）"
+        }
       },
       {
         "tradable": true,
-        "entry_idx": 667,
-        "entry_day": "2026-06-01",
-        "entry_price": 1327.0,
-        "exit_idx": 669,
-        "exit_day": "2026-06-03",
-        "exit_price": 1299.46,
-        "holding_bars": 3,
-        "outcome": "SL_BARRIER",
-        "barrier_label": -1,
-        "gross_return": -0.02075,
-        "net_return": -0.02195,
-        "signal_day": "2026-05-29",
+        "entry_idx": 688,
+        "entry_day": "2026-06-30",
+        "entry_price": 1187.0,
+        "exit_idx": 699,
+        "exit_day": "2026-07-15",
+        "exit_price": 1251.02,
+        "holding_bars": 12,
+        "outcome": "TP_BARRIER",
+        "barrier_label": 1,
+        "gross_return": 0.05393,
+        "net_return": 0.05273,
+        "signal_day": "2026-06-29",
         "action": "WATCH_LONG_SETUP",
         "setup_type": "LEFT_SIDE_PULLBACK",
         "plan_entry_zone": [
-          1320.48,
-          1335.67
+          1181.41,
+          1200.98
         ],
-        "plan_stop_loss": 1299.46,
-        "plan_take_profit_1": 1371.0
+        "plan_stop_loss": 1151.31,
+        "plan_take_profit_1": 1251.02,
+        "plan_breakeven_ratchet": {
+          "enabled": true,
+          "trigger_r": 0.9,
+          "confirm_close_r": 0.3,
+          "lock_r": 0.08,
+          "trigger_price": 1227.09,
+          "confirm_close_price": 1203.16,
+          "breakeven_stop_price": 1194.39,
+          "rule_cn": "盘中最高价触及 +0.90R（以入场区中值计约 1227.09）且当日收盘高于 +0.30R（约 1203.16）后，自次日起将保护性止损上移至 +0.08R 保本位（约 1194.39）"
+        }
       }
     ],
-    "sample_size_warning": "成交仅 8 笔（少于 30），胜率/夏普等统计量置信度很低，仅供参考",
+    "sample_size_warning": "成交仅 14 笔（少于 30），胜率/夏普等统计量置信度很低，仅供参考",
     "conformal_forecast_oos": {
       "evaluated_cutoffs": 21,
-      "nominal_50pct_coverage": 0.571,
-      "nominal_80pct_coverage": 0.952,
-      "q50_mae_pct": 2.84,
-      "random_walk_mae_pct": 2.84,
-      "rolling_all_cutoffs_coverage_50": 0.525,
-      "rolling_all_cutoffs_coverage_80": 0.832,
+      "nominal_50pct_coverage": 0.667,
+      "nominal_80pct_coverage": 0.905,
+      "q50_mae_pct": 2.52,
+      "random_walk_mae_pct": 2.52,
+      "rolling_all_cutoffs_coverage_50": 0.502,
+      "rolling_all_cutoffs_coverage_80": 0.783,
       "rolling_evaluation_samples": 631,
       "note": "evaluated_cutoffs 为按步长 H 抽样的无重叠独立截面子集；rolling_all_cutoffs_* 与主报告 calibration_audit 完全一致。q50 采用最新收盘价（无漂移），因此与随机游走误差一致。"
     }

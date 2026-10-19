@@ -126,10 +126,10 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
    - 形态只引用 `algebraic_patterns_detected` 里的 `name_cn` 和 `formula_verified`。
 4. **风控**：
    - `debate_and_veto.risk_officer_veto` 为 `true` 时，**置顶**列出 `veto_reasons`，不得给出做多建议。
-   - 否则给出 `triple_barrier_plan` 的入场区、止损、TP1/TP2 与时间屏障。
-   - **分板块/题材差异化提醒（基于 1,500 股样本外盲测实证）**：
-     - **10% 涨跌幅主板 / 港美股大盘蓝筹 / 金融红利 / 周期资源**：中长期趋势延续性强，重点结合 `rule_score`、相对强弱 `relative_strength_vs_index` 与通道中轨顺势解读；
-     - **20% 涨跌幅科创板（`688`）/ 创业板（`300/301`）及医药、科技高弹性题材**：短期脉冲后回吐频繁，严禁在偏离 `EMA20` 超过 `2.0 * ATR14` 或 `RSI14 >= 70` 时追高，必须严格强调在 `triple_barrier_plan.entry_zone` 挂单区间内执行，并依靠冲高 `+0.90R` 后的 `+0.08R` 移动保本止损锁住利润；
+   - 否则给出 `triple_barrier_plan` 的入场区、止损（盘中触及硬止损屏障离场，A 股受 T+1 约束自入场次日起生效）、TP1/TP2、时间屏障与 `breakeven_ratchet` 移动保本规则（盘中触及 `+0.90R` 且收盘 `≥ +0.30R` 后，自次日起止损上移至 `+0.08R` 保本位）。
+   - **分板块/制度差异化提醒**：
+     - **10% 涨跌幅主板 / 港美股大盘股**：结合 `rule_score`、相对强弱 `relative_strength_vs_index` 与通道中轨顺势解读；
+     - **20% 涨跌幅科创板（`688` 及 `588/589` ETF）/ 创业板（`300/301` 及创业板/双创 ETF）**：日内波动幅度大，不得在偏离 `EMA20` 超过 `2.0 * ATR14` 或 `RSI14 >= 70` 时追高，强调在 `triple_barrier_plan.entry_zone` 挂单区间内执行，并按 `breakeven_ratchet` 移动保本止损执行风控；
      - **弱市中的「超跌反弹」（`OVERSOLD_BOUNCE`）**：当大盘偏弱或个股处于 `MA60` 下方空头排列时，单凭 RSI 超卖左侧抄底容易遭遇“超卖再超卖”，必须提醒用户等待日线收阳并站上触发位右侧确认。
    - 用户已持有该标的时，转述报告里的"持仓防守计划"（`holder_defense_plan.rules`）。
    - 港股、美股报告带"破位做空计划"（`short_plan`）：转述时必须同时说明卖空限制（`constraints`）、`warnings`，以及盈亏比未计融券费用。A 股与指数没有做空计划，卖空限制只按制度手册（`references/cn-market.md`、`references/hk-market.md`、`references/us-market.md`）说明，不得给出报告中没有的做空点位。
@@ -138,7 +138,7 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
    - `scenario_conditional_fan` 为按历史条件频率混合的展示扇形，必须注明"情景混合（非校准区间）"，不得替代默认分期限保形区间。
    - 必须同时给出 `calibration_audit` 的实测覆盖率与 `effective_independent_samples`。
    - `promotion_status` 为 `RESEARCH_CALIBRATION_WARMUP` 时称"校准观察期"，不得把覆盖率说成区间已验证可靠；有效独立样本低于 `min_effective_independent_samples`（20）时不会晋级（判定见 `references/math-patterns.md` 第 5 节）。
-6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率（带 95% 区间）、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。规则分 IC 的结论（`rule_score_ic.verdict`）原文转述，`informative = false` 时说明规则分在该标的上只作描述。同时转述 `scenario_frequency_brier` 的样本外 Brier 分数、全样本基准率 Brier 分数与技能分 `brier_skill_score`（仅当 `brier_skill_score > 0` 时才说"历史频率具有区分度"）。
+6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率（带 95% 区间）、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。规则分 IC 的结论（`rule_score_ic.verdict`）原文转述，`informative = false` 时说明规则分在该标的上只作描述。同时转述 `scenario_frequency_brier` 的样本外 Brier 分数、各情景自身基准率加权 Brier 分数与技能分 `brier_skill_score`（仅当相对各情景自身基准率的 `brier_skill_score > 0` 时才说"历史频率具有区分度"）。
 7. **L3 受约束情景研判（可选，按 `references/llm-judgment-protocol.md` 执行）**：读取 `*_judgment_pack.json`，以 L2 基准概率为起点、引用 `E1…En` 证据编号做有界调整（`n>=30` 最多 ±15%，`n<30` 最多 ±10%，互斥情景概率和 = 100%），写出 `*_judgment.json`（可先用 `--auto-init` 生成预填模板再改写）并运行 `uv run python scripts/validate_judgment.py --result <..._result.json> --judgment <..._judgment.json>` 校验通过后，在「LLM 情景研判（主观判断，已记录待检验）」章节同时展示调整前后数值、证据编号与证伪条件；校验输出 `origin = AUTO_INIT_TEMPLATE`（未改写模板）时只能按「脚本预填模板」转述。可用 `scripts/lint_response.py` 校验最终回复文本，用 `scripts/score_judgments.py` 对到期研判打分。
 8. **文件**：给出 `result.json` 与 `dashboard.html` 的路径；客户端能显示图片时再内嵌 `preview.png`，否则只给路径。
 9. **免责声明**：结尾注明"以上为规则化技术分析，仅供研究参考，不构成投资建议"。
@@ -147,7 +147,7 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 
 - `rule_score`、`regime_score`、过滤分都是确定性规则打分，**不是**胜率、概率或置信度；Volume Profile 是成交分布近似，不是真实持仓筹码。
 - 只允许两类概率，而且**只有 JSON 中存在对应字段时才能说出数字**：
-  1. **历史条件频率**：脚本在该标的自身历史上无前视统计的"情景触发后先到目标 / 先到失效 / 到期"频率（字段 `rule_scenarios.scenarios[*].historical_frequency` 及 `rule_scenarios.{bull,neutral,bear}.historical_frequency`，已提供）。必须直接引用 `display_cn` 或写成"历史条件频率 X%（n = …，95% 区间 a%~b%）"，样本数 n < 30 时带"低样本，已向市场基准收缩"说明，不叫胜率、不叫上涨概率。它统计的是以 ATR 为单位的标准化屏障事件（`historical_frequency.event_definition_cn`），不是本情景目标价的到达概率；括号内的「体制加权估计」「收缩后估计」是模型估计，引用时必须带上这个名称。
+  1. **历史条件频率**：脚本在该标的自身历史上无前视统计的"情景触发后先到目标 / 先到失效 / 到期"频率（字段 `rule_scenarios.scenarios[*].historical_frequency` 及 `rule_scenarios.{bull,neutral,bear}.historical_frequency`，已提供）。必须直接引用 `display_cn` 或写成"历史条件频率 X%（n = …，95% 区间 a%~b%）"，样本数 n < 30 时带"低样本，已向市场基准收缩"说明，不叫胜率、不叫上涨概率。它统计的是以 ATR 为单位的标准化屏障事件（`historical_frequency.event_definition_cn`），不是本情景目标价的到达概率；低样本时括号内的「收缩后估计」是 Beta-Binomial 模型估计，引用时必须带上这个名称。
   2. **主观研判概率**：由你（运行技能的 agent）按 `references/llm-judgment-protocol.md` 以 `*_judgment_pack.json` 中的基准概率为锚点做有界调整，引用证据编号 `E1…En`、不超过调整上限、写入 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验后才能给出，必须标注"主观研判，已记录待检验"。
 - **严禁无依据概率**：除上述 `historical_frequency`、回测成交胜率（附 95% 区间与样本量提示）和区间覆盖率外，回答中不得出现"上涨概率 60%""胜算七成""大概率突破"等未经校验的概率数字或等价说法。
 - 推演路径只写"触发条件 → 目标位 → 失效条件"；15 个交易日的方向本身接近随机，不得承诺涨跌。
@@ -167,7 +167,7 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 
 ## 七、回复示例
 
-以下示例节选自仓库 `examples/` 中用真实行情生成的报告（贵州茅台，数据截至 2026-10-16）。**示例里的数字只用来说明格式，回答时一律使用本次运行的输出。**
+以下示例节选自仓库 `examples/` 中用真实行情生成的报告（贵州茅台，数据截至 2026-10-15）。**示例里的数字只用来说明格式，回答时一律使用本次运行的输出。**
 
 用户问："茅台现在能买吗？"
 
@@ -175,7 +175,7 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 
 > 风控已否决做多：大盘环境评分偏弱（沪深300 状态分 16.0 < 35），以下点位只用于观察，不构成做多建议。
 >
-> 数据为新浪日线，截至 2026-10-16，前复权含分红，数据质量 OK。规则分 28.5/100（均值回归体制评分偏空）：近 240 日均线偏离与随后 15 日收益负相关，四组规则分项合计 81.0 经反转调整为 28.5，衡量的是追高风险，不代表多周期空头；这是规则加权分，不是胜率。结构上是扩散喇叭形，10-16 起收盘站上上轨 1 个交易日：上攻需日线放量收盘站上 1358.18，目标 1381.97，收盘跌回 1349.43 下方视为假突破（突破回踩历史条件频率 30.6%，n = 49，95% 区间 19.5%~44.5%；统计的是 ATR 标准化事件，不是到达目标价的概率）；下探以收盘跌破 1314.37 为触发，目标 1291.44。现价附近的 1338.86、1329.88、1320.43 是正在争夺的价位，不作触发条件。浪型主计数为上涨 ABC（收盘跌破 1228.10 失效），备选为下跌 ABC（收盘站上 1363.35 失效）。……（大盘、风控与持仓防守、区间、回测与 IC、文件、免责声明依次展开）
+> 数据为新浪日线，截至 2026-10-15，前复权含分红，数据质量 OK。规则分 36.7/100（均值回归体制评分偏空）：近 240 日均线偏离与随后 15 日收益负相关，四组规则分项合计 58.5 经反转调整为 36.7，衡量的是追高风险，不代表多周期空头；这是规则加权分，不是胜率。结构上是扩散喇叭形，收盘仍在上下轨之间运行（最新 K 线上影线触及上轨后回落）：上攻需日线放量收盘站上 1425.15，目标 1445.71，收盘跌回 1416.29 下方视为假突破（趋势延续历史条件频率 27.6%，n = 29 低样本，95% 区间 14.7%~45.7%，收缩后估计 37.4%；统计的是 ATR 标准化事件，不是到达目标价的概率）；下探以收盘跌破 1295.74 为触发，目标 1270.33。现价附近的 1318.83、1315.39、1309.21 是正在争夺的价位，不作触发条件。浪型主计数为上涨 ABC（收盘跌破 1228.10 失效），备选为下跌 ABC（收盘站上 1363.35 失效）。……（大盘、风控与持仓防守、区间、回测与 IC、文件、免责声明依次展开）
 
 错误的回复（不得这样写）：
 

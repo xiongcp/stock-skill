@@ -364,7 +364,7 @@ def split_incomplete_last_bar(
     now: datetime | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     """按交易所时区与收盘时间拆出尚未收盘的最后一根日线，返回 (已收盘K线, 盘中K线或 None)。"""
-    if not bars or is_daily_bar_complete(bars[-1]["day"], market, now):
+    if not bars or (bool(bars[-1].get("complete", True)) and is_daily_bar_complete(bars[-1]["day"], market, now)):
         return bars, None
     last = bars[-1]
     tz_name = MARKET_SESSIONS[market][0]
@@ -436,13 +436,9 @@ def load_bundle(
             if request.get("as_of"):
                 bars = [b for b in bars if b["day"] <= str(request["as_of"])[:10]]
             validate_bars(bars, "input_bars")
+            bars, intraday = split_incomplete_last_bar(bars, inst["market"], now)
             if len(bars) < MIN_LIVE_BARS:
                 raise RuntimeError(f"历史长度不足 ({len(bars)} < {MIN_LIVE_BARS})")
-            intraday = None
-            if not bars[-1]["complete"]:
-                last = bars.pop()
-                prev = bars[-1]["close"] if bars else last["open"]
-                intraday = {**last, "prev": prev, "stamp": f"{last['day']} (未收盘)", "session_closed": False}
             # 本地K线数组没有公司行动数据，按原样使用并在复权状态中注明
             bars = apply_point_in_time_adjustment(bars, mode="raw", as_of_day=bars[-1]["day"])
             local_adjustment = {
@@ -470,6 +466,7 @@ def load_bundle(
                     "errors": [],
                     "adjustment": "raw",
                     "adjustment_status": local_adjustment,
+                    "intraday_excluded_day": intraday["day"] if intraday else None,
                 },
             }
 
@@ -491,13 +488,13 @@ def load_bundle(
         as_of=as_of,
         allow_network=allow_network,
     )
-    # 未收盘K线不得当作已收盘参与指标/预测计算（指定历史 as_of 时不涉及）
-    intraday = None
+    # 未收盘K线不得当作已收盘参与指标/预测计算（即使传入 --as-of 为当天或未来日期，也必须拆出尚未收盘的当日K线）
+    target_bars, intraday = split_incomplete_last_bar(target_bars, market, now)
+    if len(target_bars) < MIN_LIVE_BARS:
+        raise RuntimeError(f"历史长度不足 ({len(target_bars)} < {MIN_LIVE_BARS})")
     missing_session = None
-    if not as_of:
-        target_bars, intraday = split_incomplete_last_bar(target_bars, market, now)
-        # 已收盘的最近交易日不在数据里：数据源尚未更新或标的停牌，不补数，只披露
-        latest_closed = latest_closed_session(market, now)
+    latest_closed = latest_closed_session(market, now)
+    if not as_of or str(as_of)[:10] >= latest_closed:
         if target_bars[-1]["day"] < latest_closed:
             missing_session = latest_closed
     adj_mode = request.get("adjustment", "total_return" if inst["asset_type"] != "index" else "raw")

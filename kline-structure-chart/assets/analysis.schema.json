@@ -43,7 +43,7 @@
     },
     "triple_barrier_plan": {
       "type": "object",
-      "required": ["entry_zone", "stop_loss_barrier", "take_profit_1", "take_profit_2", "time_barrier_bars", "risk_reward_ratio", "market_microstructure", "position_sizing"]
+      "required": ["entry_zone", "stop_loss_barrier", "take_profit_1", "take_profit_2", "time_barrier_bars", "risk_reward_ratio", "breakeven_ratchet", "market_microstructure", "position_sizing"]
     },
     "rule_scenarios": {
       "type": "object",

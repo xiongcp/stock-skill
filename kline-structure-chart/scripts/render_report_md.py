@@ -187,7 +187,7 @@ def render_report_markdown(
             "- 口径说明：历史条件频率是在本标的自身历史上逐日无前视统计的实际观测频率（只消费当时已成熟的样本，与括号内 Wilson 95% 区间同口径）。"
             "它统计的是以触发日 ATR 为单位的**标准化屏障事件**（如「15 根K线内先触及 +1.55×ATR 而非 −1.05×ATR」，各情景定义见 `historical_frequency.event_definition_cn`），"
             "**不是表中目标价的到达频率**；同一情景相邻触发日只间隔 2 根K线，结果期互相重叠，n 高估了独立样本数。"
-            "括号内的「体制加权估计」「收缩后估计」是按趋势体制、近期样本或市场基准修正后的模型估计（风控守门与研判锚点使用该值），不是观测频率。"
+            "括号内的「收缩后估计」是低样本（n < 30）时向市场基准做 Beta-Binomial 修正后的模型估计（风控守门与研判锚点使用该值），不是观测频率。"
             "该数字不是交易胜率，也不是未来上涨概率。",
             "",
         ]
@@ -253,6 +253,12 @@ def render_report_markdown(
         f"印花税 买 {rules.get('stamp_duty_buy_bps', 0.0):g} / 卖 {rules['stamp_duty_sell_bps']:g} bps",
     ]
     lines += [f"- 交易制度：{'；'.join(rule_bits)}。"]
+    ratchet = plan.get("breakeven_ratchet") or {}
+    if ratchet.get("enabled") and ratchet.get("rule_cn"):
+        lines += [
+            f"- 止损与移动保本：硬止损屏障 {price(plan['stop_loss_barrier'])}（盘中最低价触及离场，A 股受 T+1 约束自入场次日起生效）；"
+            f"{ratchet['rule_cn']}。"
+        ]
     if rules.get("lot_size_source") == "ASSUMED_DEFAULT":
         lines += ["- 港股每手股数为假设值（100 股），下单前请向券商核对。"]
     if rules.get("settlement_note"):
@@ -437,7 +443,7 @@ def render_report_markdown(
             bss_txt = "—" if bss is None else f"{bss:+.4f}"
             lines += [
                 f"- 历史条件频率样本外检验（共 {sfb_n} 次情景事件）："
-                f"Brier 分数 = {sfb['brier_score']:.4f}，全样本基准率（climatology = {_pct(sfb.get('climatology_base_rate'))}）"
+                f"Brier 分数 = {sfb['brier_score']:.4f}，各情景自身基准率加权 "
                 f"Brier 分数 = {sfb['climatology_brier_score']:.4f}，技能分 BSS = {bss_txt}（{sfb.get('verdict')}）。"
             ]
             non_empty_buckets = [b for b in (sfb.get("reliability_buckets") or []) if b.get("count", 0) > 0]

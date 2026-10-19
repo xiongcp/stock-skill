@@ -12,6 +12,11 @@ from market_rules import (
 )
 
 
+def _num_or(mapping: dict[str, Any], key: str, default: float) -> float:
+    val = mapping.get(key)
+    return default if val is None else float(val)
+
+
 def compute_triple_barrier_plan(
     bars: list[dict[str, Any]],
     meta: dict[str, Any],
@@ -45,14 +50,16 @@ def compute_triple_barrier_plan(
         is_ipo_no_limit=is_ipo_no_limit,
         day_str=as_of_day,
         board_lot=meta.get("board_lot"),
+        name=str(meta.get("name") or ""),
     )
 
     last_bar = bars[-1]
     last_c = float(last_bar["close"])
     raw_c = float(last_bar.get("raw_close", last_c))
-    atr14 = float(ind_snapshot["volatility"].get("atr14") or (last_c * 0.018))
+    atr14 = _num_or(ind_snapshot["volatility"], "atr14", last_c * 0.018)
     atr14 = max(last_c * 0.005, atr14)
-    rv = float(ind_snapshot["momentum"].get("rvol20") or 1.0)
+    rv = _num_or(ind_snapshot["momentum"], "rvol20", 1.0)
+    rsi14 = _num_or(ind_snapshot["momentum"], "rsi14", 50.0)
     rule_score = float(mtf_score["rule_score"])
 
     r1 = float(projections["breakout_level"]["price"])
@@ -67,14 +74,35 @@ def compute_triple_barrier_plan(
     last_l = float(last_bar["low"])
     lower_wick_ratio = (min(last_c, last_o) - last_l) / max(1e-6, last_h - last_l)
     is_stabilizing_bar = (last_c >= last_o) or (lower_wick_ratio >= 0.35) or has_bull_div or has_bull_candle
+    is_volume_contraction = rv <= 1.10
 
     win60 = bars[-min(60, len(bars)) :]
     hi60 = max(float(b["high"]) for b in win60) if win60 else last_c
     lo60 = min(float(b["low"]) for b in win60) if win60 else last_c
     win20 = bars[-min(20, len(bars)) :]
     hi20 = max(float(b["high"]) for b in win20) if win20 else last_c
-    ema20 = float(ind_snapshot["trend"].get("ema20") or last_c)
+    ema20 = _num_or(ind_snapshot["trend"], "ema20", last_c)
+    ext_atr = (last_c - ema20) / atr14
+    tf_aligned = mtf_score.get("timeframes_aligned") or {}
+    scoring_regime = tf_aligned.get("scoring_regime", "MOMENTUM_TREND")
+    w_pos = _num_or(tf_aligned, "weekly_60w_position_pct", 50.0)
     climax_distribution = (hi60 / max(1e-6, lo60) >= 1.60) and (last_c <= hi20 - 2.0 * atr14) and (last_c < ema20)
+
+    is_mr_left_pullback = (
+        scoring_regime == "MEAN_REVERSION_ADAPTED"
+        and rule_score >= 52.0
+        and not climax_distribution
+        and wedge.get("status") != "below"
+        and ext_atr <= 0.15
+        and w_pos <= 78.0
+        and (is_volume_contraction or has_bull_div or has_bull_candle)
+    )
+    is_std_left_pullback = (
+        rule_score >= 65.0
+        and not climax_distribution
+        and is_stabilizing_bar
+        and (has_bull_div or has_bull_candle or (abs(last_c - s1) <= 0.8 * atr14 and is_volume_contraction))
+    )
 
     if wedge.get("status") == "above" or (last_c >= r1 and rv >= 1.35):
         setup_type = "RIGHT_SIDE_BREAKOUT"
@@ -86,12 +114,7 @@ def compute_triple_barrier_plan(
             entry_low = round_to_tick(max(s1, last_c - 0.35 * atr14), market, asset_type, as_of_day)
             entry_high = round_to_tick(min(r1, last_c + 0.30 * atr14), market, asset_type, as_of_day)
         stop_loss = round_to_tick(min(s1, max(s1 - 0.25 * atr14, last_c - 1.35 * atr14)), market, asset_type, as_of_day)
-    elif (
-        rule_score >= 65.0
-        and not climax_distribution
-        and is_stabilizing_bar
-        and (has_bull_div or has_bull_candle or abs(last_c - s1) <= 0.8 * atr14)
-    ):
+    elif is_std_left_pullback or is_mr_left_pullback:
         setup_type = "LEFT_SIDE_PULLBACK"
         setup_label_cn = "左侧支撑回踩观察"
         entry_low = round_to_tick(max(s1 * 0.995, last_c - 0.45 * atr14), market, asset_type, as_of_day)
@@ -136,7 +159,7 @@ def compute_triple_barrier_plan(
     if benchmark_info.get("benchmark_missing"):
         veto_codes.append("BENCHMARK_MISSING")
         veto_reasons.append("缺少大盘基准行情，无法执行先大盘、后个股检查，禁止给出做多确认")
-    elif float(benchmark_info.get("regime_score") or 50.0) < 35.0:
+    elif _num_or(benchmark_info, "regime_score", 50.0) < 35.0:
         veto_codes.append("BENCHMARK_WEAK")
         veto_reasons.append(f"大盘环境评分偏弱 ({benchmark_info.get('regime_score')}<35)，压降个股做多评级")
     if rr_ratio < 1.20:
@@ -150,24 +173,20 @@ def compute_triple_barrier_plan(
         veto_reasons.append(f"上攻突破缺乏成交量配合 (RVOL={rv:.2f} < 1.15)，警惕假突破")
 
     vetoed = len(veto_reasons) > 0
-    rsi14 = float(ind_snapshot["momentum"].get("rsi14") or 50.0)
-    ext_atr = (last_c - ema20) / atr14
     overextended = (ext_atr > 2.0) or (rsi14 >= 70.0) or climax_distribution
-    tf_aligned = mtf_score.get("timeframes_aligned") or {}
-    scoring_regime = tf_aligned.get("scoring_regime", "MOMENTUM_TREND")
-    w_pos = float(tf_aligned.get("weekly_60w_position_pct") or 50.0)
-
     if scoring_regime == "MEAN_REVERSION_ADAPTED":
         if ext_atr > 0.35 or w_pos > 78.0 or setup_type == "RIGHT_SIDE_BREAKOUT":
             overextended = True
-        elif not vetoed and ext_atr <= 0.15 and wedge.get("status") != "below":
-            setup_type = "LEFT_SIDE_PULLBACK"
-            setup_label_cn = "左侧支撑回踩观察"
 
     if not vetoed and not overextended and rule_score >= 65.0 and setup_type in ("RIGHT_SIDE_BREAKOUT", "LEFT_SIDE_PULLBACK"):
         action = "LONG_CONFIRMED"
         action_cn = "右侧/结构看多确认"
-    elif not vetoed and not overextended and rule_score >= 52.0:
+    elif (
+        not vetoed
+        and not overextended
+        and rule_score >= 52.0
+        and (scoring_regime != "MEAN_REVERSION_ADAPTED" or setup_type == "LEFT_SIDE_PULLBACK")
+    ):
         action = "WATCH_LONG_SETUP"
         action_cn = "条件观察（待放量/收盘确认）"
     elif rule_score <= 38.0 or wedge.get("status") == "below":
@@ -180,9 +199,9 @@ def compute_triple_barrier_plan(
     # L2 历史条件频率守门（经验 Meta-Labeling）：若该标的自身历史上攻先到目标频率 < 30% 且显著低于失效或下探频率，将确认做多降级为观察
     bull_hf = (projections.get("bull") or {}).get("historical_frequency") or {}
     bear_hf = (projections.get("bear") or {}).get("historical_frequency") or {}
-    b_tgt = min(float(bull_hf.get("target_freq") or 0.45), float(bull_hf.get("raw_target_freq") or 0.45))
-    b_inv = max(float(bull_hf.get("invalidation_freq") or 0.40), float(bull_hf.get("raw_invalidation_freq") or 0.40))
-    dn_tgt = max(float(bear_hf.get("target_freq") or 0.40), float(bear_hf.get("raw_target_freq") or 0.40))
+    b_tgt = min(_num_or(bull_hf, "target_freq", 0.45), _num_or(bull_hf, "raw_target_freq", 0.45))
+    b_inv = max(_num_or(bull_hf, "invalidation_freq", 0.40), _num_or(bull_hf, "raw_invalidation_freq", 0.40))
+    dn_tgt = max(_num_or(bear_hf, "target_freq", 0.40), _num_or(bear_hf, "raw_target_freq", 0.40))
     if action == "LONG_CONFIRMED" and b_tgt < 0.30 and (b_inv > b_tgt + 0.12 or dn_tgt > b_tgt + 0.12):
         action = "WATCH_LONG_SETUP"
         action_cn = "条件观察（待放量/收盘确认）"
@@ -244,6 +263,22 @@ def compute_triple_barrier_plan(
     short_plan = _short_plan(
         market, asset_type, as_of_day, p_dec, projections, s1, r1, bear_target, atr14, fee_rate, benchmark_info
     )
+    breakeven_trigger = round_to_tick(entry_mid + 0.90 * unit_risk, market, asset_type, as_of_day)
+    breakeven_confirm = round_to_tick(entry_mid + 0.30 * unit_risk, market, asset_type, as_of_day)
+    breakeven_stop = round_to_tick(entry_mid + 0.08 * unit_risk, market, asset_type, as_of_day)
+    breakeven_ratchet = {
+        "enabled": True,
+        "trigger_r": 0.90,
+        "confirm_close_r": 0.30,
+        "lock_r": 0.08,
+        "trigger_price": breakeven_trigger,
+        "confirm_close_price": breakeven_confirm,
+        "breakeven_stop_price": breakeven_stop,
+        "rule_cn": (
+            f"盘中最高价触及 +0.90R（以入场区中值计约 {breakeven_trigger:.{p_dec}f}）且当日收盘高于 +0.30R（约 {breakeven_confirm:.{p_dec}f}）后，"
+            f"自次日起将保护性止损上移至 +0.08R 保本位（约 {breakeven_stop:.{p_dec}f}）"
+        ),
+    }
 
     tb_plan = {
         "entry_zone": [entry_low, entry_high],
@@ -252,10 +287,11 @@ def compute_triple_barrier_plan(
         "take_profit_2": tp2,
         "time_barrier_bars": horizon_bars,
         "risk_reward_ratio": rr_ratio,
+        "breakeven_ratchet": breakeven_ratchet,
         "left_side_constraints": {
-            "required_evidence": "缩量企稳 + RSI 底背离或下轨支撑不破",
+            "required_evidence": f"缩量企稳 (RVOL20 <= 1.10，当前 {rv:.2f}) + RSI 底背离或下轨支撑不破",
             "invalidation_level": stop_loss,
-            "exit_rule": f"日线收盘跌破 {stop_loss:.{p_dec}f} 无条件离场",
+            "exit_rule": f"盘中最低价触及硬止损屏障 {stop_loss:.{p_dec}f} 无条件离场（A 股受 T+1 约束自入场次日起生效）",
         },
         "right_side_constraints": {
             "required_evidence": f"日线收盘站稳 {r1:.{p_dec}f} 且 RVOL20 >= 1.35 (当前 {rv:.2f})",
@@ -275,7 +311,7 @@ def compute_triple_barrier_plan(
     for p in algebraic_patterns:
         if p["direction"] == "BULLISH":
             bull_case.append(f"数学形态证据：{p['name_cn']} ({p['formula_verified']})。")
-    if float(benchmark_info.get("relative_strength_vs_index") or 1.0) >= 1.0:
+    if _num_or(benchmark_info, "relative_strength_vs_index", 1.0) >= 1.0:
         bull_case.append(
             f"相对强弱：标的相对基准指数 {benchmark_info.get('index_symbol')} 强弱比值为 {benchmark_info.get('relative_strength_vs_index'):.2f}。"
         )
@@ -325,10 +361,10 @@ def _holder_defense_plan(
     if exit_level < reduce_level:
         rules = [
             f"日线收盘跌破 {reduce_level:.{p_dec}f}（{src}）先减仓",
-            f"日线收盘跌破 {exit_level:.{p_dec}f}（硬止损屏障）离场",
+            f"盘中触及硬止损屏障 {exit_level:.{p_dec}f} 无条件离场",
         ]
     else:
-        rules = [f"日线收盘跌破 {reduce_level:.{p_dec}f}（{src}）离场"]
+        rules = [f"日线收盘跌破 {reduce_level:.{p_dec}f}（{src}）或盘中触及硬止损屏障 {exit_level:.{p_dec}f} 离场"]
     rules.append(f"跌破后反抽收盘未能站回 {rebound_cap:.{p_dec}f} 上方，不宜回补")
     return {
         "available": True,
@@ -376,7 +412,7 @@ def _short_plan(
     net_risk = unit_risk + entry_mid * fee_rate
     rr = round(net_reward / net_risk, 2) if net_risk > 0 else 0.0
     warnings = []
-    if float(benchmark_info.get("regime_score") or 50.0) >= 65.0:
+    if _num_or(benchmark_info, "regime_score", 50.0) >= 65.0:
         warnings.append(f"大盘环境评分偏强（{benchmark_info.get('regime_score')} ≥ 65），逆势做空风险高")
     if rr < 1.20:
         warnings.append(f"扣除交易成本后 TP1 净盈亏比不足（{rr:.2f} < 1.20，且未计融券费用）")

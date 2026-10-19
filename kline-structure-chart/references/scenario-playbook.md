@@ -22,7 +22,7 @@
 ## 2. 筛选、触发与时间窗规则
 
 1. **按截面状态动态筛选（2~5 个情景）**：
-   - 脚本只输出当前截面满足适用前提的情景，数量控制在 `2 ~ 5` 个，不再固定为上攻/震荡/下探三条模板。
+   - 脚本优先输出当前截面满足适用前提（`precondition_met = true`）的情景（最多 5 个）；若满足前提的情景不足 2 个，仅补充 1 个待触发条件备选情景以供对比，且必须保留 `precondition_met = false`、`selection_role = "CONDITIONAL_FALLBACK"` 与 `status_cn = "待触发（前提未成立，条件备选）"`，严禁将前提未成立的情景标为 `precondition_met = true`。
    - 不同形态（如上升通道、收敛三角形、扩散喇叭形）与不同浪段（如 C 浪末端、推动第 3/5 浪、超跌段）会产出不同的情景组合。
 2. **触发位最小噪声距离与状态区分**：
    - 待触发条件（`status = "PENDING_TRIGGER"`）的触发价必须与最新已收盘价至少相距 `0.5` 个 ATR。
@@ -47,9 +47,9 @@
    - 同一情景相邻触发日至少间隔 `MIN_TRIGGER_GAP = 2` 根K线，结果期互相重叠，样本数 n 高估了独立样本数，Wilson 区间偏窄。
 3. **95% Wilson 置信区间与小样本 Beta-Binomial 收缩**：
    - 所有频率均附带样本数 `sample_size`（`n`）与 95% Wilson 置信区间 `target_ci_95`。
-   - 当 `n < 30` 时，`low_sample = true`，脚本使用 Beta-Binomial（等效先验强度 $M = 20$）向市场基准指数同一情景的历史频率（再按当前趋势体制修正）收缩，同时输出原始频率 `raw_target_freq` 与收缩后频率 `shrunk_target_freq`。
-   - 当 `n >= 30` 时，`target_freq` 为体制加权估计：`0.35 × 原始频率 + 0.40 × 同趋势体制与近期样本加权频率 + 0.25 × 后验均值`，弱势体制下再对超跌反弹、破位下行等情景乘以折减/强化系数（`estimate_method = REGIME_WEIGHTED_BLEND`）。
-   - `target_freq` 是模型估计（风控守门、情景扇形与 L3 基准概率使用该值）；`display_cn` 的「历史条件频率」数字一律是实际观测频率 `raw_target_freq`，与 Wilson 区间同口径，模型估计在括号内标为「收缩后估计」或「体制加权估计」。
+   - 当 `n < 30` 时，`low_sample = true`，脚本使用 Beta-Binomial（等效先验强度 $M = 20$）向市场基准指数同一情景的历史频率收缩（`estimate_method = BETA_BINOMIAL_SHRINKAGE`），同时输出原始频率 `raw_target_freq` 与收缩后频率 `shrunk_target_freq`。
+   - 当 `n >= 30` 时，`target_freq` 直接取实际观测频率 `raw_target_freq = k / n`（`estimate_method = RAW`）。
+   - `display_cn` 的「历史条件频率」数字一律是实际观测频率 `raw_target_freq`，与 Wilson 区间同口径；低样本时收缩值在括号内标为「收缩后估计」。
 4. **对外表述铁律**：
    - 写入 `rule_scenarios.scenarios[*].historical_frequency`（及 `rule_scenarios.{bull,neutral,bear}.historical_frequency`）。
-   - 对外统一表述为**「历史条件频率 X%（n = …，95% 区间 a%~b%）」**（X 为观测频率），低样本时必须同时注明「n < 30 低样本，已做 Beta-Binomial 收缩」，引用模型估计时须注明「收缩后估计」或「体制加权估计」，**严禁称为胜率或未来上涨概率**。
+   - 对外统一表述为**「历史条件频率 X%（n = …，95% 区间 a%~b%）」**（X 为观测频率），低样本时必须同时注明「n < 30 低样本，已向市场基准做 Beta-Binomial 收缩，收缩后估计 Y%」，**严禁称为胜率或未来上涨概率**。

@@ -307,6 +307,11 @@ def resolve_instrument(
             board = "STAR"
         elif upper.endswith(".BJ") or code_num.startswith(("8", "4", "92")):
             board = "BSE"
+    elif inferred_market == "CN" and resolved_type == "etf":
+        if code_num.startswith(("588", "589")):
+            board = "STAR"
+        elif is_cn_20pct_etf(upper, name or ""):
+            board = "CHINEXT"
 
     if inferred_market == "CN":
         lot_size, min_order_shares, lot_step = _cn_lot_rules(resolved_type, board)
@@ -386,6 +391,40 @@ def next_trading_dates(base_day_str: str, horizon_bars: int, market: str = "CN")
 CHINEXT_REGISTRATION_DAY = "2020-08-24"  # 创业板注册制改革：涨跌幅 ±10% -> ±20%（含 ST）
 MAIN_BOARD_ST_10PCT_DAY = "2026-07-06"  # 沪深修订交易规则：主板风险警示股票 ±5% -> ±10%（2026-04-24 发布）
 
+# 深交所跟踪创业板/科创创业（双创）20% 涨跌幅指数的常见 159xxx ETF 代码集合
+# （来源：《深圳证券交易所证券投资基金交易和申购赎回实施细则（2020年修订）》2020-08-24 起施行）
+_CN_20PCT_SZSE_ETF_CODES: frozenset[str] = frozenset(
+    {
+        "159915", "159949", "159952", "159977", "159908", "159948", "159957", "159958",
+        "159964", "159966", "159967", "159971", "159991", "159808", "159810", "159814",
+        "159821", "159848", "159600", "159603", "159617", "159629", "159630", "159663",
+        "159675", "159676", "159680", "159681", "159682", "159691", "159698", "159761",
+        "159762", "159777", "159780", "159781", "159782", "159783", "159786", "159787",
+        "159788", "159370", "159371", "159372", "159373", "159375", "159376", "159377",
+        "159378", "159380", "159381", "159382", "159383", "159385", "159386", "159387",
+        "159388",
+    }
+)
+_CN_20PCT_ETF_NAME_RE = re.compile(r"(科创|创业|双创|创50|创成长|创蓝筹|创大盘|创中盘|创科技|创医药|创精选)")
+
+
+def is_cn_20pct_etf(symbol: str, name: str = "") -> bool:
+    """判断 A 股 ETF 是否适用 ±20% 涨跌幅限制：
+    1. 上交所科创板/双创 ETF 专用代码段 588xxx / 589xxx（自 2020-09-28 首只科创50 ETF 上市起实行 ±20%）；
+    2. 深交所 159xxx 中跟踪创业板或双创指数的 ETF（内置代码表，或证券简称含「科创/创业/双创/创50/创成长/创蓝筹」等）。
+    """
+    upper = symbol.strip().upper()
+    code, _, suffix = upper.partition(".")
+    if suffix and suffix not in ("SH", "SZ"):
+        return False
+    if code.startswith(("588", "589")):
+        return True
+    if code in _CN_20PCT_SZSE_ETF_CODES:
+        return True
+    if name and code.startswith(("15", "51", "56", "58")) and _CN_20PCT_ETF_NAME_RE.search(name):
+        return True
+    return False
+
 
 def get_daily_price_limit_pct(
     market: str,
@@ -394,6 +433,7 @@ def get_daily_price_limit_pct(
     is_st: bool = False,
     is_ipo_no_limit: bool = False,
     day_str: str | None = None,
+    name: str = "",
 ) -> float | None:
     """返回单日涨跌停限制比例（例如 0.10 代表 ±10%）。指数、港股、美股及新股无涨跌停期返回 None。
 
@@ -406,12 +446,14 @@ def get_daily_price_limit_pct(
     code = symbol.upper().split(".")[0]
     if symbol.upper().endswith(".BJ") or code.startswith(("8", "4", "92")):
         return 0.30
-    if code.startswith(("688", "689")):
+    if code.startswith(("688", "689", "588", "589")):
         return 0.20
     if code.startswith(("300", "301")):
         if day < CHINEXT_REGISTRATION_DAY:
             return 0.05 if is_st else 0.10
         return 0.20
+    if (asset_type == "etf" or code.startswith(("15", "51", "56", "58"))) and is_cn_20pct_etf(symbol, name):
+        return 0.10 if day < CHINEXT_REGISTRATION_DAY else 0.20
     if is_st:
         return 0.05 if day < MAIN_BOARD_ST_10PCT_DAY else 0.10
     return 0.10
@@ -514,11 +556,12 @@ def get_market_microstructure_rules(
     is_ipo_no_limit: bool = False,
     day_str: str | None = None,
     board_lot: int | None = None,
+    name: str = "",
 ) -> dict[str, Any]:
     """board_lot：港股每手股数（各股票不同，如小米 200、汇丰 400），由行情快照提供；缺省时按 100 股假设并标注来源。"""
-    st_flag = is_st_instrument(symbol, is_st=is_st)
+    st_flag = is_st_instrument(symbol, name=name, is_st=is_st)
     limit_pct = get_daily_price_limit_pct(
-        market, asset_type, symbol, is_st=st_flag, is_ipo_no_limit=is_ipo_no_limit, day_str=day_str
+        market, asset_type, symbol, is_st=st_flag, is_ipo_no_limit=is_ipo_no_limit, day_str=day_str, name=name
     )
     tradable = asset_type != "index"
     if market == "CN":
@@ -531,6 +574,11 @@ def get_market_microstructure_rules(
                 board = "STAR"
             elif symbol.upper().endswith(".BJ") or code.startswith(("8", "4", "92")):
                 board = "BSE"
+        elif asset_type == "etf":
+            if code.startswith(("588", "589")):
+                board = "STAR"
+            elif is_cn_20pct_etf(symbol, name):
+                board = "CHINEXT"
         lot_size, min_order_shares, lot_step = _cn_lot_rules(asset_type, board)
         return {
             "market": "CN",

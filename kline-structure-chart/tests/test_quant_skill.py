@@ -1216,10 +1216,14 @@ def test_o3_20_multi_scenario_engine_diversity_active_trigger_and_impulse_rules(
             signatures.add(sig)
             scenarios_seen.update(sig)
             for s in scs:
-                assert s["precondition_met"] is True
+                assert s["precondition_met"] == (s["selection_role"] == "PRECONDITION_MET")
+                assert s["precondition_met"] == (s["applicability_score"] >= 80.0)
+                if not s["precondition_met"]:
+                    assert proj["precondition_met_count"] < 2
+                    assert s["status"] == "PENDING_TRIGGER"
                 tw = s["time_window_bars"]
                 assert 1.0 <= tw["q25"] <= tw["median"] <= tw["q75"] <= 15.0
-                if s["trigger_distance_atr"] < 0.5:
+                if s["precondition_met"] and s["trigger_distance_atr"] < 0.5:
                     assert s["status"] == "ACTIVE" and s["status_cn"] == "已在进行中"
                     assert s["trigger_price"] is None
                     active_found = True
@@ -1327,8 +1331,19 @@ def test_o3_22_backtest_scenario_frequency_brier_and_reliability_buckets(replay_
         assert sfb["discriminative"] is True
         assert "历史频率具有区分度" in sfb["verdict"]
 
-    # 验证 BSS > 0 与 BSS <= 0 时的判定边界
-    good_records = [("TREND_CONTINUATION", 0.8, 1)] * 12 + [("BREAKDOWN_DECLINE", 0.2, 0)] * 12
+    # 验证按各情景自身基准率（per-scenario climatology）计算的 BSS > 0 与 <= 0 边界：
+    # 仅靠跨情景常数差异（A 全 1、B 全 0）在各自情景内无区分度，BSS 必须 <= 0
+    pooled_only_records = [("TREND_CONTINUATION", 0.8, 1)] * 12 + [("BREAKDOWN_DECLINE", 0.2, 0)] * 12
+    res_pooled_only = _evaluate_scenario_brier(pooled_only_records)
+    assert res_pooled_only["brier_skill_score"] <= 0 and res_pooled_only["discriminative"] is False
+
+    # 在同一情景内部对高低概率样本有真实区分能力时，per-scenario BSS > 0
+    good_records = (
+        [("TREND_CONTINUATION", 0.85, 1)] * 8
+        + [("TREND_CONTINUATION", 0.15, 0)] * 8
+        + [("BREAKDOWN_DECLINE", 0.80, 1)] * 8
+        + [("BREAKDOWN_DECLINE", 0.20, 0)] * 8
+    )
     res_good = _evaluate_scenario_brier(good_records)
     assert res_good["brier_skill_score"] > 0 and res_good["discriminative"] is True
     assert "历史频率具有区分度" in res_good["verdict"]
@@ -1726,10 +1741,10 @@ def test_p0_l2_display_leads_with_observed_frequency_inside_its_wilson_interval(
             assert "标准化事件" in hf["event_definition_cn"] and "不是本情景目标价" in hf["event_definition_cn"]
             if hf["low_sample"]:
                 assert "收缩后估计" in hf["display_cn"] and hf["estimate_method"] == "BETA_BINOMIAL_SHRINKAGE"
-            elif hf["estimate_method"] == "REGIME_WEIGHTED_BLEND":
-                blended += 1
-                assert f"体制加权估计 {hf['target_freq_pct']:.1f}%" in hf["display_cn"]
-    assert checked >= 10 and blended >= 1
+            else:
+                assert hf["estimate_method"] == "RAW"
+                assert hf["target_freq"] == hf["raw_target_freq"]
+    assert checked >= 10
 
 
 def test_p0_lint_rejects_skill_md_counterexample_and_unvalidated_probabilities(replay_recorded, tmp_path: Path) -> None:
@@ -1766,3 +1781,128 @@ def test_p0_lint_rejects_skill_md_counterexample_and_unvalidated_probabilities(r
     sc0 = rep["rule_scenarios"]["scenarios"][0]
     assert all(abs(p - sc0["historical_frequency"]["target_freq"]) > 1e-9 for p in wl if p < 1.0)
     assert any(abs(p - rep["rule_scenarios"]["bear"]["rebound_cap"]) <= 0.01 for p in wl)
+
+
+def test_p1_all_eight_audit_items_regression(replay_recorded, tmp_path: Path) -> None:
+    """针对 8 项 P1 审查问题的逐项回归测试。"""
+    from zoneinfo import ZoneInfo
+    from analysis import analyze_bundle
+    from evaluation import _evaluate_scenario_brier
+    from market_rules import get_daily_price_limit_pct, get_market_microstructure_rules, round_to_tick
+    from risk import compute_triple_barrier_plan
+
+    # 1. 回测与线上计划一致：result.json 含 breakeven_ratchet，回测 entry_rule 不写“无移动止损”，硬止损统一为盘中触及
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    rep = analyze_bundle(bundle, req, include_replay=False)
+    tb = rep["triple_barrier_plan"]
+    ratchet = tb["breakeven_ratchet"]
+    assert ratchet["enabled"] is True
+    assert ratchet["trigger_r"] == 0.90 and ratchet["confirm_close_r"] == 0.30 and ratchet["lock_r"] == 0.08
+    assert ratchet["trigger_price"] > ratchet["confirm_close_price"] > ratchet["breakeven_stop_price"] > tb["stop_loss_barrier"]
+    assert "盘中" in tb["left_side_constraints"]["exit_rule"] and "收盘跌破" not in tb["left_side_constraints"]["exit_rule"]
+    bt = run_plan_backtest(bundle, req, horizon_bars=15, step=15)
+    assert "无移动止损" not in bt["entry_rule"] and "+0.90R" in bt["entry_rule"] and "+0.08R" in bt["entry_rule"]
+
+    # 2. 情景前提诚实标注：前提未满足的补足情景绝不标为 precondition_met=True
+    bars_sh = load_recorded("sina_daily/sh000001.json")
+    from structure import compute_structure_layer
+    for cut in (220, 240):
+        layer_cut = compute_structure_layer(bars_sh[:cut], None, 120, horizon_bars=15)
+        proj_cut = layer_cut["projections"]
+        for sc_item in proj_cut["scenarios"]:
+            if sc_item["applicability_score"] < 80.0:
+                assert sc_item["precondition_met"] is False
+                assert sc_item["selection_role"] == "CONDITIONAL_FALLBACK"
+                assert sc_item["status"] == "PENDING_TRIGGER"
+
+    # 3. Brier 技能分按各情景自身基准率（per-scenario climatology）计算：茅台样本上 BSS <= 0，discriminative=False
+    sfb = bt["scenario_frequency_brier"]
+    assert sfb["brier_skill_score"] <= 0.0 and sfb["discriminative"] is False
+    assert "历史频率具有区分度" not in sfb["verdict"]
+    for sc_stat in sfb["per_scenario"].values():
+        assert "climatology_brier_score" in sc_stat and "brier_skill_score" in sc_stat
+
+    # 4. --as-of 设为当天且尚未收盘时，必须拆出盘中未收盘 K 线，不得算进已完成序列
+    sh_tz = ZoneInfo("Asia/Shanghai")
+    intraday_now = datetime(2026, 10, 15, 10, 30, tzinfo=sh_tz)
+    b_asof_today = load_bundle({**req, "as_of": "2026-10-15"}, now=intraday_now)
+    assert b_asof_today["target"]["bars"][-1]["day"] == "2026-10-14"
+    assert b_asof_today["target"]["intraday"] is not None and b_asof_today["target"]["intraday"]["day"] == "2026-10-15"
+    local_file = tmp_path / "local_bars.json"
+    local_file.write_text(json.dumps(load_recorded("sina_daily/sh600519.json")[-200:]), encoding="utf-8")
+    b_local_today = load_bundle({**req, "as_of": "2026-10-15"}, input_path=local_file, allow_network=False, now=intraday_now)
+    assert b_local_today["target"]["bars"][-1]["day"] == "2026-10-14"
+    assert b_local_today["target"]["intraday"] is not None and b_local_today["target"]["intraday"]["day"] == "2026-10-15"
+
+    # 5. 科创板、创业板及双创 ETF 涨跌幅限制为 ±20%（主板宽基 ETF 仍为 ±10%）
+    assert get_daily_price_limit_pct("CN", "etf", "588000.SH") == 0.20
+    assert get_daily_price_limit_pct("CN", "etf", "588200.SH") == 0.20
+    assert get_daily_price_limit_pct("CN", "etf", "159915.SZ", day_str="2026-10-15") == 0.20
+    assert get_daily_price_limit_pct("CN", "etf", "159915.SZ", day_str="2020-01-15") == 0.10
+    assert get_daily_price_limit_pct("CN", "etf", "159949.SZ") == 0.20
+    assert get_daily_price_limit_pct("CN", "etf", "159781.SZ") == 0.20
+    assert get_daily_price_limit_pct("CN", "etf", "159999.SZ", name="创业板人工智能ETF") == 0.20
+    assert get_daily_price_limit_pct("CN", "etf", "510300.SH") == 0.10
+    assert get_market_microstructure_rules("CN", "etf", "588000.SH")["daily_price_limit_pct"] == 0.20
+    assert get_market_microstructure_rules("CN", "etf", "159915.SZ")["daily_price_limit_pct"] == 0.20
+
+    # 6. 风控守门：频率为 0.0 时不得被 or 0.45 误当成缺失值跳过守门
+    fake_proj = copy.deepcopy(rep["rule_scenarios"])
+    fake_proj["bull"]["historical_frequency"] = {
+        "target_freq": 0.0,
+        "raw_target_freq": 0.0,
+        "invalidation_freq": 0.55,
+        "raw_invalidation_freq": 0.55,
+    }
+    fake_mtf = copy.deepcopy(rep["multi_timeframe_score"])
+    fake_mtf["rule_score"] = 75.0
+    fake_mtf["timeframes_aligned"]["scoring_regime"] = "MOMENTUM_TREND"
+    fake_wedge = {**rep["mathematical_indicators"]["structure_levels"]["wedge_structure"], "status": "above"}
+    fake_ind = copy.deepcopy(rep["mathematical_indicators"])
+    fake_ind["momentum"]["rvol20"] = 1.50
+    fake_ind["momentum"]["rsi14"] = 55.0
+    fake_bench = {**rep["market_benchmark"], "regime_score": 60.0, "benchmark_missing": False}
+    fake_proj["bull"]["target_price"] = float(bundle["target"]["bars"][-1]["close"]) * 1.15
+    dec_zero, _, _ = compute_triple_barrier_plan(
+        bundle["target"]["bars"], rep["meta"], fake_ind, fake_wedge, {}, fake_proj, fake_mtf, [], fake_bench
+    )
+    assert dec_zero["action"] == "WATCH_LONG_SETUP"
+
+    # 7. 均值回归体制下 LEFT_SIDE_PULLBACK 入场区与止损按左侧回踩公式计算，且要求 RVOL20 <= 1.10 缩量
+    mr_mtf = copy.deepcopy(rep["multi_timeframe_score"])
+    mr_mtf["rule_score"] = 70.0
+    mr_mtf["timeframes_aligned"]["scoring_regime"] = "MEAN_REVERSION_ADAPTED"
+    mr_mtf["timeframes_aligned"]["weekly_60w_position_pct"] = 40.0
+    mr_ind = copy.deepcopy(rep["mathematical_indicators"])
+    last_c = float(bundle["target"]["bars"][-1]["close"])
+    atr14 = float(mr_ind["volatility"]["atr14"])
+    mr_ind["trend"]["ema20"] = last_c  # ext_atr == 0.0 <= 0.15
+    mr_ind["momentum"]["rsi14"] = 48.0
+    mr_ind["momentum"]["rvol20"] = 0.85  # 缩量 <= 1.10
+    mr_wedge = {**rep["mathematical_indicators"]["structure_levels"]["wedge_structure"], "status": "inside"}
+    s1 = float(fake_proj["breakdown_level"]["price"])
+    r1 = float(fake_proj["breakout_level"]["price"])
+    dec_mr_ok, tb_mr_ok, _ = compute_triple_barrier_plan(
+        bundle["target"]["bars"], rep["meta"], mr_ind, mr_wedge, {}, fake_proj, mr_mtf, [], fake_bench
+    )
+    assert dec_mr_ok["setup_type"] == "LEFT_SIDE_PULLBACK"
+    exp_lo = round_to_tick(max(s1 * 0.995, last_c - 0.45 * atr14), "CN", "equity", rep["meta"]["as_of"])
+    exp_hi = round_to_tick(min(r1, last_c + 0.20 * atr14), "CN", "equity", rep["meta"]["as_of"])
+    exp_sl = round_to_tick(min(s1 - 0.15 * atr14, max(s1 - 0.50 * atr14, last_c - 1.45 * atr14)), "CN", "equity", rep["meta"]["as_of"])
+    assert tb_mr_ok["entry_zone"] == [exp_lo, exp_hi]
+    assert tb_mr_ok["stop_loss_barrier"] == exp_sl
+    # 放量下跌 (rvol20 = 1.60 > 1.10) 且无反转形态时，不得确认为 LEFT_SIDE_PULLBACK
+    mr_ind_high_vol = copy.deepcopy(mr_ind)
+    mr_ind_high_vol["momentum"]["rvol20"] = 1.60
+    dec_mr_hv, _, _ = compute_triple_barrier_plan(
+        bundle["target"]["bars"], rep["meta"], mr_ind_high_vol, mr_wedge, {}, fake_proj, mr_mtf, [], fake_bench
+    )
+    assert dec_mr_hv["setup_type"] != "LEFT_SIDE_PULLBACK"
+    assert dec_mr_hv["action"] == "NEUTRAL_HOLD_WAIT"
+
+    # 8. SKILL.md 与 references/ 不得残留无脚本/无数据支撑的“1,500 股盲测”引用
+    skill_root = Path(__file__).resolve().parent.parent
+    for doc_path in [skill_root / "SKILL.md", *sorted((skill_root / "references").glob("*.md"))]:
+        txt = doc_path.read_text(encoding="utf-8")
+        assert "1,500" not in txt and "1500" not in txt and "盲测" not in txt, f"Unverified claim in {doc_path}"

@@ -37,6 +37,7 @@ _NON_PRICE_PATTERNS = (
     re.compile(r"(?<![\d.])\d+(?:\.\d+)?\s*(?:个?交易日|日|天|根|手|股|笔|次|浪|分|bps|倍)(?![A-Za-z0-9])"),
     re.compile(r"\b\d+(?:\.\d+)?\s*个\s*ATR\b", re.I),
     re.compile(r"\b\d+(?:\.\d+)?\s*[×xX]\b"),
+    re.compile(r"[+-]?\d+(?:\.\d+)?\s*R\b"),
     re.compile(r"±\s*\d+(?:\.\d+)?"),
 )
 _DECIMAL_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.-])\d+\.\d+(?![A-Za-z0-9_.-])")

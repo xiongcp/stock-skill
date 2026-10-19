@@ -3,61 +3,38 @@
   "symbol": "600519.SH",
   "name": "贵州茅台",
   "market": "CN",
-  "as_of": "2026-10-16",
+  "as_of": "2026-10-15",
   "horizon_bars": 15,
   "judgment_type": "主观研判",
-  "summary_cn": "【风控已否决做多，以下仅作结构观察】主观研判（以 L2 锚点为起点，依据 E1、E2、E5、E10 有界调整）：主情景为「破位下行」（基准 36.90% → 38.40%，目标位 1291.44），备选情景为「假突破回落」（基准 36.38% → 37.88%，目标位 1314.37）；三个情景的调整幅度都很小，偏多与偏空证据并存（C1、C2），不支持单边判断。",
-  "primary_scenario_id": "BREAKDOWN_DECLINE",
-  "alternate_scenario_id": "FALSE_BREAKOUT_REVERSAL",
+  "summary_cn": "【风控已否决做多，以下仅作结构观察】主观研判（以 L2 锚点为起点，依据 E1、E2、E3、E5、E10 有界调整）：主情景为「假突破回落」（基准 46.50% → 48.00%，目标位 1295.74），备选情景为「趋势延续」（基准 44.61% → 41.61%，目标位 1445.71）。",
+  "primary_scenario_id": "FALSE_BREAKOUT_REVERSAL",
+  "alternate_scenario_id": "TREND_CONTINUATION",
   "scenario_judgments": [
     {
-      "scenario_id": "BREAKOUT_RETEST",
-      "scenario_name": "突破回踩",
+      "scenario_id": "TREND_CONTINUATION",
+      "scenario_name": "趋势延续",
       "direction": "BULLISH",
-      "sample_size_n": 49,
-      "low_sample": false,
-      "l2_historical_frequency_pct": 28.63,
-      "l2_display_cn": "历史条件频率 30.6%（n = 49，95% 区间 19.5%~44.5%；体制加权估计 28.6%）",
-      "baseline_probability_pct": 26.72,
-      "subjective_probability_pct": 23.72,
+      "sample_size_n": 29,
+      "low_sample": true,
+      "l2_historical_frequency_pct": 37.39,
+      "l2_display_cn": "历史条件频率 27.6%（n = 29 低样本，95% 区间 14.7%~45.7%；已向市场基准做 Beta-Binomial 收缩，收缩后估计 37.4%）",
+      "baseline_probability_pct": 44.61,
+      "subjective_probability_pct": 41.61,
       "adjustment_pct": -3.0,
-      "max_adjustment_pct": 15.0,
+      "max_adjustment_pct": 10.0,
       "supporting_evidence_ids": [
         "E2",
-        "E7"
+        "E3",
+        "E6"
       ],
       "opposing_evidence_ids": [
         "E1",
         "E5",
         "E10"
       ],
-      "rationale_cn": "主观研判：以归一化基准概率 26.72% 为锚点，大盘状态分低于 35 的否决线（E1）且风控已否决（E10）；规则分处于均值回归体制，近 240 日偏离均线后 15 日收益呈负相关（E5），站上上轨仅 1 个交易日的突破更容易回吐。相对强弱跑赢基准（E2）与 MACD 柱放大（E7）提供支撑，因此只下调 3.00 个百分点，调整为 23.72%（上限 ±15%）。",
-      "target_price": 1418.46,
-      "invalidation_price": 1347.47
-    },
-    {
-      "scenario_id": "BREAKDOWN_DECLINE",
-      "scenario_name": "破位下行",
-      "direction": "BEARISH",
-      "sample_size_n": 71,
-      "low_sample": false,
-      "l2_historical_frequency_pct": 39.53,
-      "l2_display_cn": "历史条件频率 43.7%（n = 71，95% 区间 32.8%~55.2%；体制加权估计 39.5%）",
-      "baseline_probability_pct": 36.9,
-      "subjective_probability_pct": 38.4,
-      "adjustment_pct": 1.5,
-      "max_adjustment_pct": 15.0,
-      "supporting_evidence_ids": [
-        "E1",
-        "E5"
-      ],
-      "opposing_evidence_ids": [
-        "E6",
-        "E9"
-      ],
-      "rationale_cn": "主观研判：以归一化基准概率 36.90% 为锚点，大盘空头趋势承压（E1）与均值回归体制（E5）支持回落，且需要先收盘跌破已突破的上轨，回踩支撑偏多证据较多（E6、E9），因此只上调 1.50 个百分点，调整为 38.40%（上限 ±15%）。",
-      "target_price": 1291.44,
-      "invalidation_price": 1322.94
+      "rationale_cn": "主观研判：以归一化基准概率 44.61% 为锚点，大盘状态分低于 35 触发风控否决（E1、E10），且均值回归体制下近期偏离均线后 15 日收益呈负相关（E5），仅下调 3.00 个百分点至 41.61%（上限 ±10%）。",
+      "target_price": 1445.71,
+      "invalidation_price": 1212.12
     },
     {
       "scenario_id": "FALSE_BREAKOUT_REVERSAL",
@@ -67,21 +44,46 @@
       "low_sample": true,
       "l2_historical_frequency_pct": 38.97,
       "l2_display_cn": "历史条件频率 50.0%（n = 28 低样本，95% 区间 32.6%~67.4%；已向市场基准做 Beta-Binomial 收缩，收缩后估计 39.0%）",
-      "baseline_probability_pct": 36.38,
-      "subjective_probability_pct": 37.88,
+      "baseline_probability_pct": 46.5,
+      "subjective_probability_pct": 48.0,
       "adjustment_pct": 1.5,
       "max_adjustment_pct": 10.0,
       "supporting_evidence_ids": [
         "E1",
-        "E5"
+        "E5",
+        "E10"
       ],
       "opposing_evidence_ids": [
-        "E6",
-        "E8"
+        "E2",
+        "E3",
+        "E6"
       ],
-      "rationale_cn": "主观研判：以归一化基准概率 36.38% 为锚点，均值回归体制下冲高后回落的倾向（E5）与弱势大盘（E1）一致，但该情景 n = 28 属低样本，观测频率区间很宽，Supertrend 与量能偏多（E6、E8），因此只上调 1.50 个百分点，调整为 37.88%（上限 ±10%）。",
-      "target_price": 1314.37,
-      "invalidation_price": 1358.18
+      "rationale_cn": "主观研判：以归一化基准概率 46.50% 为锚点，最新 K 线上影线触及扩散喇叭形上轨 1315.39 后回落（E3）且大盘偏弱（E1、E10），但相对强弱与量能偏多（E2、E8），仅上调 1.50 个百分点至 48.00%（上限 ±10%）。",
+      "target_price": 1295.74,
+      "invalidation_price": 1425.15
+    },
+    {
+      "scenario_id": "RANGE_OSCILLATION",
+      "scenario_name": "区间震荡",
+      "direction": "NEUTRAL",
+      "sample_size_n": 94,
+      "low_sample": false,
+      "l2_historical_frequency_pct": 7.45,
+      "l2_display_cn": "历史条件频率 7.4%（n = 94，95% 区间 3.6%~14.6%）",
+      "baseline_probability_pct": 8.89,
+      "subjective_probability_pct": 10.39,
+      "adjustment_pct": 1.5,
+      "max_adjustment_pct": 15.0,
+      "supporting_evidence_ids": [
+        "E4"
+      ],
+      "opposing_evidence_ids": [
+        "E1",
+        "E5"
+      ],
+      "rationale_cn": "主观研判：以归一化基准概率 8.89% 为锚点，下方支撑 1295.74 与上方触发位 1425.15 之间空间较宽（E3、E10），上调 +1.50 个百分点至 10.39%（上限 ±15%）。",
+      "target_price": 1334.9,
+      "invalidation_price": 1295.74
     }
   ],
   "conflicting_signals_reviewed": [
@@ -91,12 +93,12 @@
   "key_levels_to_watch": [
     {
       "label": "三重屏障止损位",
-      "price": 1308.8,
+      "price": 1284.83,
       "role": "STOP_LOSS"
     },
     {
       "label": "三重屏障第一目标位 TP1",
-      "price": 1357.91,
+      "price": 1359.27,
       "role": "TARGET_1"
     },
     {
@@ -105,11 +107,11 @@
       "role": "PIVOT_POC"
     },
     {
-      "label": "主情景（破位下行）目标位",
-      "price": 1291.44,
+      "label": "主情景（假突破回落）目标位",
+      "price": 1295.74,
       "role": "PRIMARY_TARGET"
     }
   ],
-  "falsification_condition": "若预测期内始终未出现主情景「破位下行」的触发条件（日线收盘跌破 1314.37（已突破的上轨(回踩支撑)）），或触发后出现主情景「破位下行」的失效条件：收盘收回破位位 1322.94 上方，则主情景判断证伪，应切换至备选情景「假突破回落」（目标位 1314.37）。",
-  "disclaimer_cn": "本节为锚定 L2 历史条件频率的受约束主观研判，已记入日志待到期按 Brier 分数与 BSS 检验，不构成投资建议。"
+  "falsification_condition": "若主情景「假突破回落」的目标位 1295.74 在预测期内未被触及，则主情景判断证伪，应切换至备选情景「趋势延续」（目标位 1445.71）。",
+  "disclaimer_cn": "本节为脚本按证据条数预填的研判模板（非 Agent 主观研判），记入日志时单独标注来源、不计入 LLM 技能分，不构成投资建议。"
 }

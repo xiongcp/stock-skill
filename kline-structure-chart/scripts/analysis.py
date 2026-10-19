@@ -329,6 +329,7 @@ def analyze_bundle(
 
     is_st = bool(inst.get("is_st") or request.get("is_st") or extra_ctx.get("is_st", False))
     is_ipo_no_limit = bool(request.get("is_ipo_no_limit") or extra_ctx.get("is_ipo_no_limit", False))
+    inst_name = str(request.get("name") or inst.get("name") or inst["symbol"])
     rules = get_market_microstructure_rules(
         inst["market"],
         inst["asset_type"],
@@ -337,6 +338,7 @@ def analyze_bundle(
         is_ipo_no_limit=is_ipo_no_limit,
         day_str=view[-1]["day"],
         board_lot=inst.get("lot_size") if inst["market"] == "HK" else None,
+        name=inst_name,
     )
     color_scheme = request.get("color_scheme")
     if not color_scheme or color_scheme == "auto":

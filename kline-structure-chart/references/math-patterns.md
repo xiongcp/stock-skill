@@ -99,10 +99,10 @@
   - 止损位 `stop_loss_barrier`：右侧突破取 $\min(S_1,\ \max(S_1-0.25\,\text{ATR}_{14},\ C_{\text{now}}-1.35\,\text{ATR}_{14}))$；左侧回踩与区间观察取 $\min(S_1-0.15\,\text{ATR}_{14},\ \max(S_1-0.50\,\text{ATR}_{14},\ C_{\text{now}}-1.45\,\text{ATR}_{14}))$。
   - 第一目标位 `take_profit_1`：设入场中值为 $E$，单位风险 $R = \max(0.5\,\text{ATR}_{14}, E - \text{止损})$，15 日有效摆动风险 $R_{\text{eff}} = \min(R, 1.50\,\text{ATR}_{14})$，上方结构上限 $U = \max(R_1, \text{上攻目标})$（非突破态且 $R_1 \ge E + 1.15 R$ 时取 $U = R_1$），则 $\text{TP1} = \min(U,\ E + 1.5 R_{\text{eff}})$。当上方结构空间受阻或止损距离过大导致扣费后净盈亏比 $< 1.20$ 时，触发 `RR_INSUFFICIENT` 否决。
   - 短期极度超买防追高过滤：当 $(C_{\text{now}} - \text{EMA}_{20}) / \text{ATR}_{14} > 2.0$ 或 $\text{RSI}_{14} \ge 70$ 时，不给出 `LONG_CONFIRMED` / `WATCH_LONG_SETUP` 追高信号，降级为 `NEUTRAL_HOLD_WAIT`（观望等待回踩）。
-  - 因果动量/反转体制自适应与 L2 频率守门：只用截至当日已成熟的过去 240 根历史样本无前视计算 20 日均线偏离度与未来 15 日收益的 Spearman 秩相关 $\rho_{\text{mom}}$（`causal_momentum_ic_15d`）。当宏观均线处于弱势排列（$\text{EMA}_{60}<\text{EMA}_{200}$ 或 $\text{EMA}_{60}<\text{SMA}_{250}$ 或 $\text{EMA}_{200}<\text{SMA}_{250}$）且 $\rho_{\text{mom}} \le -0.10$ 时，进入 `MEAN_REVERSION_ADAPTED` 均值回归体制（围绕中枢 50 旋转评分，禁止在高于 $\text{EMA}_{20}+0.35\,\text{ATR}_{14}$ 或 60 周高低区间 $>78\%$ 位置追高，仅在 $\le \text{EMA}_{20}+0.15\,\text{ATR}_{14}$ 缩量回踩时确认 `LEFT_SIDE_PULLBACK`）；当上攻先到目标历史频率 $<30\%$ 且低于失效或下探频率超过 12 个百分点时，将 `LONG_CONFIRMED` 降级为 `WATCH_LONG_SETUP`。回测中当盘中最高价触及 $+0.90R$ 且收盘高于 $+0.30R$ 时，次日起将保护性止损上移至 $+0.08R$ 保本位。
+  - 因果动量/反转体制自适应与 L2 频率守门：只用截至当日已成熟的过去 240 根历史样本无前视计算 20 日均线偏离度与未来 15 日收益的 Spearman 秩相关 $\rho_{\text{mom}}$（`causal_momentum_ic_15d`）。当宏观均线处于弱势排列（$\text{EMA}_{60}<\text{EMA}_{200}$ 或 $\text{EMA}_{60}<\text{SMA}_{250}$ 或 $\text{EMA}_{200}<\text{SMA}_{250}$）且 $\rho_{\text{mom}} \le -0.10$ 时，进入 `MEAN_REVERSION_ADAPTED` 均值回归体制（围绕中枢 50 旋转评分，禁止在高于 $\text{EMA}_{20}+0.35\,\text{ATR}_{14}$ 或 60 周高低区间 $>78\%$ 位置追高，仅在 $\le \text{EMA}_{20}+0.15\,\text{ATR}_{14}$ 且满足缩量 $\text{RVOL}_{20} \le 1.10$ 或出现反转信号时按左侧回踩公式计算 `LEFT_SIDE_PULLBACK` 入场区与止损位）；当上攻先到目标历史频率 $<30\%$ 且低于失效或下探频率超过 12 个百分点时，将 `LONG_CONFIRMED` 降级为 `WATCH_LONG_SETUP`。线上计划（`triple_barrier_plan.breakeven_ratchet`）与回测统一采用移动保本规则：盘中最高价触及 $+0.90R$ 且当日收盘高于 $+0.30R$ 时，自次日起将保护性止损上移至 $+0.08R$ 保本位。
 - **持仓防守**（`triple_barrier_plan.holder_defense_plan`，指数不适用）：
   - 日线收盘跌破下探触发位 $S_1$ 减仓；
-  - 跌破硬止损屏障离场（与做多计划同一止损；止损不低于 $S_1$ 时合并为"跌破 $S_1$ 离场"）；
+  - 盘中触及硬止损屏障离场（与做多计划同一止损；止损不低于 $S_1$ 时合并为"收盘跌破 $S_1$ 或盘中触及硬止损离场"）；
   - 跌破后反抽收盘未站回 $S_1(1 + 0.4\,\text{ATR}_{20}\%)$ 不宜回补。
 - **破位做空**（`triple_barrier_plan.short_plan`，仅港股、美股的股票/ETF；A 股与指数 `available = false`）：
   - 入场区 $[S_1 - 0.25\,\text{ATR}_{14},\ S_1]$，入场中值记为 $E$；

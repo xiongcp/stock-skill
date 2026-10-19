@@ -295,10 +295,15 @@ def build_scenarios_with_base_rates(
 
     # 预计算近期突破/冲高回落/跌破特征（只用已收盘 sview）
     recent5 = sview[-5:] if len(sview) >= 5 else sview
+    recent10 = sview[-10:] if len(sview) >= 10 else sview
     prev20_hi = max(float(b["high"]) for b in sview[-25:-5]) if len(sview) >= 25 else max(float(b["high"]) for b in sview)
     prev20_lo = min(float(b["low"]) for b in sview[-25:-5]) if len(sview) >= 25 else min(float(b["low"]) for b in sview)
     recent_hi5 = max(float(b["high"]) for b in recent5)
     recent_lo5 = min(float(b["low"]) for b in recent5)
+    recent_hi10 = max(float(b["high"]) for b in recent10)
+    piv_hs = [float(p["price"]) for p in pivots if p.get("confirmed") and p.get("kind") == "H"]
+    piv_ls = [float(p["price"]) for p in pivots if p.get("confirmed") and p.get("kind") == "L"]
+    status_run_bars = int(struct.get("status_run_bars") or 1)
 
     freq_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
@@ -345,9 +350,9 @@ def build_scenarios_with_base_rates(
         q75_c = min(float(horizon), max(med_c, round(float(raw_q75), 1)))
 
         trig_dist_atr = round(abs(raw_trigger_price / ref - 1.0) / max(atr, 1e-6), 2)
-        is_active = bool(already_active or abs(raw_trigger_price / ref - 1.0) < min_trig_dist)
+        is_active = bool(precondition_met and (already_active or abs(raw_trigger_price / ref - 1.0) < min_trig_dist))
         status = "ACTIVE" if is_active else "PENDING_TRIGGER"
-        status_cn = "已在进行中" if is_active else "待触发"
+        status_cn = "已在进行中" if is_active else ("待触发" if precondition_met else "待触发（前提未成立，条件备选）")
         trigger_text = active_trigger_text if is_active else pending_trigger_text
         if live_price is not None and not is_active:
             if direction == "BULLISH" and live_price >= raw_trigger_price:
@@ -367,6 +372,7 @@ def build_scenarios_with_base_rates(
             "direction": direction,
             "status": status,
             "status_cn": status_cn,
+            "selection_role": "PRECONDITION_MET" if precondition_met else "CONDITIONAL_FALLBACK",
             "precondition_template": meta["precondition"],
             "precondition_met": precondition_met,
             "precondition_rationale": rationale,
@@ -397,10 +403,10 @@ def build_scenarios_with_base_rates(
     candidates: list[dict[str, Any]] = []
 
     # 1. TREND_CONTINUATION（趋势延续）
-    up_channel = ("上升通道" in pat_name or "上升" in pat_name or (su > 0 and sl > 0)) and ref >= mid_rail
+    channel_active = bool(struct.get("fitted") and st_code in ("inside", "above") and ref >= mid_rail)
     up_impulse = impulse is not None and impulse["direction"] == "up" and ref >= mid_rail
-    if up_channel or up_impulse or (ref >= ma20 >= ma60 and ref >= mid_rail):
-        strict_1 = bool(up_channel or up_impulse)
+    if channel_active or up_impulse or (ref >= ma20 >= ma60 and ref >= mid_rail):
+        strict_1 = bool(channel_active or up_impulse)
         ext_u = _money(max(u + max(0.0, su) * horizon, bull_base["target_price"]))
         if up_impulse and impulse is not None:
             tgt_1 = float(impulse["wave3_1618_target"])
@@ -432,7 +438,12 @@ def build_scenarios_with_base_rates(
         )
 
     # 2. BREAKOUT_RETEST（突破回踩）
-    broke_up_recent = st_code == "breakout_up" or (ref >= prev20_hi * 0.998 and len(sview) >= 20)
+    broke_neck_up = any(ref >= ph * 0.998 and min(float(b["close"]) for b in recent5) < ph for ph in piv_hs[-3:])
+    broke_up_recent = (
+        (st_code == "above" and status_run_bars <= 5)
+        or (ref >= prev20_hi * 0.998 and len(sview) >= 20)
+        or broke_neck_up
+    )
     near_breakout = (not broke_up_recent) and (abs(r1 / ref - 1.0) <= max(0.035, 1.8 * atr) or abs(u / ref - 1.0) <= 1.5 * atr)
     strict_2 = bool(broke_up_recent)
     meas_target = _money((u if broke_up_recent else r1) + (min(height, ref * 3.0 * atr) if height > 0 else ref * 2.2 * atr))
@@ -464,10 +475,12 @@ def build_scenarios_with_base_rates(
     )
 
     # 3. FALSE_BREAKOUT_REVERSAL（假突破回落）
-    poked_above = (recent_hi5 >= u * 0.997 and ref < u and not struct["expired"]) or (
-        recent_hi5 >= prev20_hi * 0.998 and ref < prev20_hi - 0.3 * atr_abs
+    poked_above = (
+        (recent_hi10 >= u * 0.997 and ref < u and not struct["expired"])
+        or (recent_hi10 >= prev20_hi * 0.998 and ref < prev20_hi)
+        or any(recent_hi10 >= ph * 0.998 and ref < ph for ph in piv_hs[-3:])
     )
-    low_vol_break = st_code == "breakout_up" and rvol_now < 1.15
+    low_vol_break = (st_code == "above" or ref >= prev20_hi * 0.998) and rvol_now < 1.15
     strict_3 = bool(poked_above or low_vol_break)
     near_upper_resist = ref >= mid_rail and abs(u - ref) <= 1.6 * atr_abs
     if strict_3 or near_upper_resist:
@@ -509,6 +522,8 @@ def build_scenarios_with_base_rates(
             applicability_score=84.0 if strict_4 else 58.0,
             rationale=(
                 f"收盘位于 {pat_name} 内部，距上方 {fp(max(u, r1))} 约 {dist_u_atr:.1f} ATR、距下方 {fp(min(l, s1))} 约 {dist_l_atr:.1f} ATR"
+                if strict_4
+                else f"条件备选（前提未成立）：当前距轨道/支撑边界不足 1.0 ATR 或已越出轨道，仅当回到 {fp(neut_base['range'][0])} ~ {fp(neut_base['range'][1])} 区间内才按震荡处理"
             ),
             raw_trigger_price=float(neut_base["target_price"]),
             pending_trigger_text=neut_base["condition"],
@@ -519,12 +534,13 @@ def build_scenarios_with_base_rates(
             target_source_detail=f"区间两端 {fp(neut_base['range'][0])} ~ {fp(neut_base['range'][1])}（中枢 {fp(neut_base['target_price'])}）",
             invalidation_price=s1,
             invalidation_text=f"收盘越出任一侧（站上 {fp(r1)} 或跌破 {fp(s1)}）",
-            already_active=True,
+            already_active=strict_4,
         )
     )
 
     # 5. BREAKDOWN_DECLINE（破位下行）
-    broke_dn_recent = st_code == "breakdown_down" or (ref <= prev20_lo * 1.002 and len(sview) >= 20)
+    broke_piv_l = any(ref <= pl * 1.002 for pl in piv_ls[-2:])
+    broke_dn_recent = st_code == "below" or (ref <= prev20_lo * 1.002 and len(sview) >= 20) or broke_piv_l
     near_support = ref <= mid_rail or abs(ref / s1 - 1.0) <= max(0.035, 1.8 * atr)
     strict_5 = bool(broke_dn_recent)
     dn_ref = l if (broke_dn_recent and not struct["expired"]) else s1
@@ -554,9 +570,19 @@ def build_scenarios_with_base_rates(
     )
 
     # 6. C_WAVE_REVERSAL（C 浪末端反转）
-    c_cand = scenario_abc
-    if c_cand is None and wave_counts:
-        c_cand = wave_counts[0]
+    all_wave_cands = [wc for wc in ([scenario_abc] + list(wave_counts or [])) if wc is not None]
+    c_cand = None
+    for wc_item in all_wave_cands:
+        cr = float(wc_item["c_progress"]["c_over_a"])
+        cd = str(wc_item["direction"])
+        exh = (cd == "down" and (rsi_now <= 44.0 or float(sview[-1]["close"]) >= float(sview[-1]["open"]))) or (
+            cd == "up" and (rsi_now >= 56.0 or float(sview[-1]["close"]) <= float(sview[-1]["open"]))
+        )
+        if 0.72 <= cr <= 1.62 and exh:
+            c_cand = wc_item
+            break
+    if c_cand is None and all_wave_cands:
+        c_cand = min(all_wave_cands, key=lambda wc_item: abs(float(wc_item["c_progress"]["c_over_a"]) - 1.0))
     if c_cand is not None:
         c_ratio = float(c_cand["c_progress"]["c_over_a"])
         c_dir = str(c_cand["direction"])
@@ -667,7 +693,7 @@ def build_scenarios_with_base_rates(
         )
 
     # 筛选规则：优先输出所有 precondition_met=True 的情景（按 applicability_score 降序，最多 5 个）；
-    # 若不足 2 个，则按 applicability_score 补齐至至少 2 个（保证每个截面 2~5 个情景）。
+    # 若满足前提的情景不足 2 个，仅补充 1 个最高分的待触发条件备选情景（保留 precondition_met=False，严禁篡改为 True）。
     met_list = sorted(
         [c for c in candidates if c["precondition_met"]],
         key=lambda x: x["applicability_score"],
@@ -681,9 +707,7 @@ def build_scenarios_with_base_rates(
             key=lambda x: x["applicability_score"],
             reverse=True,
         )
-        selected = (met_list + rest)[: max(2, min(3, len(candidates)))]
-        for item in selected:
-            item["precondition_met"] = True
+        selected = (met_list + rest)[:2]
 
     # 为向后兼容的三路径（bull / neutral / bear）挂载对应的历史条件频率
     bull_sc = next((s for s in selected if s["direction"] == "BULLISH"), None)
@@ -697,6 +721,7 @@ def build_scenarios_with_base_rates(
     return {
         "scenarios": selected,
         "scenario_count": len(selected),
+        "precondition_met_count": len(met_list),
         "scenario_signature": [s["id"] for s in selected],
         "impulse_wave": impulse,
         "bull_frequency": bull_freq,
