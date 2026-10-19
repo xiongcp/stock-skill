@@ -328,8 +328,16 @@ def vwap_rolling(bars: list[dict[str, Any]], period: int = 20) -> list[float | N
 def _rank_list(vals: list[float]) -> list[float]:
     indexed = sorted(enumerate(vals), key=lambda x: x[1])
     ranks = [0.0] * len(vals)
-    for rank_idx, (orig_idx, _) in enumerate(indexed):
-        ranks[orig_idx] = float(rank_idx + 1)
+    i = 0
+    n = len(indexed)
+    while i < n:
+        j = i
+        while j + 1 < n and indexed[j + 1][1] == indexed[i][1]:
+            j += 1
+        avg_rank = (i + 1 + j + 1) / 2.0
+        for k in range(i, j + 1):
+            ranks[indexed[k][0]] = avg_rank
+        i = j + 1
     return ranks
 
 

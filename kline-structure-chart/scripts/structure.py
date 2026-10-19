@@ -104,9 +104,17 @@ def atr_pct(bars: list[dict], n: int = 20) -> float:
 def zigzag(bars: list[dict], thr: float) -> list[dict]:
     """高低点 ZigZag：反向幅度 ≥ thr 才确认上一个拐点；最后一个元素是尚未确认的当前波段极值。"""
 
-    def pivot(i: int, kind: str, confirmed: bool = True) -> dict:
+    def pivot(i: int, kind: str, confirmed: bool = True, confirmed_idx: int | None = None) -> dict:
         price = bars[i]["high"] if kind == "H" else bars[i]["low"]
-        return {"idx": i, "day": bars[i]["day"], "price": float(money(price)), "kind": kind, "confirmed": confirmed}
+        return {
+            "idx": i,
+            "day": bars[i]["day"],
+            "price": float(money(price)),
+            "kind": kind,
+            "confirmed": confirmed,
+            "confirmed_at_idx": confirmed_idx,
+            "confirmed_at_day": bars[confirmed_idx]["day"] if confirmed_idx is not None else None,
+        }
 
     pivots: list[dict] = []
     hi_i = lo_i = ext = 0
@@ -120,25 +128,25 @@ def zigzag(bars: list[dict], thr: float) -> list[dict]:
                 lo_i = i
             if bars[hi_i]["high"] >= bars[lo_i]["low"] * (1 + thr):
                 if lo_i < hi_i:
-                    pivots.append(pivot(lo_i, "L"))
+                    pivots.append(pivot(lo_i, "L", True, i))
                     trend, ext = 1, hi_i
                 else:
-                    pivots.append(pivot(hi_i, "H"))
+                    pivots.append(pivot(hi_i, "H", True, i))
                     trend, ext = -1, lo_i
         elif trend == 1:
             if high > bars[ext]["high"]:
                 ext = i
             elif low <= bars[ext]["high"] * (1 - thr):
-                pivots.append(pivot(ext, "H"))
+                pivots.append(pivot(ext, "H", True, i))
                 trend, ext = -1, i
         else:
             if low < bars[ext]["low"]:
                 ext = i
             elif high >= bars[ext]["low"] * (1 + thr):
-                pivots.append(pivot(ext, "L"))
+                pivots.append(pivot(ext, "L", True, i))
                 trend, ext = 1, i
     if trend:
-        pivots.append(pivot(ext, "H" if trend == 1 else "L", confirmed=False))
+        pivots.append(pivot(ext, "H" if trend == 1 else "L", confirmed=False, confirmed_idx=None))
     return pivots
 
 
@@ -151,7 +159,15 @@ def swing_pivots(completed: list[dict], view_start: int) -> tuple[list[dict], li
     thr = min(0.08, max(0.03, 2.0 * atr))
     while True:
         all_pivots = zigzag(completed, thr)
-        pivots = [dict(p, idx=p["idx"] - view_start) for p in all_pivots if p["idx"] >= view_start]
+        pivots = [
+            dict(
+                p,
+                idx=p["idx"] - view_start,
+                confirmed_at_idx=(p["confirmed_at_idx"] - view_start) if p.get("confirmed_at_idx") is not None else None,
+            )
+            for p in all_pivots
+            if p["idx"] >= view_start
+        ]
         n_high = sum(1 for p in pivots if p["confirmed"] and p["kind"] == "H")
         n_low = sum(1 for p in pivots if p["confirmed"] and p["kind"] == "L")
         if (n_high >= 2 and n_low >= 2) or thr <= 0.02:

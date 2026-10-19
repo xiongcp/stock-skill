@@ -177,6 +177,10 @@ def test_indicators_and_algebraic_patterns_and_smc() -> None:
     vp = compute_volume_profile(bars, lookback=120)
     assert vp["val_price"] <= vp["poc_price"] <= vp["vah_price"]
     assert "fvgs" in smc and "order_blocks" in smc
+    # 验证常数序列上量价秩相关返回 0.0（并列秩取均值）
+    from indicators import price_volume_rank_corr
+
+    assert price_volume_rank_corr([10.0] * 25, [100.0 + i for i in range(25)], window=20)[-1] == 0.0
 
 
 def test_causal_replay_invariance_no_lookahead() -> None:

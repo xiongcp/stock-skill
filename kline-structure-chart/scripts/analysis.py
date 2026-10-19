@@ -266,9 +266,10 @@ def analyze_bundle(
 
     # 2. 全量数学指标与 Qlib 风格量价因子计算：在固定 HISTORY_BARS 历史上预热（EMA200/SMA250 需要足够样本，且与 --days 无关），
     #    再把序列截到结构窗口长度，保持与 sview 下标对齐
+    p_dec = price_decimals(float(last_c), inst["market"], inst["asset_type"], view[-1]["day"])
     ind_all = _indicators_on_window(hist, len(sview))
     ind_full = compute_all_indicators(completed) if include_forecast else ind_all
-    causal_pivs = causal_swing_pivots(sview, zz_thr)
+    causal_pivs = causal_swing_pivots(sview, zz_thr, price_decimals=p_dec)
 
     # 3. 100% 代数形态、背离、SMC 与 Volume Profile
     cdl_patterns = detect_candlestick_patterns(
@@ -282,6 +283,7 @@ def analyze_bundle(
         causal_pivs,
         ind_all["series"]["atr14"],
         ind_all["series"]["rvol20"],
+        price_decimals=p_dec,
     )
     div_patterns = detect_divergences(
         sview,
@@ -290,8 +292,8 @@ def analyze_bundle(
         ind_all["series"]["atr14"],
     )
     all_algebraic_patterns = cdl_patterns + geo_patterns + div_patterns
-    smc_structures = detect_smc_structures(sview, causal_pivs, ind_all["series"]["atr14"], lookback=80)
-    vol_profile = compute_volume_profile(sview, lookback=min(120, len(sview)), num_bins=24)
+    smc_structures = detect_smc_structures(sview, causal_pivs, ind_all["series"]["atr14"], lookback=80, price_decimals=p_dec)
+    vol_profile = compute_volume_profile(sview, lookback=min(120, len(sview)), num_bins=24, price_decimals=p_dec)
 
     # 4. 大盘基准状态与相对强弱（先大盘、后个股）
     target_regime = classify_market_regime(

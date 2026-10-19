@@ -21,7 +21,7 @@ def causal_nadaraya_watson(values: list[float], bandwidth: float = 3.0, window: 
     return out
 
 
-def causal_swing_pivots(bars: list[dict[str, Any]], reversal_thr: float) -> list[dict[str, Any]]:
+def causal_swing_pivots(bars: list[dict[str, Any]], reversal_thr: float, price_decimals: int = 2) -> list[dict[str, Any]]:
     """无前视因果 ZigZag 极值检测器：记录极值发生时刻 (idx, day) 与真正被反向走势确认的时刻 (confirmed_at_idx, confirmed_at_day)。"""
     if not bars:
         return []
@@ -36,7 +36,7 @@ def causal_swing_pivots(bars: list[dict[str, Any]], reversal_thr: float) -> list
         return {
             "idx": idx,
             "day": bars[idx]["day"],
-            "price": round(p, 2),
+            "price": round(p, price_decimals),
             "kind": kind,
             "confirmed": confirmed,
             "confirmed_at_idx": confirmed_idx,
@@ -282,6 +282,7 @@ def detect_geometric_patterns(
     pivots: list[dict[str, Any]],
     atr_vals: list[float | None],
     rvol_vals: list[float | None],
+    price_decimals: int = 2,
 ) -> list[dict[str, Any]]:
     """基于因果 ZigZag 已确认波段拐点检测双底 / 双顶，并对核平滑收盘价做线性回归判断趋势通道（仅此两类波段形态）。"""
     n = len(bars)
@@ -316,7 +317,7 @@ def detect_geometric_patterns(
                         "direction": "BULLISH",
                         "observed_at": l2["day"],
                         "confirmed_at": last_day if breakout else (l2.get("confirmed_at_day") or l2["day"]),
-                        "neckline_price": round(float(neck["price"]), 2),
+                        "neckline_price": round(float(neck["price"]), price_decimals),
                         "formula_verified": (
                             f"|E2({l1['price']:.2f}) - E4({l2['price']:.2f})| = {diff_lows:.2f} <= 0.65*ATR({atr:.2f}) "
                             f"AND Neckline({neck['price']:.2f}) - Bottom >= 1.2*ATR "
@@ -344,7 +345,7 @@ def detect_geometric_patterns(
                         "direction": "BEARISH",
                         "observed_at": h2["day"],
                         "confirmed_at": last_day if breakdown else (h2.get("confirmed_at_day") or h2["day"]),
-                        "neckline_price": round(float(neck["price"]), 2),
+                        "neckline_price": round(float(neck["price"]), price_decimals),
                         "formula_verified": (
                             f"|E1({h1['price']:.2f}) - E3({h2['price']:.2f})| = {diff_highs:.2f} <= 0.65*ATR({atr:.2f}) "
                             f"AND Top - Neckline({neck['price']:.2f}) >= 1.2*ATR "
@@ -459,6 +460,7 @@ def detect_smc_structures(
     pivots: list[dict[str, Any]],
     atr_vals: list[float | None],
     lookback: int = 80,
+    price_decimals: int = 2,
 ) -> dict[str, Any]:
     """算法化 SMC 结构检测：FVG 公允价值缺口、Order Block 订单块与 BOS 结构破位（收盘越过最近已确认波段高/低点；不区分趋势延续与反转）。"""
     n = len(bars)
@@ -488,7 +490,7 @@ def detect_smc_structures(
                         "kind": "BULLISH_FVG",
                         "day": b1["day"],
                         "idx": t - 1,
-                        "zone": [round(h2, 2), round(l0, 2)],
+                        "zone": [round(h2, price_decimals), round(l0, price_decimals)],
                         "status": status,
                         "formula_verified": f"Low[{b0['day']}]({l0:.2f}) - High[{b2['day']}]({h2:.2f}) > 0.2*ATR({atr:.2f})",
                     }
@@ -505,7 +507,7 @@ def detect_smc_structures(
                         "kind": "BEARISH_FVG",
                         "day": b1["day"],
                         "idx": t - 1,
-                        "zone": [round(h0, 2), round(l2, 2)],
+                        "zone": [round(h0, price_decimals), round(l2, price_decimals)],
                         "status": status,
                         "formula_verified": f"Low[{b2['day']}]({l2:.2f}) - High[{b0['day']}]({h0:.2f}) > 0.2*ATR({atr:.2f})",
                     }
@@ -516,8 +518,7 @@ def detect_smc_structures(
     high_pivs = [p for p in confirmed if p["kind"] == "H"]
     low_pivs = [p for p in confirmed if p["kind"] == "L"]
 
-    if high_pivs:
-        last_h = high_pivs[-1]
+    for last_h in high_pivs[-3:]:
         h_idx = int(last_h["idx"])
         h_price = float(last_h["price"])
         for k in range(h_idx + 1, n):
@@ -527,7 +528,7 @@ def detect_smc_structures(
                         "type": "BULLISH_BOS",
                         "day": bars[k]["day"],
                         "idx": k,
-                        "broken_level": round(h_price, 2),
+                        "broken_level": round(h_price, price_decimals),
                         "pivot_day": last_h["day"],
                         "formula_verified": f"Close[{bars[k]['day']}]({float(bars[k]['close']):.2f}) > SwingHigh[{last_h['day']}]({h_price:.2f})",
                     }
@@ -547,15 +548,14 @@ def detect_smc_structures(
                                 "kind": "BULLISH_ORDER_BLOCK",
                                 "day": ob_bar["day"],
                                 "idx": ob_idx,
-                                "zone": [round(ob_low, 2), round(ob_high, 2)],
+                                "zone": [round(ob_low, price_decimals), round(ob_high, price_decimals)],
                                 "status": "ACTIVE",
                                 "formula_verified": f"LastBearBar[{ob_bar['day']}] before BOS({h_price:.2f}), Close stays >= {ob_low:.2f}",
                             }
                         )
                 break
 
-    if low_pivs:
-        last_l = low_pivs[-1]
+    for last_l in low_pivs[-3:]:
         l_idx = int(last_l["idx"])
         l_price = float(last_l["price"])
         for k in range(l_idx + 1, n):
@@ -565,7 +565,7 @@ def detect_smc_structures(
                         "type": "BEARISH_BOS",
                         "day": bars[k]["day"],
                         "idx": k,
-                        "broken_level": round(l_price, 2),
+                        "broken_level": round(l_price, price_decimals),
                         "pivot_day": last_l["day"],
                         "formula_verified": f"Close[{bars[k]['day']}]({float(bars[k]['close']):.2f}) < SwingLow[{last_l['day']}]({l_price:.2f})",
                     }
@@ -584,7 +584,7 @@ def detect_smc_structures(
                                 "kind": "BEARISH_ORDER_BLOCK",
                                 "day": ob_bar["day"],
                                 "idx": ob_idx,
-                                "zone": [round(ob_low, 2), round(ob_high, 2)],
+                                "zone": [round(ob_low, price_decimals), round(ob_high, price_decimals)],
                                 "status": "ACTIVE",
                                 "formula_verified": f"LastBullBar[{ob_bar['day']}] before Breakdown({l_price:.2f}), Close stays <= {ob_high:.2f}",
                             }
@@ -599,7 +599,9 @@ def detect_smc_structures(
     }
 
 
-def compute_volume_profile(bars: list[dict[str, Any]], lookback: int = 120, num_bins: int = 24) -> dict[str, Any]:
+def compute_volume_profile(
+    bars: list[dict[str, Any]], lookback: int = 120, num_bins: int = 24, price_decimals: int = 2
+) -> dict[str, Any]:
     """基于 OHLCV 价格区间均匀分配近似计算 Volume Profile (POC / VAH / VAL)，明确标注近似方法。"""
     sub = bars[-lookback:] if len(bars) > lookback else bars
     if not sub:
@@ -607,7 +609,7 @@ def compute_volume_profile(bars: list[dict[str, Any]], lookback: int = 120, num_
     p_min = min(float(b["low"]) for b in sub)
     p_max = max(float(b["high"]) for b in sub)
     if p_max <= p_min:
-        p = round(p_min, 2)
+        p = round(p_min, price_decimals)
         return {"poc_price": p, "vah_price": p, "val_price": p, "bins": [], "approximation_method": "ohlcv_range_partition_v1"}
 
     step = (p_max - p_min) / num_bins
@@ -645,9 +647,9 @@ def compute_volume_profile(bars: list[dict[str, Any]], lookback: int = 120, num_
     max_v = max(vols) if any(vols) else 1.0
     bins_out = [
         {
-            "price_low": round(p_min + k * step, 2),
-            "price_high": round(p_min + (k + 1) * step, 2),
-            "price_mid": round(p_min + (k + 0.5) * step, 2),
+            "price_low": round(p_min + k * step, price_decimals),
+            "price_high": round(p_min + (k + 1) * step, price_decimals),
+            "price_mid": round(p_min + (k + 0.5) * step, price_decimals),
             "rel_volume": round(vols[k] / max_v, 4),
             "is_poc": k == poc_idx,
             "in_value_area": low_i <= k <= high_i,
@@ -655,9 +657,9 @@ def compute_volume_profile(bars: list[dict[str, Any]], lookback: int = 120, num_
         for k in range(num_bins)
     ]
     return {
-        "poc_price": round(poc_price, 2),
-        "vah_price": round(vah_price, 2),
-        "val_price": round(val_price, 2),
+        "poc_price": round(poc_price, price_decimals),
+        "vah_price": round(vah_price, price_decimals),
+        "val_price": round(val_price, price_decimals),
         "value_area_coverage": 0.70,
         "lookback_bars": len(sub),
         "approximation_method": "ohlcv_range_partition_v1",
