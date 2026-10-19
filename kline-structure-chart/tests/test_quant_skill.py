@@ -1490,6 +1490,7 @@ def test_o3_30_to_o3_34_judgment_layer_and_scoring(replay_recorded, tmp_path: Pa
         ok, val = resolve_json_path(rep, ev["json_path"])
         assert ok is True, f"Unresolved json_path: {ev['json_path']}"
         assert val == ev["value"]
+        assert "UNDEFINED" not in ev["summary_cn"] and "None" not in ev["summary_cn"]
     assert len(pack["conflicting_signals"]) >= 1
     anchors = pack["scenario_anchors"]
     assert len(anchors) == len(rep["rule_scenarios"]["scenarios"])

@@ -253,18 +253,19 @@ def build_judgment_pack(report: dict[str, Any]) -> dict[str, Any]:
     )
 
     # E4: 近120日轨道结构
-    w_cls = str(wedge.get("class") or "UNDEFINED")
+    w_pat = str(wedge.get("pattern") or "")
+    w_st = str(wedge.get("status") or "inside")
     w_dir = (
         "BULLISH"
-        if "UP" in w_cls or "FALLING_WEDGE" in w_cls
-        else ("BEARISH" if "DOWN" in w_cls or "RISING_WEDGE" in w_cls else "NEUTRAL")
+        if w_st == "above" or "上升通道" in w_pat or "下降楔形" in w_pat
+        else ("BEARISH" if w_st == "below" or "下降通道" in w_pat or "上升楔形" in w_pat else "NEUTRAL")
     )
     _add_ev(
         "STRUCTURE",
         "mathematical_indicators.structure_levels.wedge_structure.pattern",
         w_dir,
-        f"近 120 日结构分类为「{wedge['pattern']}」（{w_cls}），当前状态：{wedge['status_text']}；"
-        f"上轨末端 {_fmt_price(wedge.get('upper_end'), p_dec)}，下轨末端 {_fmt_price(wedge.get('lower_end'), p_dec)}",
+        f"近 120 日结构分类为「{w_pat}」，当前状态：{wedge['status_text']}；"
+        f"今日上轨 {_fmt_price(wedge.get('upper_today'), p_dec)}，今日下轨 {_fmt_price(wedge.get('lower_today'), p_dec)}",
     )
 
     # E5: 多周期规则综合分
@@ -531,7 +532,7 @@ def build_falsification_text(
             if inv_price is not None
             else f"出现主情景「{name}」的失效条件（{inv_text}）"
         )
-        cond = f"{inv_part}，或收盘跌破三重屏障止损位 {_fmt_price(stop_loss, p_dec)}（见 E10）"
+        cond = f"{inv_part}，或盘中触及三重屏障止损位 {_fmt_price(stop_loss, p_dec)}（见 E10）"
     elif inv_text and inv_text != "—":
         cond = f"出现主情景「{name}」的失效条件：{inv_text}"
     elif breakout is not None and breakdown is not None:
@@ -621,7 +622,7 @@ def generate_constrained_judgment(report: dict[str, Any]) -> dict[str, Any]:
         cited = ", ".join(dict.fromkeys(sup + opp))
         l2_pct_txt = f"{a['l2_effective_pct']:.1f}%" if a.get("l2_effective_pct") is not None else "—"
         rationale = (
-            f"脚本预填（按偏多/偏空证据条数机械调整，尚未经 Agent 研判）：L2 体制加权估计频率为 {l2_pct_txt}（样本 n={a['sample_size_n']}），"
+            f"脚本预填（按偏多/偏空证据条数机械调整，尚未经 Agent 研判）：L2 历史条件频率（含低样本收缩）为 {l2_pct_txt}（样本 n={a['sample_size_n']}），"
             f"归一化基准概率为 {base_p:.2f}%；支持证据 {', '.join(sup)}，反向约束 {', '.join(opp)}（引用 {cited}），"
             f"预填调整 {adj_p:+.2f} 个百分点至 {subj_p:.2f}%（未超 ±{a['max_adjustment_pct']:.0f}% 上限）。"
         )
@@ -705,6 +706,8 @@ def generate_constrained_judgment(report: dict[str, Any]) -> dict[str, Any]:
 
 def judgment_origin(judgment: dict[str, Any], report: dict[str, Any]) -> str:
     """判定研判来源：各情景主观概率与 --auto-init 模板完全一致即视为模板（无论是否改过文字），否则为 Agent 研判。"""
+    if str(judgment.get("judgment_type") or "") == "主观研判（脚本预填模板）":
+        return AUTO_INIT_GENERATOR
     try:
         template = generate_constrained_judgment(report)
     except (KeyError, ValueError, IndexError, TypeError):
