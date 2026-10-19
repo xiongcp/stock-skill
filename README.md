@@ -1,31 +1,75 @@
-# kline-structure-chart：A股 / 港股 / 美股 K 线结构分析技能
+# kline-structure-chart：A股 / 港股 / 美股 K 线数学结构、三重屏障风控与保形预测技能包
 
-`kline-structure-chart` 是一个符合 [Agent Skills 开放规范](https://agentskills.io/specification) 的技能包。装进 Claude Code、Codex、Cursor、Gemini CLI 等 AI 编程助手之后，你只要说"帮我看看贵州茅台的 K 线"，助手就会：
+`kline-structure-chart` 是一个符合 [Agent Skills 开放规范](https://agentskills.io/specification) 的金融量化与 K 线数学结构分析技能包。装进 Claude Code、Codex、Hermes Agent、Cursor、Gemini CLI、OpenCode 等 AI 助手之后，你只需用自然语言提问（例如："帮我看看贵州茅台的 K 线结构和支撑压力，账户 50 万，带回测"），助手就会自动完成从**真实行情拉取 → 确定性数学结构识别 → 历史条件频率统计 → 三重屏障风控与保形预测 → 离线交互看板与高清图生成 → 受约束研判校验**的完整投研闭环。
 
-1. 运行脚本，从新浪、Yahoo、腾讯拉取**真实**日线行情；
-2. 用确定性的 Python 公式计算指标、形态、支撑压力、风控点位、未来 15 个交易日的价格区间和历史回测；
-3. 生成一份中文 Markdown 报告、一张结构图（PNG）、一个可离线打开的交互看板（HTML），并据此回答你。
-
-设计原则：
-
-- **只用真实数据**：取不到行情就报错退出（`[DATA_UNAVAILABLE]`），绝不估算、补数或生成假数据。
-- **算图分离**：所有数字由脚本计算，图表只负责展示；不让 AI 看图猜价格。
-- **先大盘、后个股**：分析个股时同时评估对应大盘，大盘太弱或缺少大盘数据时风控会否决做多。
-- **不用未来数据**：形态、预测校准和回测都只使用当时已经收盘的 K 线。
-
-> 本技能只做规则化技术分析，仅供研究参考，不构成投资建议，也不会替你下单。
+![kline-structure-chart 架构与三层分析流水线总览](examples/architecture_overview.png)
 
 ---
 
-## 1. 能分析什么
+## 0. 我们究竟解决什么问题？（为什么不能让大模型直接看图猜 K 线）
+
+在传统的大模型看图或直接对话问股中，普遍存在四大致命痛点：
+
+1. **视觉幻觉与价格编造**：让多模态模型（VLM）直接看 K 线截图识别形态或支撑阻力位，极易读错坐标轴、编造不存在的价格或画错趋势线。
+2. **前视偏差（Lookahead Bias）与事后诸葛亮**：传统 ZigZag 拐点、双底/双顶、ABC 浪型往往在事后用未来 K 线重绘历史极值，回测看似完美，实盘完全无法复现。
+3. **把主观打分伪装成"上涨概率"**：许多工具将几个指标的简单加权分直接宣称为"上涨概率 75%"，既无历史样本支撑，也未经样本外校准检验。
+4. **忽视大盘环境与微观交易制度**：在大盘空头崩跌时仍激进推荐个股突破追高；或忽略 A 股 T+1、科创/创业板及双创 ETF ±20% 涨跌幅、港股动态价位表与双边印花税、美股盘前盘后与 VIX 波动放大等真实交易约束。
+
+为此，`kline-structure-chart` 建立了**六大工程铁律（Hard Invariants）**与**三层渐进式量化架构（L1 → L2 → L3）**：
+
+```mermaid
+flowchart TD
+    A["用户自然语言提问 / CLI 调用<br/>（如：分析茅台 / 00700.HK / NVDA.US）"] --> B["0. 名称解析与多市场真实行情网关<br/>resolve_symbol.py · data_gateway.py"]
+    B --> C["盘中未收盘K线剥离 + 点位时间前复权(PIT) + 大盘基准配对<br/>market_rules.py（A股沪深300 / 港股恒指 / 美股SPY）"]
+    C --> D["L1 确定性数学结构与多周期策略层<br/>单边因果NW核平滑 · 因果ZigZag · 轨道候选打分拟合<br/>主+备选ABC浪型 · 推动5浪硬规则 · 8类标准情景筛选<br/>蜡烛/双底双顶/RSI背离 · SMC(FVG/OB/BOS) · Volume Profile"]
+    D --> E["L2 逐点无前视历史条件频率层<br/>base_rates.py：标准化ATR三重屏障事件研究<br/>观测频率 k/n + 95% Wilson区间 + n&lt;30 Beta-Binomial向基准收缩"]
+    D --> F["Triple-Barrier 风控与 Split-Conformal 保形区间层<br/>risk.py · forecast.py · evaluation.py<br/>左右侧入场区/盘中硬止损/+0.90R移动保本/持仓防守/港美做空<br/>鞅中心15日50%&amp;80%保形扇形 + 线上计划逐日无前视回测"]
+    E --> G["同源核心数据契约：*_result.json + *_judgment_pack.json<br/>（通过 assets/analysis.schema.json 严苛校验）"]
+    F --> G
+    G --> H1["*_preview.png<br/>1920×1160 2×SSAA高清结构图"]
+    G --> H2["*_dashboard.html<br/>零依赖9图层离线交互终端"]
+    G --> H3["*_report.md<br/>零失误中文投研报告"]
+    G --> H4["L3 受约束主观研判闭环<br/>validate_judgment.py 校验<br/>score_judgments.py 到期打分<br/>lint_response.py 回复守门"]
+```
+
+### 核心架构与六大不可变铁律
+
+1. **数据真实性（Data Authenticity）优先于一切**：只使用新浪、Yahoo、腾讯实时/录制真实行情或用户提供的本地真实行情文件。取不到行情时立即以 `[DATA_UNAVAILABLE]` 非零退出，**严禁回退、估算、补数或生成任何合成行情**。当日未收盘 K 线（按交易所时区与半日市/提前收市规则判定）严格拆出，绝不混入已收盘序列。
+2. **100% 算图分离（Compute-Render Separation）**：所有均线、指标、拐点、轨道、ABC 浪型、SMC、Volume Profile、三重屏障点位、15 日保形分位区间全部由 Python 从 OHLCV 序列计算一次并写入 JSON；PNG 与 HTML 渲染器只读取同一份计算结果，**严禁调用视觉模型看图猜数或调用图像生成模型画 K 线**。
+3. **先大盘、后个股（Market-First Hierarchy）**：分析任何个股或 ETF 前必须同步加载对应市场大盘基准（A 股 `000300.SH`、港股 `HSI.HK`、美股 `SPY.US`），计算大盘状态分与 20 日相对强弱（RS Line）。大盘极弱（状态分 `< 35`）或缺失基准时，独立风控官自动触发一票否决（`risk_officer_veto = true`）。
+4. **严格单边因果与零前视泄漏（Zero Lookahead Bias）**：核平滑采用单边因果 Nadaraya-Watson；每个波段拐点同时记录极值发生日 `day` 与反向达标确认日 `confirmed_at_day`；点位复权（PIT）只消费截至当时已生效的分红送转；回测与历史回放截面按当时截止日重算大盘状态与复权，并经追加 5 倍极端未来价格冲击的因果回放审计验证零泄漏。
+5. **跨展示窗口不变性（Cross-Window Invariance）**：`--days N`（60~500）只改变主图展示根数，底层取数固定 760 根、指标在固定 420 根历史上预热、结构在固定 120 根窗口上识别，切换展示天数绝不改变任何指标数值、结构分类或交易点位。
+6. **概率与术语边界铁律**：规则分（`rule_score`）是确定性条件加权分，绝不称为"胜率"或"上涨概率"；对外只允许两类受检验的概率数字——**(1) L2 历史条件频率**（附样本数 `n`、95% Wilson 区间与低样本收缩说明）与 **(2) L3 受约束主观研判概率**（锚定 L2、引用 `E1…En` 证据编号、受调整上限约束并记入日志待到期按 Brier 分数检验）。
+
+> 本技能只做规则化技术分析与量化研究验证，不构成任何投资建议，也不会替你下单。
+
+---
+
+## 1. 能分析什么（三市场全品种覆盖与真实图例展示）
 
 | 市场 | 代码格式 | 示例 | 行情来源 | 默认大盘基准 |
 | --- | --- | --- | --- | --- |
 | A股 | 6 位代码 + `.SH` / `.SZ` / `.BJ` | `600519.SH`、`000002.SZ`、`830799.BJ`、`510300.SH`（ETF）、`000001.SH`（上证指数） | 新浪日线（不复权）+ Yahoo 除权除息事件 | 沪深300 `000300.SH` |
-| 港股 | 5 位代码 + `.HK` | `00700.HK`、`01810.HK`、`HSI.HK`、`HSTECH.HK` | Yahoo 日线；恒生科技指数用腾讯指数日线 | 恒生指数 `HSI.HK` |
-| 美股 | 代码 + `.US` | `NVDA.US`、`SPY.US`、`BRK.B.US` | Yahoo 日线 | `SPY.US` |
+| 港股 | 5 位代码 + `.HK` | `00700.HK`、`01810.HK`、`02800.HK`（ETF）、`HSI.HK`、`HSTECH.HK` | Yahoo 日线；恒生科技指数用腾讯指数日线 | 恒生指数 `HSI.HK` |
+| 美股 | 代码 + `.US` | `NVDA.US`、`SPY.US`、`QQQ.US`、`BRK.B.US` | Yahoo 日线 + `^VIX` 恐慌指数 | `SPY.US` |
 
-证券简称、A 股 ST/\*ST 标识和港股每手股数，会自动从腾讯行情快照获取。
+证券简称、A 股 ST/\*ST 风险警示标识和港股每手股数（Board Lot）会自动从腾讯行情快照获取；常见科创/创业板 20% 涨跌幅 ETF、A 股跨境/债券/黄金/货币 T+0 ETF 以及港交所豁免印花税的 ETF/ETP 代码段均支持自动识别。
+
+### 三市场真实行情生成的高清结构推演图展示
+
+以下三张 `1920×1160` 结构图全部由本技能脚本基于真实行情自动生成（数据截至 2026-10-15，完整报告、JSON 与离线交互看板见 [examples/](examples/README.md)）：
+
+#### (1) A 股示例：贵州茅台（`600519.SH` · 红涨绿跌 · 扩散喇叭形 + 三情景推演 + 15 日保形扇形）
+
+![贵州茅台 600519.SH 结构推演图](examples/600519.SH/600519.SH_preview.png)
+
+#### (2) 港股示例：腾讯控股（`00700.HK` · 红涨绿跌 · 破位下行与 C 浪末端反转推演）
+
+![腾讯控股 00700.HK 结构推演图](examples/00700.HK/00700.HK_preview.png)
+
+#### (3) 美股示例：英伟达（`NVDA.US` · 绿涨红跌 · 超跌反弹与破位下行推演）
+
+![英伟达 NVDA.US 结构推演图](examples/NVDA.US/NVDA.US_preview.png)
 
 ---
 
@@ -266,16 +310,55 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 | `*_result.json` | 全部计算结果（通过 `assets/analysis.schema.json` 契约校验） |
 | `*_judgment_pack.json` | L3 受约束研判证据包（含可溯源证据编号 `E1…En`、冲突信号 `C1…Cm`、L2 情景基准频率与价格白名单） |
 | `*_preview.png` | 1920×1160 结构推演图；数据有问题时带红色告警和水印 |
-| `*_dashboard.html` | 离线交互看板：7 个图层开关、悬停查看数值、相对强弱视图、历史回放滑块、导出 PNG |
+| `*_dashboard.html` | 离线交互看板：9 个图层开关、悬停查看数值、相对强弱视图、历史回放滑块、导出 PNG |
 | `*_backtest.json` | 历史计划回放回测与无前视审计（传 `--backtest` 时生成） |
 
-每个字段的含义、单位和能否为空见 [references/output-fields.md](kline-structure-chart/references/output-fields.md)。下图是用真实行情生成的贵州茅台结构图（数据截至 2026-10-16，完整产物见 [examples/](examples/README.md)）：
+每个字段的含义、单位和能否为空见 [references/output-fields.md](kline-structure-chart/references/output-fields.md)。完整产物示例见 [examples/](examples/README.md)。
 
-![贵州茅台结构推演图示例](examples/600519.SH/600519.SH_preview.png)
+![产物视觉导读：PNG 五大分区与 HTML 九大图层](examples/chart_reading_guide.png)
 
 ---
 
 ## 7. 怎么读结果
+
+### 7.1 三层量化输出体系（L1 结构 → L2 历史条件频率 → L3 受约束研判）
+
+| 层级 | 核心产出 | 统计口径与对外表述规范 |
+| --- | --- | --- |
+| **L1 确定性数学结构层** | 轨道拟合形态、主+备选 ABC 浪型、推动 5 浪、8 类标准情景（选 2~5 个活跃情景）、蜡烛/双底双顶/RSI 背离、SMC（FVG/订单块/BOS）、24 桶成交分布（POC/VAH/VAL）、多周期规则分（0~100） | 规则分是确定性条件加权分（均值回归体制下按反转规则调整），**严禁称为胜率或上涨概率**；Volume Profile 是 OHLCV 成交分布近似，不等于真实持仓筹码 |
+| **L2 逐点无前视历史条件频率层** | 在标的自身历史上逐日无前视统计各情景触发后 `horizon_bars` 日内先触及标准化目标屏障（如 `+1.55×ATR`）而非失效屏障（如 `-1.05×ATR`）的实际观测频率 `k/n`、95% Wilson 置信区间与到达用时分位数 | 必须称**"历史条件频率"**并附样本数 `n` 与 95% 区间；当 `n < 30` 时标注"低样本"并通过 Beta-Binomial 向市场基准同情景频率收缩；统计的是 ATR 标准化事件而非图中目标价的到达概率 |
+| **L3 受约束主观研判层** | 基于 `*_judgment_pack.json`（含 `E1…En` 证据溯源、`C1…Cm` 冲突信号与价格白名单），以 L2 归一化频率为锚点做有界调整（`n>=30` 最多 ±15%，`n<30` 最多 ±10%，互斥情景概率和 = 100%） | 必须通过 `validate_judgment.py` 校验并标注**"主观研判，已记录待检验"**；未改写的 `--auto-init` 预填模板标记为 `AUTO_INIT_TEMPLATE`，不计入 LLM 技能分 |
+
+### 7.2 8 类标准情景库速查（见 [references/scenario-playbook.md](kline-structure-chart/references/scenario-playbook.md)）
+
+每次分析会根据当前截面的轨道位置、量能、RSI 与波段结构，从以下 8 类标准情景中动态筛选出 2~5 个适用情景（当触发位距最新收盘价不足 `0.5×ATR` 时自动归入**「已在进行中」**）：
+
+1. `TREND_CONTINUATION`（趋势延续）：沿上升通道或推动第 3/5 浪顺势推进；
+2. `BREAKOUT_RETEST`（突破回踩）：放量站上上轨/颈线/前高后回踩确认；
+3. `FALSE_BREAKOUT_REVERSAL`（假突破回落）：冲高刺破上轨或前高后缺量跌回轨道内；
+4. `RANGE_OSCILLATION`（区间震荡）：位于轨道内部且距上下边界均超过 `1.0×ATR`；
+5. `BREAKDOWN_DECLINE`（破位下行）：收盘跌破下轨、颈线或前低支撑；
+6. `C_WAVE_REVERSAL`（C 浪末端反转）：ABC 调整浪中 `C/A` 接近 `1.0` 倍且出现背离或企稳；
+7. `OVERSOLD_BOUNCE`（超跌反弹）：`RSI14 < 30` 或收盘偏离 `MA20` 超过 `2.0×ATR`；
+8. `APEX_BREAKOUT`（收敛末端变盘）：收敛三角形/楔形距顶点剩余 `0~10` 根 K 线以内且未过期。
+
+### 7.3 L3 受约束主观研判、到期打分与回复校验命令
+
+```bash
+# 1. 生成预填研判模板（供 Agent 在此基础上结合 E1..En 证据改写概率与理由）
+uv run --directory kline-structure-chart python scripts/validate_judgment.py --result artifacts/smoke/600519.SH_result.json --judgment artifacts/smoke/600519.SH_judgment.json --auto-init
+
+# 2. 校验 Agent 改写后的主观研判 JSON，通过后自动合入 result.json / report.md 并追加至 judgment_log.jsonl
+uv run --directory kline-structure-chart python scripts/validate_judgment.py --result artifacts/smoke/600519.SH_result.json --judgment artifacts/smoke/600519.SH_judgment.json
+
+# 3. 对历史已到期（满 horizon_bars 根 K 线）的主观研判进行真实行情回放打分（输出 Brier 分数与技能分 BSS）
+uv run --directory kline-structure-chart python scripts/score_judgments.py --log artifacts/judgment_log.jsonl --bars-dir tests/fixtures/recorded/sina_daily
+
+# 4. 对 Agent 最终输出的自然语言回复执行契约守门校验（拦截捏造价格、违规概率术语、漏报否决/免责声明）
+uv run --directory kline-structure-chart python scripts/lint_response.py --result examples/600519.SH/600519.SH_result.json --response examples/600519.SH/reply.md
+```
+
+### 7.4 阅读报告与图表的核心要点
 
 - **先看数据质量**（`quality.status`）：
   - `OK`：可以正常解读。

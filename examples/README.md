@@ -15,6 +15,35 @@
 | [00700.HK](00700.HK) | 腾讯控股（港股，基准恒生指数） | 报告、结构图 PNG |
 | [NVDA.US](NVDA.US) | 英伟达（美股，基准 SPY） | 报告、结构图 PNG |
 
+## 架构与三市场实盘生成图例预览
+
+### 1. 系统架构与三层分析流水线总览
+
+![架构与三层分析流水线总览](architecture_overview.png)
+
+### 2. 高清结构图 (PNG) 五大分区与交互看板 (HTML) 九大图层导读
+
+![产物视觉导读](chart_reading_guide.png)
+
+### 3. 贵州茅台（`600519.SH` · A股红涨绿跌）
+
+- 完整中文报告：[600519.SH_report.md](600519.SH/600519.SH_report.md)
+- Agent 标准回复示范（含正例与反例）：[reply.md](600519.SH/reply.md)
+
+![贵州茅台 600519.SH 结构推演图](600519.SH/600519.SH_preview.png)
+
+### 4. 腾讯控股（`00700.HK` · 港股红涨绿跌）
+
+- 完整中文报告：[00700.HK_report.md](00700.HK/00700.HK_report.md)
+
+![腾讯控股 00700.HK 结构推演图](00700.HK/00700.HK_preview.png)
+
+### 5. 英伟达（`NVDA.US` · 美股绿涨红跌）
+
+- 完整中文报告：[NVDA.US_report.md](NVDA.US/NVDA.US_report.md)
+
+![英伟达 NVDA.US 结构推演图](NVDA.US/NVDA.US_preview.png)
+
 ## 生成命令
 
 在仓库根目录执行（需要联网），产物写入 `kline-structure-chart/artifacts/examples/`，再复制到本目录：
