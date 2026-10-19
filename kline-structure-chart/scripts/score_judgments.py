@@ -16,7 +16,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from base_rates import _get_or_build_causal_features, label_scenario_event
+from base_rates import SCENARIO_BARRIER_ATR, _get_or_build_causal_features, label_scenario_event
 from judgment import AUTO_INIT_GENERATOR
 
 MIN_MATURED_FOR_VERDICT = 30
@@ -41,18 +41,23 @@ def _determine_realized_outcomes(
     """在真实未来窗口 [cut_idx+1 .. cut_idx+horizon_bars] 上判定各情景是否触及目标及胜出主情景。"""
     feat = _get_or_build_causal_features(bars[: cut_idx + 1 + horizon_bars])
     event_hits: dict[str, int] = {}
+    outcomes: dict[str, str] = {}
     best_sid: str | None = None
-    best_bars_used = horizon_bars + 999
+    best_key: tuple[float, int] = (-1.0, -(horizon_bars + 999))
 
     for sc in scenarios:
         sid = str(sc["scenario_id"])
         direction = str(sc.get("direction") or "BULLISH")
         res = label_scenario_event(feat, cut_idx, sid, horizon_bars=horizon_bars, direction=direction)
+        outcomes[sid] = str(res["outcome"])
         hit = 1 if res["outcome"] == "HIT_TARGET" else 0
         event_hits[sid] = hit
-        if hit == 1 and int(res["bars_used"]) < best_bars_used:
-            best_bars_used = int(res["bars_used"])
-            best_sid = sid
+        if hit == 1:
+            tgt_mult = float(SCENARIO_BARRIER_ATR.get(sid, (1.35, 1.10))[0])
+            cand_key = (tgt_mult, -int(res["bars_used"]))
+            if cand_key > best_key:
+                best_key = cand_key
+                best_sid = sid
 
     if best_sid is None and scenarios:
         c0 = float(bars[cut_idx]["close"])
@@ -65,10 +70,14 @@ def _determine_realized_outcomes(
             target_dir = "BULLISH"
         else:
             target_dir = "BEARISH"
-        matched = [str(s["scenario_id"]) for s in scenarios if s.get("direction") == target_dir]
-        best_sid = matched[0] if matched else str(scenarios[0]["scenario_id"])
+        matched = [
+            str(s["scenario_id"])
+            for s in scenarios
+            if s.get("direction") == target_dir and outcomes.get(str(s["scenario_id"])) != "HIT_INVALIDATION"
+        ]
+        best_sid = matched[0] if matched else "NONE"
 
-    winner_id = best_sid or (str(scenarios[0]["scenario_id"]) if scenarios else "")
+    winner_id = best_sid or "NONE"
     return winner_id, event_hits
 
 
@@ -123,7 +132,7 @@ def score_judgment_entries(
             sid = str(sc["scenario_id"])
             p_llm = float(sc["subjective_probability_pct"]) / 100.0
             p_base = float(sc["baseline_probability_pct"]) / 100.0
-            y_win = 1 if sid == winner_id else 0
+            y_win = 1 if (sid == winner_id or event_hits.get(sid, 0) == 1) else 0
 
             sq_llm = (p_llm - y_win) ** 2
             sq_base = (p_base - y_win) ** 2
@@ -145,7 +154,10 @@ def score_judgment_entries(
                 "matured_on": str(bars[cut_idx + horizon]["day"]),
                 "primary_scenario_id": entry.get("primary_scenario_id"),
                 "realized_winner_scenario_id": winner_id,
-                "primary_hit": entry.get("primary_scenario_id") == winner_id,
+                "primary_hit": bool(
+                    entry.get("primary_scenario_id") == winner_id
+                    or event_hits.get(str(entry.get("primary_scenario_id") or ""), 0) == 1
+                ),
                 "event_hits": event_hits,
                 "llm_brier": round(entry_llm_brier / k_cnt, 6),
                 "baseline_brier": round(entry_base_brier / k_cnt, 6),

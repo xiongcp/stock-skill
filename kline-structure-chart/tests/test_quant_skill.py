@@ -1572,6 +1572,24 @@ def test_o3_30_to_o3_34_judgment_layer_and_scoring(replay_recorded, tmp_path: Pa
     assert score_res["llm_log_loss"] > 0.0
     assert len(score_res["reliability_buckets"]) == 5
 
+    # 验证未命中任何情景且实际方向相反时不会错误把 scenarios[0] 判为获胜 (winner_id == "NONE")
+    from score_judgments import _determine_realized_outcomes
+
+    bars_all = bundle_full["target"]["bars"]
+    bear_cut = next(
+        i
+        for i in range(200, len(bars_all) - 20)
+        if float(bars_all[i + 15]["close"]) < float(bars_all[i]["close"]) * 0.96
+    )
+    win_none, hits_none = _determine_realized_outcomes(
+        bars_all,
+        bear_cut,
+        15,
+        [{"scenario_id": "TREND_CONTINUATION", "direction": "BULLISH"}],
+    )
+    if hits_none.get("TREND_CONTINUATION", 0) == 0:
+        assert win_none == "NONE"
+
 
 def test_hk_etp_auto_detection_and_stamp_duty_exemption() -> None:
     from market_rules import get_market_microstructure_rules, is_hk_etp_code
