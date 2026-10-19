@@ -129,6 +129,14 @@ def test_point_in_time_adjustment_no_future_leakage() -> None:
     assert raw_bars[idx_pre]["close"] == 337.0
     assert raw_bars[idx_ex]["open"] == 112.01
 
+    # 截至除权日构建动作时，未来事件只能用于还原 Yahoo 已折算的历史股息，
+    # 不能作为未来 corporate action 输出或计入 events_used。
+    actions_as_of_ex = data_gateway.build_corporate_actions(
+        raw_bars[: idx_ex + 1], raw_events, include_splits=True
+    )
+    assert all(a["ex_date"] <= "2025-07-29" for a in actions_as_of_ex)
+    assert len(actions_as_of_ex) <= len(actions)
+
     # 截至 2025-07-28（除权日前一日），2025-07-29 的拆送股尚未发生，当日收盘必须保持原始 337.0
     before = apply_point_in_time_adjustment(raw_bars[: idx_pre + 1], actions, mode="split", as_of_day="2025-07-28")
     assert before[-1]["close"] == 337.0

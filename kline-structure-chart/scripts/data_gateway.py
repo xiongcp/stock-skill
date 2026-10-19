@@ -257,11 +257,15 @@ def build_corporate_actions(
     if not raw_bars:
         return []
     first_day = raw_bars[0]["day"]
+    last_day = raw_bars[-1]["day"]
     splits = [s for s in events if float(s.get("split_ratio") or 1.0) != 1.0]
     actions: list[dict[str, Any]] = []
     for ev in events:
         ex_date = ev["ex_date"]
-        if ex_date <= first_day:
+        # 只输出截至当前行情末日已生效的事件；未来事件即使来自同一 vendor 响应，
+        # 也不能进入 provenance.events_used 或下游动作列表。splits 仍保留完整事件表，
+        # 用于把 Yahoo 已按后续拆股折算过的历史股息还原成拆股前口径。
+        if ex_date <= first_day or ex_date > last_day:
             continue
         prev = [b for b in raw_bars if b["day"] < ex_date]
         if not prev:
