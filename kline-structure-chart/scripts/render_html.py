@@ -43,7 +43,18 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     validate_report(report)
     meta = report["meta"]
     title_str = html.escape(f"{meta['name']} ({meta['symbol']}) · K线数学结构与15日保形预测终端")
-    safe_json = _safe_json_for_script(report)
+    q_status = str((report.get("quality") or {}).get("status") or "OK")
+    if q_status == "UNAVAILABLE":
+        redacted_payload: dict[str, Any] = {
+            "meta": meta,
+            "quality": report.get("quality") or {},
+            "reproducibility": report.get("reproducibility") or {},
+            "series_export": {"bars": [], "pivots": []},
+            "replay_snapshots": [],
+        }
+        safe_json = _safe_json_for_script(redacted_payload)
+    else:
+        safe_json = _safe_json_for_script(report)
     quality_banner = _render_quality_banner(report.get("quality") or {})
 
     html_doc = f"""<!DOCTYPE html>
@@ -320,6 +331,27 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
 (function() {{
   const REPORT = JSON.parse(document.getElementById('report-data').textContent);
   const meta = REPORT.meta;
+  if ((REPORT.quality || {{}}).status === 'UNAVAILABLE') {{
+    document.getElementById('headerTitle').textContent =
+      meta.name + ' (' + meta.symbol + ') · 数据不可用 (UNAVAILABLE)';
+    document.getElementById('headerSub').textContent =
+      '数据源: ' + meta.data_source + ' | 依据数据真实性铁律，合成或不可用行情已屏蔽全部价格点位与交易计划';
+    document.getElementById('headerVerdict').textContent =
+      '【数据不可用】检测到合成数据或不可信来源，禁止输出任何价格点位、形态结论或交易计划。';
+    const c = document.getElementById('klineCanvas');
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#0b0f17';
+    cx.fillRect(0, 0, c.width, c.height);
+    cx.save();
+    cx.translate(c.width / 2, c.height / 2);
+    cx.rotate(-0.25);
+    cx.fillStyle = 'rgba(239, 68, 68, 0.35)';
+    cx.font = 'bold 52px sans-serif';
+    cx.textAlign = 'center';
+    cx.fillText('数据质量 UNAVAILABLE · 非真实行情禁止用于交易判断', 0, 0);
+    cx.restore();
+    return;
+  }}
   const bench = REPORT.market_benchmark;
   const ind = REPORT.mathematical_indicators;
   const tb = REPORT.triple_barrier_plan;
@@ -952,9 +984,12 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     ctx.translate(W / 2, H / 2);
     ctx.rotate(-0.25);
     ctx.fillStyle = 'rgba(239, 68, 68, 0.28)';
-    ctx.font = 'bold 56px sans-serif';
+    ctx.font = 'bold 48px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('数据质量 ' + q.status + ' · 非真实行情禁止用于交易判断', 0, 0);
+    const wmText = q.status === 'UNAVAILABLE'
+      ? '数据质量 UNAVAILABLE · 非真实行情禁止用于交易判断'
+      : ('数据质量 ' + q.status + ' · 缺少大盘基准或来源待核验');
+    ctx.fillText(wmText, 0, 0);
     ctx.restore();
   }}
 

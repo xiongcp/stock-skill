@@ -158,7 +158,9 @@ def test_report_md_puts_veto_before_conclusions(cn_pipeline) -> None:
         assert "**风控否决**" not in md
 
 
-def test_report_md_hides_all_prices_when_data_unavailable(cn_pipeline) -> None:
+def test_report_md_hides_all_prices_when_data_unavailable(cn_pipeline, tmp_path: Path) -> None:
+    from render_html import render_html
+
     report, _, _ = cn_pipeline
     broken = copy.deepcopy(report)
     broken["quality"]["status"] = "UNAVAILABLE"
@@ -168,6 +170,10 @@ def test_report_md_hides_all_prices_when_data_unavailable(cn_pipeline) -> None:
     for section in ("## 1.", "## 3.", "## 4.", "## 6."):
         assert section not in md
     assert f"{report['triple_barrier_plan']['stop_loss_barrier']:.2f}" not in md
+    html_out = render_html(broken, tmp_path / "unavailable.html")
+    html_text = html_out.read_text(encoding="utf-8")
+    assert f"{report['triple_barrier_plan']['stop_loss_barrier']:.2f}" not in html_text
+    assert 'data-quality-status="UNAVAILABLE"' in html_text
 
 
 def test_report_md_zero_trade_rows_show_dash(cn_pipeline) -> None:

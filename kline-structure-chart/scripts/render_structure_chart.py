@@ -1194,12 +1194,19 @@ def render(
     draw.text((left, 1118), footer, font=f_tiny, fill=MUTED)
 
     # 数据不可信（合成/来源未知/缺基准）时：主图顶部红色横幅 + 主图区半透明大字水印，导出后无法被忽略
-    if data_warning:
-        banner_text = f"【数据质量警告】{data_warning}"
+    if data_warning or quality_status != "OK":
+        warn_msg = data_warning or f"数据质量状态：{quality_status}"
+        banner_text = f"【数据质量警告】{warn_msg}"
+        if quality_status == "UNAVAILABLE":
+            draw.rectangle((0, 68, width, height), fill=BG)
         draw.rectangle((left, top, width - right, top + 40), fill=(185, 28, 28, 235))
         draw.text((left + 14, top + 10), banner_text[:110], font=f_card_val_sm, fill=(255, 255, 255))
-        f_mark = font(72, bold=True, scale=scale)
-        mark_text = "非真实行情 · 禁止用于交易判断"
+        f_mark = font(56 if quality_status == "PARTIAL" else 72, bold=True, scale=scale)
+        mark_text = (
+            "非真实行情 · 禁止用于交易判断"
+            if quality_status == "UNAVAILABLE"
+            else "数据质量 PARTIAL · 缺少大盘基准或来源待核验"
+        )
         mw, mh = text_size(draw, mark_text, f_mark)
         cx = (left + width - right) / 2
         cy = (top + main_bottom) / 2
@@ -1413,14 +1420,28 @@ def render(
             "last": float(money(active_intra["close"])),
             "prev": float(money(active_intra["prev"])),
         },
-        "small_model_copy_blocks": {
-            "0_long_cycle_context": background_str,
-            "1_completed_summary": completed_str,
-            "2_intraday_summary": intra_str,
-            "3_wedge_and_levels": wedge_and_levels_str,
-            "4_three_projections": proj_str,
-            "5_structure_verdict": verdict_str,
-        },
+        "small_model_copy_blocks": (
+            {
+                k: f"【数据不可用】{data_warning or '检测到合成数据或不可信来源，已屏蔽全部价格点位与推演结论。'}"
+                for k in (
+                    "0_long_cycle_context",
+                    "1_completed_summary",
+                    "2_intraday_summary",
+                    "3_wedge_and_levels",
+                    "4_three_projections",
+                    "5_structure_verdict",
+                )
+            }
+            if quality_status == "UNAVAILABLE"
+            else {
+                "0_long_cycle_context": background_str,
+                "1_completed_summary": completed_str,
+                "2_intraday_summary": intra_str,
+                "3_wedge_and_levels": wedge_and_levels_str,
+                "4_three_projections": proj_str,
+                "5_structure_verdict": verdict_str,
+            }
+        ),
     }
 
 
