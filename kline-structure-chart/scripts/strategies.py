@@ -419,7 +419,12 @@ def compute_multi_timeframe_score(
     w_pos = (last_c - w_lo) / max(1e-6, w_hi - w_lo)
 
     macro_weak = (ema60 < ema200_val) or (ema60 < sma250_val) or (ema200_val < sma250_val)
-    is_mr_regime = mom_ic <= -0.10 and macro_weak
+    is_mr_regime = (
+        mom_ic <= -0.10
+        and macro_weak
+        and wedge.get("status") != "below"
+        and (last_c / max(1e-6, ema200_val)) >= 0.905
+    )
     if is_mr_regime:
         rev_adj = max(-14.0, min(14.0, -ext_atr * 6.0 + (50.0 - rsi14) * 0.25))
         blend = min(0.85, max(0.45, abs(mom_ic) * 2.2))

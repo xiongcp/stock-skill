@@ -501,6 +501,15 @@ def compute_scenario_frequency(
     k_inv = sum(1 for e in events if e["outcome"] == "HIT_INVALIDATION")
     k_exp = n - k_tgt - k_inv
 
+    n_bars = len(target_feat["closes"])
+    cur_idx = (n_bars - 1) if max_cutoff_idx is None else min(n_bars - 1, max_cutoff_idx)
+    c_now = target_feat["closes"][cur_idx] if n_bars else 0.0
+    ma20_now = target_feat["ma20"][cur_idx] if n_bars else c_now
+    ma60_now = target_feat["ma60"][cur_idx] if n_bars else c_now
+    atr_now = target_feat["atr_pct"][cur_idx] if n_bars else 0.018
+    is_bear_regime = (c_now < ma60_now and ma20_now <= ma60_now) or (c_now < ma20_now * (1.0 - 1.2 * atr_now))
+    is_bull_regime = c_now >= ma60_now and ma20_now >= ma60_now and c_now >= ma20_now
+
     # 市场基准同情景频率（用于 n < 30 时 Beta-Binomial 收缩先验）
     default_p = DEFAULT_PRIOR_FREQS.get(scenario_id, (0.45, 0.39, 0.16))
     prior_source = "UNIFORM_PRIOR"
@@ -521,6 +530,29 @@ def compute_scenario_frequency(
             prior_inv = (bi + 1.0) / (prior_n + 3.0)
             prior_exp = (be + 1.0) / (prior_n + 3.0)
 
+    # 结合当前截面趋势状态调整先验（消除牛市超跌反弹先验在弱市/破位期的高估偏差）
+    if is_bear_regime:
+        if scenario_id == "OVERSOLD_BOUNCE":
+            prior_tgt *= 0.42
+            prior_inv *= 1.48
+        elif scenario_id in ("BREAKOUT_RETEST", "C_WAVE_REVERSAL") and direction == "BULLISH":
+            prior_tgt *= 0.72
+            prior_inv *= 1.24
+        elif scenario_id in ("BREAKDOWN_DECLINE", "FALSE_BREAKOUT_REVERSAL"):
+            prior_tgt *= 1.38
+            prior_inv *= 0.74
+    elif is_bull_regime:
+        if scenario_id == "BREAKDOWN_DECLINE":
+            prior_tgt *= 0.85
+            prior_inv *= 1.12
+    if scenario_id in ("RANGE_OSCILLATION", "neutral") and atr_now >= 0.018:
+        prior_tgt *= 0.65
+        prior_inv *= 1.18
+    p_sum = max(1e-9, prior_tgt + prior_inv + prior_exp)
+    prior_tgt /= p_sum
+    prior_inv /= p_sum
+    prior_exp /= p_sum
+
     if n > 0:
         raw_tgt = k_tgt / n
         raw_inv = k_inv / n
@@ -539,8 +571,41 @@ def compute_scenario_frequency(
         shrunk_inv = round(post_inv, 4)
         shrunk_exp = round(max(0.0, 1.0 - shrunk_tgt - shrunk_inv), 4)
     else:
-        shrunk_tgt = round(raw_tgt, 4)
-        shrunk_inv = round(raw_inv, 4)
+        # 样本充足时融合同趋势体制与近期成熟样本权重，降低跨牛熊周期的先验滞后
+        last_mature_t = cur_idx - max(1, horizon_bars)
+        w_sum = 0.0
+        w_tgt = 0.0
+        w_inv = 0.0
+        for e in events:
+            t_ev = int(e["trigger_idx"])
+            age = max(0, last_mature_t - t_ev)
+            w = math.exp(-age / 140.0)
+            t_bear = target_feat["closes"][t_ev] < target_feat["ma60"][t_ev]
+            if t_bear == is_bear_regime:
+                w *= 1.65
+            else:
+                w *= 0.65
+            w_sum += w
+            if e["outcome"] == "HIT_TARGET":
+                w_tgt += w
+            elif e["outcome"] == "HIT_INVALIDATION":
+                w_inv += w
+        reg_tgt = (w_tgt / w_sum) if w_sum > 0 else raw_tgt
+        reg_inv = (w_inv / w_sum) if w_sum > 0 else raw_inv
+        blend_tgt = 0.35 * raw_tgt + 0.40 * reg_tgt + 0.25 * post_tgt
+        blend_inv = 0.35 * raw_inv + 0.40 * reg_inv + 0.25 * post_inv
+        if is_bear_regime:
+            if scenario_id == "OVERSOLD_BOUNCE":
+                blend_tgt *= 0.68
+                blend_inv = min(0.94, blend_inv * 1.22)
+            elif scenario_id in ("BREAKDOWN_DECLINE", "FALSE_BREAKOUT_REVERSAL"):
+                blend_tgt = min(0.88, blend_tgt * 1.15)
+                blend_inv *= 0.85
+        if scenario_id in ("RANGE_OSCILLATION", "neutral") and atr_now >= 0.018:
+            blend_tgt *= 0.72
+            blend_inv = min(0.94, blend_inv * 1.12)
+        shrunk_tgt = round(max(0.02, min(0.96, blend_tgt)), 4)
+        shrunk_inv = round(max(0.02, min(0.98 - shrunk_tgt, blend_inv)), 4)
         shrunk_exp = round(max(0.0, 1.0 - shrunk_tgt - shrunk_inv), 4)
 
     ci_tgt = wilson_ci_95(k_tgt, n)

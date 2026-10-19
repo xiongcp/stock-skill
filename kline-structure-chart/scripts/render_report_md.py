@@ -88,9 +88,27 @@ def render_report_markdown(
         lines += [""]
 
     # 1. 结论速览
+    bench = report["market_benchmark"]
+    plan = report["triple_barrier_plan"]
+    fp = report["future_projection_15d"]
+    veto_prefix = (
+        f"【风控否决：{'；'.join(debate.get('veto_reasons') or [])}，以下点位仅用于观察，不构成做多建议】"
+        if debate.get("risk_officer_veto")
+        else ""
+    )
+    flash_digest = (
+        f"{veto_prefix}数据截至 {meta['as_of']}（数据源 {meta['data_source']}，{ADJUSTMENT_CN.get(meta.get('adjustment'), meta.get('adjustment'))}，质量 {quality['status']}）。"
+        f"基准 {bench['index_name']}（{bench['index_symbol']}）处于{bench['regime_label_cn']}（状态分 {bench['regime_score']:.1f}/100）。"
+        f"本标的规则分 {mtf['rule_score']:.1f}/100（{mtf['rating_cn']}，确定性规则加权分，不是胜率或上涨概率），"
+        f"当前评级为「{decision['action_cn']}」（{decision['setup_label_cn']}），最新收盘 {price(last_close)}，"
+        f"三重屏障计划入场区 {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])}、止损 {price(plan['stop_loss_barrier'])}、"
+        f"TP1 {price(plan['take_profit_1'])}（扣费后净盈亏比 {plan['risk_reward_ratio']:.2f}）；"
+        f"未来 {fp['horizon_bars']} 日 80% 保形区间为 {price(fp['q10'][-1])} ~ {price(fp['q90'][-1])}（中枢 q50 = {price(fp['base_median_q50'][-1])}，只描述波动幅度，不含方向预测）。"
+    )
     lines += [
         "## 1. 结论速览",
         "",
+        f"- 直出摘要（供 Agent / Flash 模型首段原样引用）：{flash_digest}",
         f"- 结论：{debate['final_verdict_cn']}",
         f"- 规则分：**{mtf['rule_score']:.1f} / 100**（{mtf['rating_cn']}）。这是确定性规则加权分，不是胜率，也不是上涨概率。",
         f"- 最新收盘：{price(last_close)}；计划类型：{decision['setup_label_cn']}。",
@@ -98,7 +116,6 @@ def render_report_markdown(
     ]
 
     # 2. 大盘环境
-    bench = report["market_benchmark"]
     lines += ["## 2. 大盘环境（先大盘、后个股）", ""]
     if bench.get("benchmark_missing"):
         lines += [

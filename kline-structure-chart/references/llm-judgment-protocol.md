@@ -27,12 +27,13 @@
    - 指定 `primary_scenario_id`（主观研判概率最高的主情景）与 `alternate_scenario_id`（次高备选情景）；
    - 在 `key_levels_to_watch` 中列出需要观察的关键价位（只能从 `price_whitelist` 中选取）；
    - 在 `falsification_condition` 中明确写出「什么价格或收盘条件发生时说明主情景判断错了」。
-6. **写入并运行校验脚本**：将结果保存为 `<代码>_judgment.json`，执行 `scripts/validate_judgment.py` 校验、记入 `judgment_log.jsonl` 并自动更新 `<代码>_report.md` 的第 8 节：
+6. **写入并运行校验脚本（推荐 Flash 模型加 `--auto-init` 一键预填）**：将结果保存为 `<代码>_judgment.json`（若使用 Flash 模型，可直接传入 `--auto-init` 自动生成满足全部硬约束的预填 JSON，再按需微调），执行 `scripts/validate_judgment.py` 校验、记入 `judgment_log.jsonl` 并自动更新 `<代码>_report.md` 的第 8 节：
 
 ```bash
 uv run --directory kline-structure-chart python scripts/validate_judgment.py \
   --result kline-structure-chart/artifacts/<目录>/<代码>_result.json \
-  --judgment kline-structure-chart/artifacts/<目录>/<代码>_judgment.json
+  --judgment kline-structure-chart/artifacts/<目录>/<代码>_judgment.json \
+  --auto-init
 ```
 
 ---

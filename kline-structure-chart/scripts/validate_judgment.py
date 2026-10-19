@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from contracts import compute_canonical_hash
-from judgment import build_judgment_pack
+from judgment import build_judgment_pack, generate_constrained_judgment
 
 _EVIDENCE_ID_RE = re.compile(r"\bE\d+\b")
 _CONFLICT_ID_RE = re.compile(r"\bC\d+\b")
@@ -324,12 +324,22 @@ def main() -> None:
     parser.add_argument("--pack", default=None, help="Optional path to *_judgment_pack.json")
     parser.add_argument("--log", default=None, help="Optional path to judgment_log.jsonl to append validated entry")
     parser.add_argument("--report-md", default=None, help="Optional path to *_report.md to re-render with judgment section")
+    parser.add_argument(
+        "--auto-init",
+        action="store_true",
+        help="If *_judgment.json does not exist yet, initialize it with a compliant evidence-anchored template before validating",
+    )
     args = parser.parse_args()
 
     res_path = Path(args.result)
     jud_path = Path(args.judgment)
     if not res_path.exists():
         raise SystemExit(f"[INVALID_ARGUMENT] result file not found: {res_path}")
+    if args.auto_init and not jud_path.exists():
+        rep_tmp = json.loads(res_path.read_text(encoding="utf-8"))
+        jud_init = generate_constrained_judgment(rep_tmp)
+        jud_path.parent.mkdir(parents=True, exist_ok=True)
+        jud_path.write_text(json.dumps(jud_init, ensure_ascii=False, indent=2), encoding="utf-8")
     if not jud_path.exists():
         raise SystemExit(f"[INVALID_ARGUMENT] judgment file not found: {jud_path}")
 

@@ -1559,3 +1559,45 @@ def test_regime_adaptive_scoring_and_breakeven_ratchet_boost_moutai_ic_and_winra
     assert bt["all_long_signals"]["cumulative_return_pct"] > 0.0
     assert bt["long_confirmed"]["win_rate_pct"] >= 60.0
     assert bt["long_confirmed"]["cumulative_return_pct"] > 0.0
+
+
+def test_flash_model_digest_and_validate_judgment_auto_init_cli(replay_recorded, tmp_path: Path) -> None:
+    from lint_response import lint_agent_response
+
+    rep = run_pipeline(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        output_dir=tmp_path,
+        run_backtest=False,
+    )
+    md_path = Path(rep["rendered_paths"]["report_md"])
+    md_text = md_path.read_text(encoding="utf-8")
+    assert "直出摘要（供 Agent / Flash 模型首段原样引用）" in md_text
+
+    # 即使 Flash 模型仅复制首段「直出摘要」+ 免责声明作为简短回复，也完全符合 lint_response 契约
+    digest_line = next(line for line in md_text.splitlines() if "直出摘要（供 Agent / Flash 模型首段原样引用）" in line)
+    short_reply = f"{digest_line}\n\n*以上为规则化技术分析，仅供研究参考，不构成投资建议。*"
+    assert lint_agent_response(short_reply, rep) == []
+
+    # 验证 validate_judgment.py --auto-init 在目标 *_judgment.json 不存在时一键生成合规研判并更新报告
+    jud_path = tmp_path / "600519_SH_judgment.json"
+    assert not jud_path.exists()
+    cli = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS_DIR / "validate_judgment.py"),
+            "--result",
+            rep["rendered_paths"]["result_json"],
+            "--judgment",
+            str(jud_path),
+            "--auto-init",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert cli.returncode == 0, cli.stderr
+    out = json.loads(cli.stdout)
+    assert out["status"] == "VALID"
+    assert jud_path.exists()
+    updated_md = md_path.read_text(encoding="utf-8")
+    assert "LLM 情景研判（主观判断，已记录待检验）" in updated_md

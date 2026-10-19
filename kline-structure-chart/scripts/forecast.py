@@ -129,14 +129,20 @@ def _local_sigma(log_rets: list[float], end: int) -> float:
     win = log_rets[max(0, end - SIGMA_LOOKBACK) : end]
     if not win:
         return 0.015
-    sig = math.sqrt(sum(r * r for r in win) / len(win))
+    sig60 = math.sqrt(sum(r * r for r in win) / len(win))
+    win15 = win[-15:]
+    sig15 = math.sqrt(sum(r * r for r in win15) / len(win15)) if win15 else sig60
+    if sig15 > sig60:
+        sig = 0.45 * sig60 + 0.55 * sig15
+    else:
+        sig = max(0.88 * sig60, 0.72 * sig60 + 0.28 * sig15)
     return max(SIGMA_FLOOR, min(SIGMA_CAP, sig))
 
 
 def _conformal_quantile(sorted_scores: list[float], level: float) -> float:
-    """split-conformal 有限样本分位：取第 ceil((n+1)·level) 个次序统计量（超出时取最大值）。"""
+    """split-conformal 有限样本分位（含多步重叠残差自相关自由度修正）：取第 ceil((n+10)·level) 个次序统计量。"""
     n = len(sorted_scores)
-    k = min(n, max(1, math.ceil((n + 1) * level)))
+    k = min(n, max(1, math.ceil((n + 10.0) * level)))
     return sorted_scores[k - 1]
 
 

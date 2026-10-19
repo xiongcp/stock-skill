@@ -62,6 +62,19 @@ def compute_triple_barrier_plan(
     # Determine setup type: RIGHT_SIDE_BREAKOUT vs LEFT_SIDE_SUPPORT_RETEST vs ABSTAIN_WAIT
     has_bull_div = any(p["pattern"] == "RSI_BULLISH_DIVERGENCE" for p in algebraic_patterns)
     has_bull_candle = any(p["category"] == "candlestick" and p["direction"] == "BULLISH" for p in algebraic_patterns)
+    last_o = float(last_bar["open"])
+    last_h = float(last_bar["high"])
+    last_l = float(last_bar["low"])
+    lower_wick_ratio = (min(last_c, last_o) - last_l) / max(1e-6, last_h - last_l)
+    is_stabilizing_bar = (last_c >= last_o) or (lower_wick_ratio >= 0.35) or has_bull_div or has_bull_candle
+
+    win60 = bars[-min(60, len(bars)) :]
+    hi60 = max(float(b["high"]) for b in win60) if win60 else last_c
+    lo60 = min(float(b["low"]) for b in win60) if win60 else last_c
+    win20 = bars[-min(20, len(bars)) :]
+    hi20 = max(float(b["high"]) for b in win20) if win20 else last_c
+    ema20 = float(ind_snapshot["trend"].get("ema20") or last_c)
+    climax_distribution = (hi60 / max(1e-6, lo60) >= 1.60) and (last_c <= hi20 - 2.0 * atr14) and (last_c < ema20)
 
     if wedge.get("status") == "above" or (last_c >= r1 and rv >= 1.35):
         setup_type = "RIGHT_SIDE_BREAKOUT"
@@ -73,7 +86,12 @@ def compute_triple_barrier_plan(
             entry_low = round_to_tick(max(s1, last_c - 0.35 * atr14), market, asset_type, as_of_day)
             entry_high = round_to_tick(min(r1, last_c + 0.30 * atr14), market, asset_type, as_of_day)
         stop_loss = round_to_tick(min(s1, max(s1 - 0.25 * atr14, last_c - 1.35 * atr14)), market, asset_type, as_of_day)
-    elif rule_score >= 52.0 and (has_bull_div or has_bull_candle or abs(last_c - s1) <= 0.8 * atr14):
+    elif (
+        rule_score >= 65.0
+        and not climax_distribution
+        and is_stabilizing_bar
+        and (has_bull_div or has_bull_candle or abs(last_c - s1) <= 0.8 * atr14)
+    ):
         setup_type = "LEFT_SIDE_PULLBACK"
         setup_label_cn = "左侧支撑回踩观察"
         entry_low = round_to_tick(max(s1 * 0.995, last_c - 0.45 * atr14), market, asset_type, as_of_day)
@@ -82,8 +100,12 @@ def compute_triple_barrier_plan(
     else:
         setup_type = "WAIT_CONFIRMATION"
         setup_label_cn = "区间观察/等待右侧收盘突破"
-        entry_low = round_to_tick(max(s1, last_c - 0.40 * atr14), market, asset_type, as_of_day)
-        entry_high = round_to_tick(min(r1, last_c + 0.35 * atr14), market, asset_type, as_of_day)
+        if last_c < last_o:
+            entry_low = round_to_tick(max(s1, min(r1, last_c + 0.08 * atr14)), market, asset_type, as_of_day)
+            entry_high = round_to_tick(max(entry_low, min(r1 * 1.003, last_c + 0.45 * atr14)), market, asset_type, as_of_day)
+        else:
+            entry_low = round_to_tick(max(s1, last_c - 0.20 * atr14), market, asset_type, as_of_day)
+            entry_high = round_to_tick(min(r1, last_c + 0.35 * atr14), market, asset_type, as_of_day)
         stop_loss = round_to_tick(min(s1 - 0.15 * atr14, max(s1 - 0.50 * atr14, last_c - 1.40 * atr14)), market, asset_type, as_of_day)
     if entry_low > entry_high:
         entry_low = round_to_tick(last_c * 0.995, market, asset_type, as_of_day)
@@ -128,10 +150,9 @@ def compute_triple_barrier_plan(
         veto_reasons.append(f"上攻突破缺乏成交量配合 (RVOL={rv:.2f} < 1.15)，警惕假突破")
 
     vetoed = len(veto_reasons) > 0
-    ema20 = float(ind_snapshot["trend"].get("ema20") or last_c)
     rsi14 = float(ind_snapshot["momentum"].get("rsi14") or 50.0)
     ext_atr = (last_c - ema20) / atr14
-    overextended = (ext_atr > 2.0) or (rsi14 >= 70.0)
+    overextended = (ext_atr > 2.0) or (rsi14 >= 70.0) or climax_distribution
     tf_aligned = mtf_score.get("timeframes_aligned") or {}
     scoring_regime = tf_aligned.get("scoring_regime", "MOMENTUM_TREND")
     w_pos = float(tf_aligned.get("weekly_60w_position_pct") or 50.0)
@@ -159,9 +180,9 @@ def compute_triple_barrier_plan(
     # L2 历史条件频率守门（经验 Meta-Labeling）：若该标的自身历史上攻先到目标频率 < 30% 且显著低于失效或下探频率，将确认做多降级为观察
     bull_hf = (projections.get("bull") or {}).get("historical_frequency") or {}
     bear_hf = (projections.get("bear") or {}).get("historical_frequency") or {}
-    b_tgt = float(bull_hf.get("target_freq") or 0.45)
-    b_inv = float(bull_hf.get("invalidation_freq") or 0.40)
-    dn_tgt = float(bear_hf.get("target_freq") or 0.40)
+    b_tgt = min(float(bull_hf.get("target_freq") or 0.45), float(bull_hf.get("raw_target_freq") or 0.45))
+    b_inv = max(float(bull_hf.get("invalidation_freq") or 0.40), float(bull_hf.get("raw_invalidation_freq") or 0.40))
+    dn_tgt = max(float(bear_hf.get("target_freq") or 0.40), float(bear_hf.get("raw_target_freq") or 0.40))
     if action == "LONG_CONFIRMED" and b_tgt < 0.30 and (b_inv > b_tgt + 0.12 or dn_tgt > b_tgt + 0.12):
         action = "WATCH_LONG_SETUP"
         action_cn = "条件观察（待放量/收盘确认）"
