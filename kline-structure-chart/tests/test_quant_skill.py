@@ -2429,6 +2429,7 @@ def test_high_conviction_rebound_and_decision_probability_contract(replay_record
     assert "BENCHMARK_WEAK" in dec_w["veto_codes"]
     assert dec_w["high_conviction_rebound"] is False
     assert dec_w["high_conviction_suppressed_by_veto"] is True
+    assert dec_w["high_conviction_suppressed_subtype"] == "BENCH_SYNC_REBOUND"
     assert dec_w["decision_probability"]["available"] is False
     assert dec_w["decision_probability"]["p_net_positive"] is None
     assert dec_w["decision_probability"]["method"] == "SUPPRESSED_BY_BENCHMARK_VETO"
@@ -2480,6 +2481,59 @@ def test_round_number_stop_avoidance_only_on_fine_tick_grids() -> None:
     # 港股 200~500 档 tick 0.2：每个价位都离 0.5 关口不超过 1 tick，不能一律下移
     for px in (400.0, 400.2, 400.4, 400.6, 400.8):
         assert _avoid_round_number_stop(px, 450.0, "HK", "equity", "2026-10-16") == pytest.approx(px)
+
+
+
+def _recorded_rebound_inputs() -> dict:
+    """以录制的 600519 真实最后一根K线为底，只改被测条件，构造反转触发器的入参。"""
+    bars = load_recorded("sina_daily/sh600519.json")
+    b = bars[-1]
+    o = float(b["open"])
+    h = float(b["high"])
+    lo = float(b["low"])
+    rng = max(h - lo, o * 0.02)
+    c = o + 0.6 * rng  # 阳线；区间 [o-0.1rng, o+0.9rng]，实体占比 0.6
+    atr = c * 0.02
+    return {
+        "close": c,
+        "open_": o,
+        "high": o + 0.9 * rng,
+        "low": o - 0.1 * rng,
+        "raw_close": c,
+        "atr14": atr,
+        "ema20": c + 1.2 * atr,  # ext_atr = -1.2
+        "rsi14": 25.0,
+        "rsi14_prev": 24.0,
+        "bench_ret1": 0.0,
+        "bench_ret5": 0.0,
+        "bench_bull_bar": True,
+    }
+
+
+def test_high_conviction_trigger_uses_calibrated_rsi_turn_and_bench_ret1() -> None:
+    """线上与研究共用的触发器：RSI 拐头看 RSI 本身；CN/US 共振反弹看大盘当日涨幅 >= 0.3%，不看大盘是否收阳。"""
+    from risk import detect_high_conviction_rebound
+
+    base = _recorded_rebound_inputs()
+    assert detect_high_conviction_rebound("CN", **base) == "DEEP_OVERSOLD_TURN"
+    # 收盘价上涨但 RSI 未拐头：旧线上口径（收盘价比较）会触发，校准口径不触发
+    assert detect_high_conviction_rebound("CN", **{**base, "rsi14_prev": 26.0}) is None
+    assert detect_high_conviction_rebound("CN", **{**base, "rsi14_prev": None}) is None
+
+    sync = {**base, "rsi14": 40.0, "bench_ret5": -0.03}
+    # 大盘收阳但当日涨幅只有 0.1%：不构成共振反弹
+    assert detect_high_conviction_rebound("CN", **{**sync, "bench_ret1": 0.001, "bench_bull_bar": True}) is None
+    # 大盘涨 0.4% 即使收阴（高开低走）也算共振
+    assert detect_high_conviction_rebound("US", **{**sync, "bench_ret1": 0.004, "bench_bull_bar": False}) == "BENCH_SYNC_REBOUND"
+    # 港股门槛 0.5%
+    assert detect_high_conviction_rebound("HK", **{**sync, "atr14": base["close"] * 0.025, "ema20": base["close"] + 1.2 * base["close"] * 0.025, "bench_ret1": 0.004}) is None
+
+
+def test_snapshot_exposes_previous_rsi(replay_recorded) -> None:
+    bars = load_recorded("sina_daily/sh600519.json")
+    ind = compute_all_indicators(bars)
+    series = ind["series"]["rsi14"]
+    assert ind["snapshot"]["momentum"]["rsi14_prev"] == pytest.approx(round(float(series[-2]), 2))
 
 
 # ---------------------------------------------------------------------------

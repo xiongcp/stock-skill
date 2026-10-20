@@ -82,6 +82,74 @@ _ANTI_QUANT_GATES: dict[str, frozenset[str]] = {
 }
 
 
+# 高置信反转计划的几何（预注册冻结项）：入场区 [-0.50, +0.25] ATR，TP1 +0.85 ATR、SL -2.20 ATR，均以入场区中点为锚
+HC_ENTRY_ZONE_ATR = (-0.50, 0.25)
+HC_TP1_ATR = 0.85
+HC_SL_ATR = 2.20
+
+
+def detect_high_conviction_rebound(
+    market: str,
+    *,
+    close: float,
+    open_: float,
+    high: float,
+    low: float,
+    raw_close: float,
+    atr14: float,
+    ema20: float,
+    rsi14: float,
+    rsi14_prev: float | None,
+    bench_ret1: float,
+    bench_ret5: float,
+    bench_bull_bar: bool,
+) -> str | None:
+    """高置信超跌/大盘共振反转触发器（纯函数）。线上 compute_triple_barrier_plan 与 research 回测共用这一实现。
+
+    口径与开发集校准时一致：DEEP_OVERSOLD_TURN 的"拐头"指 RSI14 高于前一根；
+    CN/US 的 BENCH_SYNC_REBOUND 要求大盘当日涨幅 >= 0.3%（港股 >= 0.5%）。返回子类型，未触发返回 None。
+    """
+    if atr14 <= 0 or close <= 0 or raw_close < 2.0:
+        return None
+    min_atr_pct = 0.020 if market == "HK" else 0.012
+    if atr14 / close < min_atr_pct:
+        return None
+    rng = high - low
+    if rng <= 0 or close <= open_:
+        return None
+    body_ratio = (close - open_) / rng
+    ext_atr = (close - ema20) / atr14
+    rsi_turned_up = rsi14_prev is not None and rsi14 > rsi14_prev
+
+    if market == "HK":
+        if bench_ret5 <= -0.025 and bench_ret1 >= 0.005 and ext_atr <= -1.0 and body_ratio >= 0.32:
+            return "BENCH_SYNC_REBOUND"
+        if rsi14 <= 26.0 and rsi_turned_up and body_ratio >= 0.35 and bench_ret1 >= 0.0:
+            return "DEEP_OVERSOLD_TURN"
+        return None
+    if bench_ret5 <= -0.025 and bench_ret1 >= 0.003 and ext_atr <= -1.0 and body_ratio >= 0.32:
+        return "BENCH_SYNC_REBOUND"
+    if ((rsi14 <= 28.0 and rsi_turned_up) or ext_atr <= -1.85) and body_ratio >= 0.35 and (bench_bull_bar or bench_ret1 >= 0.0):
+        return "DEEP_OVERSOLD_TURN"
+    return None
+
+
+def high_conviction_plan_levels(
+    close: float,
+    atr14: float,
+    market: str,
+    asset_type: str,
+    as_of_day: str | None,
+) -> tuple[float, float, float, float]:
+    """高置信反转计划的固定价位 (entry_low, entry_high, take_profit_1, stop_loss)，信号日确定后不随成交价移动。"""
+    entry_low = round_to_tick(max(0.01, close + HC_ENTRY_ZONE_ATR[0] * atr14), market, asset_type, as_of_day)
+    entry_high = round_to_tick(close + HC_ENTRY_ZONE_ATR[1] * atr14, market, asset_type, as_of_day)
+    entry_mid = 0.5 * (entry_low + entry_high)
+    tp1 = round_to_tick(entry_mid + HC_TP1_ATR * atr14, market, asset_type, as_of_day)
+    sl = round_to_tick(max(0.01, entry_mid - HC_SL_ATR * atr14), market, asset_type, as_of_day)
+    return entry_low, entry_high, tp1, sl
+
+
 def compute_triple_barrier_plan(
     bars: list[dict[str, Any]],
     meta: dict[str, Any],
@@ -497,45 +565,37 @@ def compute_triple_barrier_plan(
         },
     }
 
-    # 高置信超跌/大盘共振反转层（2021-2024 开发集校准，用于识别日线级别具有 >=70% 扣费后正收益命中率与正期望收益的反转截面）
-    raw_c = float(last_bar.get("raw_close", last_c))
-    atr_pct_val = atr14 / max(1e-6, last_c)
-    min_atr_pct = 0.020 if market == "HK" else 0.012
-    bar_rng = last_h - last_l
-    body_ratio = (last_c - last_o) / max(1e-6, bar_rng) if bar_rng > 0 else 0.0
-    prev_c = float(bars[-2]["close"]) if len(bars) >= 2 else last_c
-    rsi_turned_up = last_c > prev_c
-    bf_ret1 = _num_or(benchmark_info, "bench_ret1", 0.0)
-    bf_ret5 = _num_or(benchmark_info, "bench_ret5", 0.0)
-    bf_bull = bool(benchmark_info.get("bench_bull_bar", False))
-
+    # 高置信超跌/大盘共振反转层（2021-2024 开发集校准）。触发条件与计划价位由共享纯函数给出，研究回测调用同一实现
     hc_subtype: str | None = None
-    if not benchmark_info.get("benchmark_missing") and raw_c >= 2.0 and atr_pct_val >= min_atr_pct and last_c > last_o:
-        if market == "HK":
-            if bf_ret5 <= -0.025 and bf_ret1 >= 0.005 and ext_atr <= -1.0 and body_ratio >= 0.32:
-                hc_subtype = "BENCH_SYNC_REBOUND"
-            elif rsi14 <= 26.0 and rsi_turned_up and body_ratio >= 0.35 and bf_ret1 >= 0.0:
-                hc_subtype = "DEEP_OVERSOLD_TURN"
-        else:
-            if bf_ret5 <= -0.025 and bf_bull and ext_atr <= -1.0 and body_ratio >= 0.32:
-                hc_subtype = "BENCH_SYNC_REBOUND"
-            elif ((rsi14 <= 28.0 and rsi_turned_up) or ext_atr <= -1.85) and body_ratio >= 0.35 and (bf_bull or bf_ret1 >= 0.0):
-                hc_subtype = "DEEP_OVERSOLD_TURN"
+    if not benchmark_info.get("benchmark_missing"):
+        hc_subtype = detect_high_conviction_rebound(
+            market,
+            close=last_c,
+            open_=last_o,
+            high=last_h,
+            low=last_l,
+            raw_close=float(last_bar.get("raw_close", last_c)),
+            atr14=atr14,
+            ema20=_num_or(ind_snapshot["trend"], "ema20", last_c),
+            rsi14=rsi14,
+            rsi14_prev=ind_snapshot["momentum"].get("rsi14_prev"),
+            bench_ret1=_num_or(benchmark_info, "bench_ret1", 0.0),
+            bench_ret5=_num_or(benchmark_info, "bench_ret5", 0.0),
+            bench_bull_bar=bool(benchmark_info.get("bench_bull_bar", False)),
+        )
 
     # 先大盘、后个股：大盘极弱（BENCHMARK_WEAK）已触发风控否决时，不得再给出反转入场计划与校准概率
     hc_suppressed_by_veto = hc_subtype is not None and "BENCHMARK_WEAK" in veto_codes
+    hc_suppressed_subtype = hc_subtype if hc_suppressed_by_veto else None
     if hc_suppressed_by_veto:
         hc_subtype = None
 
     prior = _DEV_CALIBRATED_REBOUND_PRIORS.get(market, _DEV_CALIBRATED_REBOUND_PRIORS["CN"])
-    hc_entry_low = round_to_tick(max(0.01, last_c - 0.50 * atr14), market, asset_type, as_of_day)
-    hc_entry_high = round_to_tick(last_c + 0.25 * atr14, market, asset_type, as_of_day)
-    hc_entry_mid = 0.5 * (hc_entry_low + hc_entry_high)
-    hc_tp1 = round_to_tick(hc_entry_mid + 0.85 * atr14, market, asset_type, as_of_day)
-    hc_sl = round_to_tick(max(0.01, hc_entry_mid - 2.20 * atr14), market, asset_type, as_of_day)
+    hc_entry_low, hc_entry_high, hc_tp1, hc_sl = high_conviction_plan_levels(last_c, atr14, market, asset_type, as_of_day)
     meta_decision["high_conviction_rebound"] = hc_subtype is not None
     meta_decision["high_conviction_subtype"] = hc_subtype
     meta_decision["high_conviction_suppressed_by_veto"] = hc_suppressed_by_veto
+    meta_decision["high_conviction_suppressed_subtype"] = hc_suppressed_subtype
     meta_decision["decision_probability"] = (
         {
             "available": True,

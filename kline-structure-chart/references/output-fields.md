@@ -44,6 +44,7 @@
 | `trend.supertrend_line` / `supertrend_dir` | Supertrend 线与方向（1 多、-1 空） | 价格 / ±1 | 否 | — |
 | `trend.adx14`、`plus_di14`、`minus_di14` | 趋势强度与多空方向指标 | 0~100 | 否 | ADX 高于 23 视为有趋势 |
 | `momentum.rsi14` | 相对强弱指数 | 0~100 | 否 | 不单独作为买卖依据 |
+| `momentum.rsi14_prev` | 前一根K线的 RSI14 | 0~100 | 历史不足时可空 | 只用于高置信反转层判定"RSI 拐头"（`rsi14 > rsi14_prev`） |
 | `momentum.macd_dif/dea/hist` | MACD 快线、慢线、柱 | 价格差 | 否 | — |
 | `momentum.stoch_k/d` | 随机指标 | 0~100 | 否 | — |
 | `momentum.rvol20` | 当日成交量 / 近 20 日均量 | 倍数 | 否 | "量能为 20 日均量的 X 倍" |
@@ -81,6 +82,9 @@
 | `meta_labeling_decision.setup_type` / `setup_label_cn` | 计划类型：右侧突破、左侧回踩、等待确认等 | 枚举 | 否 | — |
 | `meta_labeling_decision.action` / `action_cn` | 动作标签：`LONG_CONFIRMED` 确认做多、`WATCH_LONG_SETUP` 条件观察、`NEUTRAL_HOLD_WAIT` 观望、`DEFENSIVE_AVOID` 防守回避 | 枚举 | 否 | 风控否决时只能说观察，不说买入 |
 | `meta_labeling_decision.risk_veto_applied` / `veto_reasons` / `veto_codes` | 是否被风控否决、原因文本及稳定编码（`BENCHMARK_MISSING`、`BENCHMARK_WEAK`、`RR_INSUFFICIENT`、`BELOW_LOWER_RAIL`、`BREAKOUT_LOW_VOLUME`、`PLAN_GEOMETRY_INVALID`（止损不低于入场区下沿或 TP1 不高于入场区上沿），与原因一一对应） | 布尔 / 文本 / 枚举 | 否 | 否决时置顶转述原因文本，编码不需要对外说 |
+| `meta_labeling_decision.high_conviction_rebound` / `high_conviction_subtype` | 是否触发高置信超跌/大盘共振反转条件，子类型 `BENCH_SYNC_REBOUND`（大盘 5 日跌 ≥2.5% 后当日反弹）或 `DEEP_OVERSOLD_TURN`（RSI 低位拐头或深度偏离 EMA20）；触发器为 `risk.detect_high_conviction_rebound`，研究回测共用 | 布尔 / 枚举 | 子类型未触发时为 `null` | 只说"触发了反转条件"，不得说成上涨概率 |
+| `meta_labeling_decision.high_conviction_suppressed_by_veto` / `high_conviction_suppressed_subtype` | 反转条件已触发、但大盘环境评分 < 35（`BENCHMARK_WEAK`）而被抑制；被抑制时记录原本的子类型 | 布尔 / 枚举 | 子类型未被抑制时为 `null` | 为 `true` 时只转述风控否决，不给反转计划 |
+| `meta_labeling_decision.decision_probability` | 反转层的开发区回测成交统计：`available`、`event_definition`、`p_net_positive`、`p_episode_net_positive`、`p_tp_before_sl`、`episode_ci95`（对应 `p_episode_net_positive`）、`dev_sample_size`、`dev_effective_episodes`、`method`、`calibration_version`；未触发或被抑制时数值为 `null` | 比例 / 文本 | 未触发时数值为 `null` | 属开发区样本内统计，**不是该标的的上涨概率**，留出集验收通过前不对外报数字 |
 
 ## 6. 风控计划 `triple_barrier_plan` 与否决 `debate_and_veto`
 
@@ -94,6 +98,7 @@
 | `breakeven_ratchet` | 移动保本规则（与回测同源）：`enabled`、`trigger_r`（0.90）、`confirm_close_r`（0.30）、`lock_r`（0.08）、`trigger_price`、`confirm_close_price`、`breakeven_stop_price`、`rule_cn` | 价格 / R 倍数 / 文本 | 否 | 原文转述 `rule_cn` |
 | `left_side_constraints` / `right_side_constraints` | 左侧（回踩）与右侧（突破）计划的必要证据、失效位、假突破规则 | 文本 / 价格 | 否 | 原文转述 |
 | `market_microstructure.*` | 交易制度：`settlement`、`can_intraday_roundtrip`、`daily_price_limit_pct`（A 股为小数，如 0.1；港美股为空）、`lot_size`/`min_order_shares`/`lot_step`、`tick_size`、`session_hours_local`、`commission_bps`、`stamp_duty_buy_bps`/`stamp_duty_sell_bps`、港股 `lot_size_source`、美股 `day_trading_rule` | — | 部分可空 | 按市场转述，规则来源见 `references/{cn,hk,us}-market.md` |
+| `high_conviction_plan` | 高置信反转计划：`triggered`、`subtype`、`entry_zone`（收盘 −0.50~+0.25 ATR）、`take_profit_1`（入场区中点 +0.85 ATR）、`stop_loss_barrier`（中点 −2.20 ATR）、`time_barrier_bars`、`limit_order_sessions`（5）、`rule_cn`；价位由 `risk.high_conviction_plan_levels` 在信号日确定，不随成交价移动 | 价格 / 文本 | 未触发时价位仍给出但 `triggered = false` | `triggered = false` 时不得转述价位 |
 | `holder_defense_plan` | 已持仓者的防守计划：`reduce_level`（收盘跌破减仓）、`exit_level`（盘中触及硬止损屏障离场）、`rebound_cap`（跌破后反抽上限）、`downside_reference`、`rules[]`（中文规则原文）、`note`（A 股 T+1 提示）；指数为 `available = false` | 价格 / 文本 | 否 | 用户说"已经持有"时转述 `rules`；不是卖出建议 |
 | `short_plan` | 破位做空计划，仅港股、美股的股票/ETF（A 股与指数 `available = false` 并给出 `reason`）：`trigger`、`entry_zone`、`stop_loss_barrier`、`take_profit_1/2`、`time_barrier_bars`、`risk_reward_ratio`（扣交易成本，**未计融券费**）、`invalidation`、`constraints`（卖空制度限制）、`warnings`（大盘偏强、盈亏比不足） | 价格 / 文本 | 否 | 必须同时转述 `constraints` 与 `warnings`；不得给出报告里没有的做空点位 |
 | `position_sizing.*` | 仓位：`tradable`、`account_equity`、`max_risk_pct`（%）、`risk_budget_amount`、`sizing_basis`（`ENTRY_HIGH_WORST_FILL`：每股风险 = 入场区上沿 − 止损 + 上沿 × 往返费率，区内任意价位成交触及止损都不超预算）、`unit_risk_per_share`、`recommended_shares`、`estimated_notional`（按入场区上沿计）、`max_loss_at_stop`（按止损价成交的亏损）、`gap_risk_note`（跳空/跌停时亏损可能超预算）、`reason` | 股 / 货币 | 未传账户净值、指数、**风控否决或评级不是 `LONG_CONFIRMED`/`WATCH_LONG_SETUP`** 时 `recommended_shares` 等为 `null` 并给出 `reason` | "按入场区上沿到止损的距离计算为 X 股"，同时转述 `gap_risk_note`；为 `null` 时转述 `reason`，不得自行换算股数；不是个性化建议 |

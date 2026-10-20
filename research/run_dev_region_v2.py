@@ -1,0 +1,506 @@
+#!/usr/bin/env python3
+"""高置信反转层开发区回测 v2（回测与验收口径调整方案第 1~3 步，见
+docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md）。
+
+与 v1（run_final_oos_evaluation.py）的区别：
+1. 触发、计划价位与大盘否决全部来自线上 analyze_bundle：先用宽松预筛（线上条件的超集，
+   research/tests/test_dev_region_v2.py 校验）缩小候选，再对候选个股-日调用线上流水线。
+2. 撮合按线上计划的固定价位：5 日内触及入场区上沿成交（低开按开盘价），TP1/SL 不随成交价移动；
+   成交价已在止损下方时记为 GAP_BELOW_STOP，单独计数，不进入成交样本。
+3. 大盘否决（BENCHMARK_WEAK）下的信号单独统计，主指标只用否决后的信号，同时报告否决前对照。
+4. 基准：同口径随机入场（信号日随机抽股，同几何、同撮合、同费用）为主；全期随机与超跌随机为诊断。
+   区间一律按信号日期分块 bootstrap。
+
+只评估开发区 2021-01-04 ~ 2026-09-24。2020-11-30 及以前是留出集 H1，本脚本拒绝评估任何该区间的结果；
+读取 2021 年前的K线只用于指标预热，与线上一致。所有结果均为样本内，不构成验收。
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import zlib
+from bisect import bisect_left, bisect_right
+from collections import Counter, defaultdict
+from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime, timezone
+from pathlib import Path
+
+from aggregate import _non_overlapping_episodes, date_block_bootstrap, wilson
+from common import ART, BENCHMARKS, PIT_UNIVERSE, ROOT, VIX_SYMBOL, adjusted_bars, load_bars, load_cache
+from discover_alpha_dev import build_benchmark_features
+from run_backtest import WINDOW_BARS, make_pit_slice
+
+from analysis import analyze_bundle  # noqa: E402  (common 已把技能 scripts 加入 sys.path)
+from evaluation import label_triple_barrier_event  # noqa: E402
+from indicators import atr_series, ema, rsi  # noqa: E402
+from market_rules import is_st_instrument, resolve_instrument  # noqa: E402
+from risk import high_conviction_plan_levels  # noqa: E402
+
+DEV_REGION = ("2021-01-04", "2026-09-24")
+H1_LAST_DAY = "2020-11-30"
+# 与 v1 的切分对齐，便于对照；"all" 为整个开发区
+SEGMENTS = {
+    "all": DEV_REGION,
+    "seg_2021_2024": ("2021-01-04", "2024-12-09"),
+    "seg_2025h1": ("2025-01-02", "2025-06-09"),
+    "seg_2025h2_2026": ("2025-07-01", "2026-09-24"),
+}
+WARMUP_BARS = 420
+HORIZON = 15
+LIMIT_SESSIONS = 5
+SEED = 20261020
+SAME_DAY_MULTIPLE = 18  # 按"信号日股票池"折算的抽样倍数；扣除不合格日与 episode 去重后约为信号的 12 倍（要求 >= 10 倍）
+ALL_DAYS_RATE = 0.02
+OVERSOLD_RATE = 0.25
+OUT = ART / "dev_region_v2_metrics.json"
+LEDGER = ART / "trial_ledger.jsonl"
+
+_C: dict = {}
+
+
+def prefilter(market: str, c: float, o: float, h: float, lo: float, raw_c: float, atr: float, e20: float,
+              rsi_v: float, bf: dict) -> bool:
+    """线上触发条件的宽松超集：阈值各留余量，吸收全历史序列与线上 420 根窗口、快照舍入之间的微小差异。"""
+    if atr <= 0 or c <= 0 or raw_c < 1.95 or c <= o or h <= lo:
+        return False
+    if atr / c < (0.020 if market == "HK" else 0.012) * 0.95:
+        return False
+    if (c - o) / (h - lo) < 0.31:
+        return False
+    if (c - e20) / atr > -0.95 and rsi_v > 29.0:
+        return False
+    if market == "HK":
+        return bf["ret1"] >= -1e-6
+    return bf["ret1"] >= -1e-6 or bool(bf["bull_bar"])
+
+
+def _hash_unit(*parts: str) -> float:
+    return zlib.crc32("|".join((str(SEED),) + parts).encode()) / 0xFFFFFFFF
+
+
+def _init(market: str, same_day_rate: dict | None = None) -> None:
+    pit = json.loads(PIT_UNIVERSE.read_text(encoding="utf-8"))["markets"][market]
+    periods: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for p in pit["periods"]:
+        for s in p["symbols"]:
+            periods[s].append((p["start_day"], p["end_day"]))
+    bench_payload = load_cache(market, BENCHMARKS[market]["symbol"])
+    vix: dict[str, float] = {}
+    if market == "US":
+        try:
+            vix = {b["day"]: float(b["close"]) for b in load_bars("US", VIX_SYMBOL)}
+        except Exception:  # noqa: BLE001 - 缺失如实披露为 CACHE_MISS，不补数
+            vix = {}
+    _C.clear()
+    _C.update(
+        market=market,
+        periods=dict(periods),
+        bench=bench_payload["bars"],
+        bench_days=[b["day"] for b in bench_payload["bars"]],
+        bench_source=bench_payload.get("source", f"CACHED_{market}_BENCHMARK"),
+        bf=build_benchmark_features(market),
+        vix=vix,
+        bench_inst=resolve_instrument(
+            BENCHMARKS[market]["symbol"], market=market, asset_type=BENCHMARKS[market]["asset_type"],
+            name=BENCHMARKS[market]["name"],
+        ),
+        same_day_rate=same_day_rate or {},
+    )
+
+
+def _load_symbol(symbol: str) -> dict | None:
+    try:
+        payload = load_cache(_C["market"], symbol)
+        _, bars = adjusted_bars(payload, mode="total_return")
+    except Exception:  # noqa: BLE001 - 缓存缺失或损坏的标的跳过（v1 同样处理）
+        return None
+    if len(bars) < WARMUP_BARS + HORIZON + LIMIT_SESSIONS + 2:
+        return None
+    closes = [float(b["close"]) for b in bars]
+    name = str(payload.get("name") or "")
+    return {
+        "payload": payload,
+        "bars": bars,
+        "idx": {b["day"]: i for i, b in enumerate(bars)},
+        "c": closes,
+        "o": [float(b["open"]) for b in bars],
+        "h": [float(b["high"]) for b in bars],
+        "l": [float(b["low"]) for b in bars],
+        "raw": [float(b.get("raw_close", b["close"])) for b in bars],
+        "e20": ema(closes, 20),
+        "r14": rsi(closes, 14),
+        "a14": atr_series(bars, 14),
+        "name": name,
+        "is_st": is_st_instrument(symbol, name=name),
+    }
+
+
+def _eligible_days(symbol: str, data: dict):
+    """开发区内、属于 PIT 股票池、有足够预热与成熟期的交易日，返回 (day, t, b_pos)。"""
+    n = len(data["bars"])
+    bench_days = _C["bench_days"]
+    for s_d, e_d in _C["periods"].get(symbol, []):
+        lo, hi = max(s_d, DEV_REGION[0]), min(e_d, DEV_REGION[1])
+        if lo > hi:
+            continue
+        for b_pos in range(bisect_left(bench_days, lo), len(bench_days)):
+            day = bench_days[b_pos]
+            if day > hi:
+                break
+            if day not in _C["bf"]:
+                continue
+            assert day > H1_LAST_DAY, "留出集 H1 不得在开发区管线中评估"
+            t = data["idx"].get(day)
+            if t is None or t < WARMUP_BARS - 1 or t + LIMIT_SESSIONS + HORIZON >= n:
+                continue
+            if b_pos + 1 >= len(bench_days) or data["bars"][t + 1]["day"] > bench_days[b_pos + 1]:
+                continue  # 次日停牌：与 v1 相同，跳过
+            yield day, t, b_pos
+
+
+def build_bundle(symbol: str, data: dict, pit: list[dict], cut: int, day: str) -> tuple[dict, dict]:
+    """与 run_backtest 相同的 PIT bundle：标的与基准都只到 day。"""
+    market = _C["market"]
+    b_hi = bisect_right(_C["bench_days"], day)
+    vix_value = _C["vix"].get(day)
+    inst = resolve_instrument(symbol, market=market, asset_type="equity", name=data["name"], is_st=data["is_st"])
+    payload = data["payload"]
+    bundle = {
+        "schema_version": "5.3.0",
+        "market": market,
+        "target": {"instrument": inst, "bars": pit[: cut + 1], "intraday": None},
+        "benchmark": {
+            "instrument": _C["bench_inst"],
+            "bars": _C["bench"][max(0, b_hi - WINDOW_BARS):b_hi],
+            "source": _C["bench_source"],
+            "errors": [],
+        },
+        "extra_context": {
+            "vix": vix_value,
+            "vix_source": f"CACHE(^VIX,{day})" if vix_value is not None else "CACHE_MISS",
+            "earnings_date": None,
+            "earnings_date_source": "NOT_AVAILABLE",
+            "is_st": data["is_st"],
+            "is_ipo_no_limit": False,
+        },
+        "provenance": {
+            "source": payload.get("source", f"CACHED_{market}_DAILY"),
+            "as_of": day,
+            "adjustment": "total_return",
+            "adjustment_status": {"requested": "total_return", "applied": "total_return",
+                                  "events_used": len(payload.get("events") or []),
+                                  "source": payload.get("events_source")},
+            "errors": [],
+            "intraday_excluded_day": None,
+            "instrument_meta": {},
+        },
+    }
+    request = {
+        "symbol": symbol, "market": market, "asset_type": "equity", "name": data["name"], "is_st": data["is_st"],
+        "display_bars": 120, "horizon_bars": HORIZON, "account_equity": None, "adjustment": "total_return",
+    }
+    return bundle, request
+
+
+def live_high_conviction(symbol: str, data: dict, t: int, day: str) -> dict:
+    """对一个个股-日调用线上流水线，返回反转层结论（含被大盘否决抑制的子类型）与计划价位。"""
+    pit, cut = make_pit_slice(data["bars"], t, HORIZON)
+    bundle, request = build_bundle(symbol, data, pit, cut, day)
+    rep = analyze_bundle(bundle, request, include_replay=False, include_forecast=False)
+    ml = rep["meta_labeling_decision"]
+    plan = rep["triple_barrier_plan"]["high_conviction_plan"]
+    return {
+        "pit": pit,
+        "cut": cut,
+        "subtype": ml.get("high_conviction_subtype"),
+        "suppressed_subtype": ml.get("high_conviction_suppressed_subtype"),
+        "veto_codes": ml.get("veto_codes") or [],
+        "regime_score": rep["market_benchmark"].get("regime_score"),
+        "entry_zone": [float(x) for x in plan["entry_zone"]],
+        "take_profit_1": float(plan["take_profit_1"]),
+        "stop_loss": float(plan["stop_loss_barrier"]),
+    }
+
+
+def execute_plan(symbol: str, data: dict, pit: list[dict], cut: int, b_pos: int,
+                 entry_high: float, tp: float, sl: float) -> dict:
+    """按固定价位撮合：次日开盘层（诊断）与 5 日限价成交层（主口径）。"""
+    market = _C["market"]
+    kw = {"horizon_bars": HORIZON, "market": market, "asset_type": "equity", "symbol": symbol,
+          "is_st": data["is_st"], "trailing_stop": False, "name": data["name"]}
+    out: dict = {}
+    op = float(pit[cut + 1]["open"])
+    if sl < op < tp:
+        r = label_triple_barrier_event(pit, entry_idx=cut + 1, tp_price=tp, sl_price=sl, **kw)
+        out["open_status"] = "FILL" if r.get("tradable") else f"NOT_TRADABLE:{r.get('reason')}"
+        if r.get("tradable"):
+            out.update(open_net=float(r["net_return"]), open_outcome=r["outcome"])
+    else:
+        out["open_status"] = "OPEN_OUTSIDE_PLAN"
+
+    bench_days = _C["bench_days"]
+    max_day = bench_days[min(len(bench_days) - 1, b_pos + LIMIT_SESSIONS)]
+    out["fill_status"] = "NO_FILL_5D"
+    for k in range(cut + 1, min(len(pit) - 1, cut + LIMIT_SESSIONS) + 1):
+        b = pit[k]
+        if b["day"] > max_day:
+            break
+        op_k, lo_k = float(b["open"]), float(b["low"])
+        if op_k <= entry_high:
+            fill_px = op_k
+        elif lo_k <= entry_high:
+            fill_px = entry_high
+        else:
+            continue
+        if fill_px <= sl:
+            out["fill_status"] = "GAP_BELOW_STOP"
+            break
+        r = label_triple_barrier_event(pit, entry_idx=k, tp_price=tp, sl_price=sl, entry_price_override=fill_px, **kw)
+        if r.get("tradable"):
+            out.update(fill_status="FILL", fill_day=r["entry_day"], fill_price=fill_px,
+                       net=float(r["net_return"]), gross=float(r["gross_return"]), outcome=r["outcome"])
+        else:
+            out["fill_status"] = f"NOT_TRADABLE:{r.get('reason')}"
+        break
+    return out
+
+
+def _scan_signals(symbol: str) -> tuple[list[dict], int]:
+    data = _load_symbol(symbol)
+    if data is None:
+        return [], 0
+    market = _C["market"]
+    rows: list[dict] = []
+    n_candidates = 0
+    for day, t, b_pos in _eligible_days(symbol, data):
+        if not prefilter(market, data["c"][t], data["o"][t], data["h"][t], data["l"][t], data["raw"][t],
+                         float(data["a14"][t] or 0.0), float(data["e20"][t] or data["c"][t]),
+                         float(data["r14"][t] or 50.0), _C["bf"][day]):
+            continue
+        n_candidates += 1
+        live = live_high_conviction(symbol, data, t, day)
+        raw_sub = live["subtype"] or live["suppressed_subtype"]
+        if raw_sub is None:
+            continue
+        ex = execute_plan(symbol, data, live["pit"], live["cut"], b_pos,
+                          live["entry_zone"][1], live["take_profit_1"], live["stop_loss"])
+        rows.append({
+            "symbol": symbol, "day": day, "subtype": raw_sub,
+            "vetoed": live["suppressed_subtype"] is not None,
+            "regime_score": live["regime_score"],
+            "entry_zone": live["entry_zone"], "tp": live["take_profit_1"], "sl": live["stop_loss"],
+            **ex,
+        })
+    return rows, n_candidates
+
+
+def _scan_baselines(symbol: str) -> list[dict]:
+    """同口径随机（信号日）、全期随机与超跌随机：用全历史序列的 ATR 按 PIT 比例换算，价位规则与线上相同。"""
+    data = _load_symbol(symbol)
+    if data is None:
+        return []
+    market = _C["market"]
+    rows: list[dict] = []
+    for day, t, b_pos in _eligible_days(symbol, data):
+        u = _hash_unit(market, symbol, day)
+        kinds = []
+        rate = _C["same_day_rate"].get(day)
+        if rate is not None and u < rate:
+            kinds.append("same_day")
+        if _hash_unit("all", market, symbol, day) < ALL_DAYS_RATE:
+            kinds.append("all_days")
+        atr = float(data["a14"][t] or 0.0)
+        c = data["c"][t]
+        if atr > 0 and (c - float(data["e20"][t] or c)) / atr <= -1.0 and _hash_unit("os", market, symbol, day) < OVERSOLD_RATE:
+            kinds.append("oversold")
+        if not kinds or atr <= 0:
+            continue
+        pit, cut = make_pit_slice(data["bars"], t, HORIZON)
+        c_pit = float(pit[cut]["close"])
+        atr_pit = max(c_pit * 0.005, atr * (c_pit / c))
+        entry_low, entry_high, tp, sl = high_conviction_plan_levels(c_pit, atr_pit, market, "equity", day)
+        ex = execute_plan(symbol, data, pit, cut, b_pos, entry_high, tp, sl)
+        for kind in kinds:
+            rows.append({"kind": kind, "symbol": symbol, "day": day, **ex})
+    return rows
+
+
+def _pool_map(fn, symbols: list[str], workers: int, init_args: tuple) -> list:
+    if workers <= 1:
+        _init(*init_args)
+        return [fn(s) for s in symbols]
+    with ProcessPoolExecutor(max_workers=workers, initializer=_init, initargs=init_args) as ex:
+        return list(ex.map(fn, symbols, chunksize=8))
+
+
+def _pct(x: float | None, digits: int = 2) -> float | None:
+    return None if x is None else round(x * 100.0, digits)
+
+
+def _ci_pct(ci: list[float] | None) -> list[float] | None:
+    return None if ci is None else [round(ci[0] * 100.0, 2), round(ci[1] * 100.0, 2)]
+
+
+def _layer_stats(eps: list[dict]) -> dict:
+    n = len(eps)
+    if n == 0:
+        return {"n_episodes": 0}
+    wins = sum(1 for r in eps if r["net"] > 0)
+    tp = sum(1 for r in eps if r["outcome"] == "TP_BARRIER")
+    sl = sum(1 for r in eps if str(r["outcome"]).startswith("SL_BARRIER"))
+    days = Counter(r["day"] for r in eps)
+    return {
+        "n_episodes": n,
+        "n_signal_days": len(days),
+        "max_day_share_pct": round(max(days.values()) / n * 100.0, 2),
+        "net_positive_rate_pct": round(wins / n * 100.0, 2),
+        "wilson95_pct": wilson(wins, n),
+        "date_cluster95_pct": _ci_pct(date_block_bootstrap(eps, lambda r: r["net"] > 0)),
+        "mean_net_return_pct": _pct(sum(r["net"] for r in eps) / n, 3),
+        "mean_date_cluster95_pct": _ci_pct(date_block_bootstrap(eps, lambda r: r["net"])),
+        "tp_first_rate_pct": round(tp / max(1, tp + sl) * 100.0, 2),
+        "outcomes": dict(Counter(r["outcome"] for r in eps)),
+    }
+
+
+def _fill_eps(rows: list[dict]) -> list[dict]:
+    return _non_overlapping_episodes([r for r in rows if r.get("fill_status") == "FILL"])
+
+
+def summarize(signals: list[dict], baselines: list[dict], lo: str, hi: str) -> dict:
+    sig = [r for r in signals if lo <= r["day"] <= hi]
+    base = [r for r in baselines if lo <= r["day"] <= hi]
+    kept = [r for r in sig if not r["vetoed"]]
+    eps = _fill_eps(kept)
+    main = _layer_stats(eps)
+    status = Counter(r["fill_status"] for r in kept)
+    by_kind = {k: _fill_eps([r for r in base if r["kind"] == k]) for k in ("same_day", "all_days", "oversold")}
+    same = by_kind["same_day"]
+    out: dict = {
+        "n_signals_pre_veto": len(sig),
+        "n_vetoed_benchmark_weak": len(sig) - len(kept),
+        "n_signals": len(kept),
+        "subtypes": dict(Counter(r["subtype"] for r in kept)),
+        "fill_status": dict(status),
+        "fill_layer": main,
+        "next_open_layer": {
+            "n": sum(1 for r in kept if r.get("open_status") == "FILL"),
+            "outside_plan": sum(1 for r in kept if r.get("open_status") == "OPEN_OUTSIDE_PLAN"),
+            "net_positive_rate_pct": _pct(
+                sum(1 for r in kept if r.get("open_status") == "FILL" and r["open_net"] > 0)
+                / max(1, sum(1 for r in kept if r.get("open_status") == "FILL"))
+            ),
+        },
+        "pre_veto_fill_layer": _layer_stats(_fill_eps(sig)),
+        "baselines": {k: _layer_stats(v) for k, v in by_kind.items()},
+    }
+    if eps and same:
+        rate_ci = date_block_bootstrap(eps, lambda r: r["net"] > 0, same)
+        mean_ci = date_block_bootstrap(eps, lambda r: r["net"], same)
+        b = out["baselines"]["same_day"]
+        out["excess_vs_same_day_random"] = {
+            "baseline_to_signal_ratio": round(len(same) / len(eps), 1),
+            "rate_pp": round(main["net_positive_rate_pct"] - b["net_positive_rate_pct"], 2),
+            "rate_pp_date_cluster95": _ci_pct(rate_ci),
+            "mean_pct": round(main["mean_net_return_pct"] - b["mean_net_return_pct"], 3),
+            "mean_pct_date_cluster95": _ci_pct(mean_ci),
+        }
+    if main.get("n_episodes") and main["max_day_share_pct"] > 10.0:
+        top_day = Counter(r["day"] for r in eps).most_common(1)[0][0]
+        rest = [r for r in eps if r["day"] != top_day]
+        out["sensitivity_excluding_top_day"] = {"excluded_day": top_day, **_layer_stats(rest)}
+    ex = out.get("excess_vs_same_day_random") or {}
+    mean_ci = main.get("mean_date_cluster95_pct")
+    out["criteria_diagnostic"] = {
+        "note": "开发区·样本内，仅用于诊断，不构成验收",
+        "P1_mean_net_positive": bool(mean_ci and main["mean_net_return_pct"] > 0 and mean_ci[0] > 0),
+        "P2a_rate_excess": bool(ex.get("rate_pp_date_cluster95") and ex["rate_pp_date_cluster95"][0] > 0),
+        "P2b_mean_excess": bool(ex.get("mean_pct_date_cluster95") and ex["mean_pct_date_cluster95"][0] > 0),
+        "P3_sample": bool(main.get("n_episodes", 0) >= 100 and main.get("n_signal_days", 0) >= 30),
+        "T_rate_ge_70": bool(main.get("n_episodes") and main["net_positive_rate_pct"] >= 70.0),
+    }
+    return out
+
+
+def run_market(market: str, workers: int, limit_symbols: int | None = None) -> dict:
+    _init(market)
+    symbols = sorted(_C["periods"])
+    if limit_symbols:
+        symbols = symbols[:: max(1, len(symbols) // limit_symbols)][:limit_symbols]
+    results = _pool_map(_scan_signals, symbols, workers, (market,))
+    signals = [r for rows, _ in results for r in rows]
+    n_candidates = sum(n for _, n in results)
+
+    # 同口径随机：只在（否决后）信号日抽样，抽样率按"当日股票池规模"折算到信号数的 SAME_DAY_MULTIPLE 倍
+    kept_days = Counter(r["day"] for r in signals if not r["vetoed"])
+    day_list = sorted(kept_days)
+    total_pool = 0  # 信号日上的股票池"个股-日"总数
+    for sym in symbols:
+        for s_d, e_d in _C["periods"].get(sym, []):
+            total_pool += bisect_right(day_list, e_d) - bisect_left(day_list, s_d)
+    rate = min(1.0, SAME_DAY_MULTIPLE * sum(kept_days.values()) / max(1, total_pool))
+    same_day_rate = {d: rate for d in kept_days}
+    baselines = _pool_map(_scan_baselines, symbols, workers, (market, same_day_rate))
+    baselines = [r for rows in baselines for r in rows]
+
+    return {
+        "n_symbols_scanned": len(symbols),
+        "n_prefilter_candidates": n_candidates,
+        "same_day_sampling_rate": round(rate, 4),
+        "segments": {name: summarize(signals, baselines, lo, hi) for name, (lo, hi) in SEGMENTS.items()},
+    }
+
+
+def _git_head() -> str:
+    """当前提交号；工作区有未提交改动时加 -dirty，台账据此判断结果能否按提交号复现。"""
+    try:
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "--", "research", "kline-structure-chart/scripts"],
+                               cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+        return head + ("-dirty" if dirty else "")
+    except Exception:  # noqa: BLE001
+        return "UNKNOWN"
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--markets", default="CN,HK,US")
+    ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--limit-symbols", type=int, default=None, help="冒烟测试：每市场只取等间隔抽样的 N 只")
+    ap.add_argument("--out", type=Path, default=OUT)
+    args = ap.parse_args()
+
+    result: dict = {
+        "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "code_commit": _git_head(),
+        "dev_region": DEV_REGION,
+        "h1_holdout_last_day_untouched": H1_LAST_DAY,
+        "in_sample_note": "开发区结果均为样本内，不构成验收",
+        "config": {"limit_sessions": LIMIT_SESSIONS, "horizon": HORIZON, "seed": SEED,
+                   "same_day_multiple": SAME_DAY_MULTIPLE, "all_days_rate": ALL_DAYS_RATE,
+                   "oversold_rate": OVERSOLD_RATE, "limit_symbols": args.limit_symbols},
+        "markets": {},
+    }
+    for market in [m.strip() for m in args.markets.split(",") if m.strip()]:
+        result["markets"][market] = run_market(market, args.workers, args.limit_symbols)
+        seg = result["markets"][market]["segments"]["all"]
+        fl = seg["fill_layer"]
+        print(f"[{market}] pre_veto={seg['n_signals_pre_veto']} vetoed={seg['n_vetoed_benchmark_weak']} "
+              f"episodes={fl.get('n_episodes')} days={fl.get('n_signal_days')} rate={fl.get('net_positive_rate_pct')}% "
+              f"mean={fl.get('mean_net_return_pct')}% excess={seg.get('excess_vs_same_day_random')}", flush=True)
+    args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"wrote {args.out}")
+    with LEDGER.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "ts": result["generated_at_utc"], "script": "research/run_dev_region_v2.py",
+            "code_commit": result["code_commit"], "config": result["config"], "out": str(args.out.relative_to(ROOT)) if args.out.is_relative_to(ROOT) else str(args.out),
+            "summary": {m: {k: v["segments"]["all"]["fill_layer"].get(k) for k in
+                            ("n_episodes", "net_positive_rate_pct", "mean_net_return_pct")}
+                        for m, v in result["markets"].items()},
+        }, ensure_ascii=False) + "\n")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
