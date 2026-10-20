@@ -536,12 +536,16 @@ def render(
     quality_status: str = "OK",
     risk_veto: dict | None = None,
     conformal_forecast: dict | None = None,
+    volume_profile: dict | None = None,
 ) -> dict:
     # 涨跌与上攻/下探配色跟随市场约定：A股/港股默认红涨绿跌，美股绿涨红跌
     UP, DOWN, PROJ_BULL, PROJ_BEAR = _palette(color_scheme)
+    VP_POC = (45, 212, 191)
+    VP_VA_BORDER = (129, 140, 248)
     up_word, down_word = ("绿", "红") if color_scheme == "us_green_up" else ("红", "绿")
     # 结构层只来自 structure.compute_structure_layer：v5 主流程传入已算好的结果，v4.1 CLI 才在这里现算
     layer = structure if structure is not None else compute_structure_layer(bars, intraday, show)
+    vp_data = volume_profile if isinstance(volume_profile, dict) else (layer.get("volume_profile") if isinstance(layer, dict) else None)
     # 图上与摘要里的价格文本与 *_report.md 同一精度（价位表小数位由结构层按市场给出）
     dec = layer["price_decimals"]
 
@@ -634,6 +638,11 @@ def render(
         for q_val in (*conformal_forecast["q10"], *conformal_forecast["q90"]):
             if abs(float(q_val) / float(ref_p) - 1) <= 0.25:
                 prices.append(float(q_val))
+    if vp_data:
+        for vp_k in ("poc_price", "vah_price", "val_price"):
+            vp_v = vp_data.get(vp_k)
+            if vp_v is not None and abs(float(vp_v) / float(ref_p) - 1) <= 0.25:
+                prices.append(float(vp_v))
 
     pmin, pmax = min(prices), max(prices)
     pad = (pmax - pmin) * 0.08
@@ -679,6 +688,7 @@ def render(
         ("波段", ZIGZAG, "dash"),
         ("上轨", WEDGE_UPPER, "line"),
         ("下轨", WEDGE_LOWER, "line"),
+        ("POC近似", VP_POC, "dash"),
         (f"上攻{bull_ftag}", PROJ_BULL, "dash" if bull_dash else "line"),
         (f"震荡{neut_ftag}", PROJ_NEUTRAL, "dash" if neut_dash else "line"),
         (f"下探{bear_ftag}", PROJ_BEAR, "dash" if bear_dash else "line"),
@@ -703,12 +713,11 @@ def render(
             head, tail = parts
             while head and text_size(draw, head + "… · " + tail, f_title)[0] > max_title_w:
                 head = head[:-1]
-            fit_title = head + "… · " + tail
-        while fit_title and text_size(draw, fit_title + "…", f_title)[0] > max_title_w:
-            fit_title = fit_title[:-1]
+            fit_title = (head + "… · " + tail) if head else tail
         if text_size(draw, fit_title, f_title)[0] > max_title_w:
-            fit_title = fit_title[:-1]
-        fit_title += "…"
+            while fit_title and text_size(draw, fit_title + "…", f_title)[0] > max_title_w:
+                fit_title = fit_title[:-1]
+            fit_title += "…"
     draw.text((left, 16), fit_title, font=f_title, fill=TEXT)
     draw.rounded_rectangle((leg_x1, 16, width - 24, 44), radius=7, fill=CARD_BG, outline=CARD_BORDER, width=1)
     lx = leg_x1 + 12
@@ -901,9 +910,23 @@ def render(
     for i in range(len(zz_pts) - 1):
         dashed_line(draw, zz_pts[i], zz_pts[i + 1], fill=(*ZIGZAG, 195), width=1.8, dash=6, gap=5)
 
-    # ---------------- 绘制 ABC 测算水平虚线 ----------------
+    # ---------------- 绘制 Volume Profile (POC / VAH / VAL) 与 ABC / 黄金分割水平虚线 ----------------
     right_gutter_tags = []
     abc_ys: list[int] = []
+    if vp_data and vp_data.get("poc_price") is not None:
+        poc_f = float(vp_data["poc_price"])
+        vah_f = float(vp_data.get("vah_price") or poc_f)
+        val_f = float(vp_data.get("val_price") or poc_f)
+        if pmin <= vah_f <= pmax and pmin <= val_f <= pmax and vah_f > val_f:
+            y_vah, y_val = yp(vah_f), yp(val_f)
+            draw.rectangle((left + 1, min(y_vah, y_val), div_x, max(y_vah, y_val)), fill=(99, 102, 241, 20))
+            dashed_hline(draw, left, div_x, y_vah, (*VP_VA_BORDER, 130))
+            dashed_hline(draw, left, div_x, y_val, (*VP_VA_BORDER, 130))
+        if pmin <= poc_f <= pmax:
+            y_poc = yp(poc_f)
+            abc_ys.append(y_poc)
+            dashed_hline(draw, left, chart_right, y_poc, (*VP_POC, 195))
+            right_gutter_tags.append((y_poc, f"POC 成交分布近似 {fp(poc_f)}", VP_POC))
     if scenario:
         for level in scenario["levels"]:
             if not level["drawn"]:
@@ -913,6 +936,16 @@ def render(
             dashed_hline(draw, left, chart_right, y, (*SCEN, 185))
             live_tag = f"·{level['intraday']}" if level["intraday"] else ""
             right_gutter_tags.append((y, f"ABC {level['ratio']:.3f}  {fp(level['price'])} ({level['state']}{live_tag})", SCEN))
+    elif fibs and fibs.get("retracements"):
+        for flvl in fibs["retracements"]:
+            if flvl["ratio"] not in (0.382, 0.5, 0.618):
+                continue
+            fp_val = float(flvl["price"])
+            if pmin <= fp_val <= pmax:
+                y_fib = yp(fp_val)
+                abc_ys.append(y_fib)
+                dashed_hline(draw, left, div_x, y_fib, (*SCEN, 140))
+                right_gutter_tags.append((y_fib, f"Fib {flvl['ratio']:.3f}{fibs.get('kind', '')} {fp(fp_val)}", SCEN))
 
     # ---------------- 绘制真实 K 线与盘中 K 线 ----------------
     kline_obstacles: list[tuple[int, int, int, int]] = []
@@ -1026,7 +1059,8 @@ def render(
         sc_pct = f"{sc_raw * 100:.1f}%" if sc_n > 0 else f"先验{sc_freq * 100:.0f}%"
         sc_pts = [(x_of(last_bar_idx + dx), yp(p)) for dx, p in sc_wps]
         draw_arrow_polyline(draw, sc_pts, fill=sc_col, width=round(1.6 + 1.8 * sc_freq, 2), dashed=True, alpha=165 if sc_low else 200)
-        right_gutter_tags.append((sc_pts[-1][1], f"{sc_item['name']} {fp(sc_tgt)} {sc_pct}(n={sc_n})", sc_col))
+        sc_low_tag = "[低样本] " if sc_low else ""
+        right_gutter_tags.append((sc_pts[-1][1], f"{sc_item['name']} {fp(sc_tgt)} {sc_low_tag}{sc_pct}(n={sc_n})", sc_col))
 
     step_boxes: list[tuple[int, int, int, int]] = []
     for key, col, _, _, _, _ in proj_configs:

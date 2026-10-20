@@ -22,7 +22,7 @@ def classify_data_source(source: str | None) -> SourceClass:
     s = str(source or "").upper()
     if "SYNTHETIC" in s or "OFFLINE_FIXTURE" in s:
         return "SYNTHETIC"
-    if s.startswith(("SINA_", "YAHOO_", "TENCENT_")):
+    if s.startswith(("SINA_", "YAHOO_", "TENCENT_", "CACHED_", "CACHE", "RECORDED_FIXTURE")):
         return "LIVE"
     if s.startswith("LOCAL_FILE"):
         return "LOCAL_FILE"

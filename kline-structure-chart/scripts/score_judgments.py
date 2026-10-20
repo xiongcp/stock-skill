@@ -259,7 +259,7 @@ def _bars_map_from_payload(
     entries: list[dict[str, Any]],
     symbol_hint: str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """解析 --bars-file：支持 bundle、单标的缓存字典、symbol->bars 映射与裸 K 线数组。"""
+    """解析 --bars-file：支持 bundle、result.json、单标的缓存字典、symbol->bars 映射与裸 K 线数组。"""
     if isinstance(raw, list):
         sym = symbol_hint or (entries[0]["symbol"] if entries else "UNKNOWN")
         return {str(sym): raw}
@@ -268,10 +268,18 @@ def _bars_map_from_payload(
     if "target" in raw and isinstance(raw["target"], dict) and "bars" in raw["target"]:
         sym = symbol_hint or raw["target"].get("instrument", {}).get("symbol") or "UNKNOWN"
         return {str(sym): raw["target"]["bars"]}
+    if "series_export" in raw and isinstance(raw["series_export"], dict) and isinstance(raw["series_export"].get("bars"), list):
+        sym = symbol_hint or (raw.get("meta") or {}).get("symbol") or (entries[0]["symbol"] if entries else "UNKNOWN")
+        return {str(sym): raw["series_export"]["bars"]}
     if isinstance(raw.get("bars"), list):
         # 单标的缓存字典：{"symbol": "601288.SH", "bars": [...], "events": [...]}
         sym = symbol_hint or raw.get("symbol") or (entries[0]["symbol"] if entries else "UNKNOWN")
-        return {str(sym): raw["bars"]}
+        bars_list = raw["bars"]
+        if isinstance(raw.get("events"), list) and raw["events"]:
+            from market_rules import apply_point_in_time_adjustment
+
+            bars_list = apply_point_in_time_adjustment(bars_list, raw["events"], mode="total_return")
+        return {str(sym): bars_list}
     return {
         str(k): v for k, v in raw.items()
         if isinstance(v, list) and (not v or (isinstance(v[0], dict) and "day" in v[0]))

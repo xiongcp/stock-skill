@@ -21,24 +21,27 @@ from judgment import build_judgment_pack
 from validate_judgment import _CONTEXT_PRICE_RE, _NON_PRICE_PATTERNS, _price_in_whitelist
 
 _FORBIDDEN_PROB_PHRASES = (
-    re.compile(r"规则分[^\n。；]{0,16}(?:胜率|上涨概率|置信度)"),
-    re.compile(r"(?:胜率|上涨概率|置信度)[^\n。；]{0,12}规则分"),
-    re.compile(r"真实持仓筹码|获利盘比例"),
+    re.compile(r"(?:多周期)?(?:规则(?:综合)?(?:评分|分)|过滤分|状态分)[^\n。；]{0,16}(?:胜率|上涨概率|置信度|确定性)"),
+    re.compile(r"(?:胜率|上涨概率|置信度|确定性)[^\n。；]{0,12}(?:多周期)?(?:规则(?:综合)?(?:评分|分)|过滤分|状态分)"),
+    re.compile(r"(?:主力|真实)?持仓筹码|主力(?:真实)?筹码|获利盘(?:比例|占比)"),
 )
 
 # 未经校验的概率/确定性措辞：只有历史条件频率、通过校验的主观研判、回测成交胜率（带 95% 区间）与区间覆盖率可以带概率数字
 _UNVALIDATED_PROB_PHRASES = (
     re.compile(r"大概率|小概率|胜算|稳赚|必涨|必跌|十拿九稳|板上钉钉"),
     re.compile(r"(?:上涨|下跌|突破|反弹|上攻|下探|成功|盈利|翻倍|见顶|见底|涨|跌)(?:的)?(?:概率|可能性|几率)"),
-    re.compile(r"(?:概率|可能性|几率|胜率|把握)\s*(?:约|大约|为|是|达|高达|超过|接近|有|在)?\s*\d+(?:\.\d+)?\s*%"),
+    re.compile(
+        r"(?:概率|可能性|几率|胜率|成功率|命中率|命中概率|准确率|把握)\s*"
+        r"(?:约|大约|为|是|达|达到|高达|超|超过|高于|接近|有|在|>=?|:|：|=)?\s*\d+(?:\.\d+)?\s*%"
+    ),
     re.compile(r"[一二三四五六七八九]成(?:把握|胜算|概率|机会|以上)?(?=[^\d]|$)"),
 )
 _NEGATION_RE = re.compile(r"不是|不叫|不代表|并非|不得|不能|严禁|禁止|不构成|不等于|不要|不应|不宜|而非|不含|没有")
-_PROB_ALLOWED_CONTEXT_RE = re.compile(r"历史条件频率|主观研判|脚本预填|研判模板|覆盖率|95% 区间|95%区间|Wilson")
+_PROB_ALLOWED_CONTEXT_RE = re.compile(r"历史条件频率|主观研判|脚本预填|研判模板|覆盖率|95% 区间|95%区间|Wilson|校准先验")
 # 回测胜率专用：必须与 backtest.json 的成交样本一致；小样本不得被包装为 70% 目标证据
 _BACKTEST_RATE_RE = re.compile(
-    r"(?:胜率|成功率|命中率)\s*(?:为|是|约|达|达到|高达|超过|高于|在|>=?|攀升至)?\s*(\d+(?:\.\d+)?)\s*%"
-    r"|(\d+(?:\.\d+)?)\s*%\s*的(?:胜率|成功率|命中率)"
+    r"(?:胜率|成功率|命中率|命中概率|准确率)\s*(?:为|是|约|达|达到|高达|超|超过|高于|接近|在|>=?|:|：|=|攀升至)?\s*(\d+(?:\.\d+)?)\s*%"
+    r"|(\d+(?:\.\d+)?)\s*%\s*的(?:胜率|成功率|命中率|命中概率|准确率)"
 )
 _SAMPLE_HINT_RE = re.compile(r"(?:n\s*=\s*\d+|\d+\s*笔(?:成交|交易)?|\d+\s*个?样本)")
 _SMALL_SAMPLE_CLAIM_RE = re.compile(
@@ -58,13 +61,13 @@ _LINT_PRICE_BEFORE_RE = re.compile(
     r"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:元|港元|美元|港币)?\s*(?:附近|一线|上方|下方|左右|处|之上|之下|上下)?\s*"
     r"(?:买入|卖出|建仓|加仓|减仓|止损|止盈|挂单|入场|抄底|离场|低吸)"
 )
-VETO_HEAD_CHARS = 200
+VETO_HEAD_CHARS = 250
 # 买入/建仓语境下的股数（「每手 100 股」「最小申报 200 股」等制度描述不在此列）
-_BUY_SHARES_RE = re.compile(r"(?:买入|买进|建仓|加仓|开仓|仓位|可买|买)[^。；\n股手]{0,8}?\d[\d,]*\s*股")
+_BUY_SHARES_RE = re.compile(r"(?:买入|买进|建仓|加仓|开仓|仓位|可买|买|低吸|挂单)[^。；\n股手]{0,8}?\d[\d,]*\s*股")
 # 子句级匹配：允许价格/介词插在建议与动作之间，覆盖「可于…建仓」「逢低吸纳」等话术。
 _VETO_POSITIVE_BUY_RE = re.compile(
     r"(?:建议|可以?|应当|不妨|推荐|宜|考虑|适合|值得|投资者可|逢低)"
-    r"[^。；\n]{0,30}?(?:买入|建仓|加仓|做多|抄底|低吸|进场|吸纳|吸筹)"
+    r"[^。；\n]{0,30}?(?:买入|买进|建仓|加仓|做多|抄底|低吸|进场|入场|布局|吸纳|吸筹)"
 )
 _TARGET_ROLE_PRICE_RE = re.compile(r"(?:目标位|目标价|目标看至|上看目标)\s*[为=:：约至]?\s*(\d+(?:\.\d+)?)")
 
@@ -140,19 +143,22 @@ def lint_agent_response(
     # 3b. 报告没有给出建议股数（风控否决、评级非做多或未给账户净值）时，回复不得自行换算买入股数
     sizing = (report.get("triple_barrier_plan") or {}).get("position_sizing") or {}
     if sizing.get("recommended_shares") is None:
-        m_sh = _BUY_SHARES_RE.search(text)
-        if m_sh:
+        for m_sh in _BUY_SHARES_RE.finditer(text):
             sent_sh = _sentence_around(text, m_sh.start(), m_sh.end())
             # 「每手 100 股」「按 100 股/手假设」「最小申报 200 股」是制度说明，不是建议买入股数。
-            if not any(tok in sent_sh for tok in ("假设", "每手", "最小申报", "步长", "交易制度")):
+            if not any(tok in sent_sh for tok in ("假设", "每手", "最小申报", "步长", "交易制度", "股/手")):
                 errors.append(f"报告未给出建议股数（{sizing.get('reason') or '无账户净值'}），回复不得出现买入股数: {m_sh.group(0)!r}")
+                break
 
     # 4. 禁用术语检查
     for pat in _FORBIDDEN_PROB_PHRASES:
-        # 「规则分不是胜率或上涨概率」是合规的否定说明，不算违规
-        m = next((hit for hit in pat.finditer(text) if not _NEGATION_RE.search(hit.group(0))), None)
-        if m:
-            errors.append(f"检测到违规表述: {m.group(0)!r}（禁止将规则分称为胜率/概率/置信度，禁止将成交分布称为真实持仓筹码）")
+        # 「规则分不是胜率或上涨概率」「不是真实持仓筹码」是合规的否定说明，不算违规
+        for hit in pat.finditer(text):
+            sent_start = max((sm.end() for sm in _SENTENCE_SPLIT_RE.finditer(text, 0, hit.start())), default=0)
+            before_hit = text[sent_start : hit.start()]
+            if not _NEGATION_RE.search(hit.group(0)) and not _NEGATION_RE.search(before_hit):
+                errors.append(f"检测到违规表述: {hit.group(0)!r}（禁止将规则分称为胜率/概率/置信度，禁止将成交分布称为真实持仓筹码）")
+                break
     for hit in dict.fromkeys(_unvalidated_probability_hits(text)):
         errors.append(
             f"检测到未经校验的概率/确定性表述: {hit!r}（只允许引用历史条件频率、通过校验的主观研判、带 95% 区间的回测胜率与区间覆盖率）"
@@ -191,7 +197,7 @@ def lint_agent_response(
                 sent = _sentence_around(text, m_wr.start(), m_wr.end())
                 if not _SAMPLE_HINT_RE.search(sent):
                     errors.append("小样本回测胜率必须同时给出样本量 n（禁止只报百分比，n<30 不构成统计证据）")
-                if _SMALL_SAMPLE_CLAIM_RE.search(sent):
+                if _SMALL_SAMPLE_CLAIM_RE.search(sent) or _SMALL_SAMPLE_CLAIM_RE.search(text[m_wr.start() : min(len(text), m_wr.end() + 120)]):
                     errors.append("小样本回测（n<30）不得被表述为达到/证明 70% 目标或作为充分证据")
 
     # 5. 价格白名单检查（针对带价格语境的数值）
@@ -219,8 +225,12 @@ def lint_agent_response(
             valid_target_prices.append(float(sc_item["target_price"]))
     if isinstance(rs_obj.get("impulse_wave"), dict) and rs_obj["impulse_wave"].get("wave3_1618_target") is not None:
         valid_target_prices.append(float(rs_obj["impulse_wave"]["wave3_1618_target"]))
-    for m_tp in _TARGET_ROLE_PRICE_RE.finditer(text):
-        sent = _sentence_around(text, m_tp.start(), m_tp.end())
+
+    cleaned = text
+    for pat in _NON_PRICE_PATTERNS:
+        cleaned = pat.sub(" ", cleaned)
+    for m_tp in _TARGET_ROLE_PRICE_RE.finditer(cleaned):
+        sent = _sentence_around(cleaned, m_tp.start(), m_tp.end())
         if any(w in sent for w in ("测算", "ABC", "浪")):
             continue
         cand_tp = float(m_tp.group(1))
@@ -229,10 +239,6 @@ def lint_agent_response(
             and not _price_in_whitelist(cand_tp, valid_target_prices, wl_tol)
         ):
             errors.append(f"不得把浪型测算位 {cand_tp} 当作目标位/目标价: {m_tp.group(0)!r}")
-
-    cleaned = text
-    for pat in _NON_PRICE_PATTERNS:
-        cleaned = pat.sub(" ", cleaned)
     seen_spans: set[tuple[int, int]] = set()
     for pat in (_CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_PRICE_BEFORE_RE):
         for m in pat.finditer(cleaned):

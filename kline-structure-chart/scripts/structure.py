@@ -20,7 +20,7 @@ EXT_RATIO = 1.618           # 1.000 倍位被触及后追加的延伸测算位
 MAX_ALT_COUNTS = 2          # 主计数之外最多输出的备选浪型计数
 MIN_TRIGGER_ATR = 0.5       # 推演触发位至少离最新收盘价这么多个 ATR，更近的价位只作「正在争夺」披露
 SIGMA_LOOKBACK = 60         # 推演折点时间用的日对数收益 RMS 回看根数（与 forecast.py 同口径）
-RETRACE_RATIOS = (0.382, 0.5, 0.618)
+RETRACE_RATIOS = (0.236, 0.382, 0.5, 0.618, 0.786)
 MIN_RAIL_SPAN = 10          # 轨道两个支点之间至少间隔的K线根数
 RAIL_RECENT_PIVOTS = 4      # 轨道候选只在最近这么多个同类已确认拐点中两两组合（描述当前结构，而非窗口最早的拐点）
 FLAT_ATR_PER_BAR = 0.025   # 轨道每根K线移动不足 0.025×ATR（40 根K线累计不足 1 个 ATR）视为走平
@@ -687,7 +687,8 @@ def build_ladder(
         if value:
             items.append((value, f"MA{n}"))
     for lvl in fibs["retracements"]:
-        items.append((lvl["price"], f"{lvl['ratio']:.3f}{fibs['kind']}"))
+        if lvl["ratio"] in (0.382, 0.5, 0.618):
+            items.append((lvl["price"], f"{lvl['ratio']:.3f}{fibs['kind']}"))
     if scenario:
         for lvl in scenario["levels"]:
             items.append((lvl["price"], f"ABC {lvl['ratio']:.3f}倍位"))
@@ -718,8 +719,8 @@ def _src(level: dict) -> str:
     return "/".join(level["sources"])
 
 
-# 「重要位」：形态轨道、ABC 测算位、近120日极值、当前波段极值、均线、黄金分割位。普通前高前低与缺口只作目标参考。
-MAJOR_SOURCE_PREFIXES = ("形态", "已跌破", "已突破", "ABC", f"近{STRUCT_DAYS}日", "近期", "MA", "0.")
+# 「重要位」：形态轨道、ABC 测算位、近120日极值、当前波段极值、均线、核心黄金分割位(0.382/0.500/0.618)。普通前高前低与缺口只作目标参考。
+MAJOR_SOURCE_PREFIXES = ("形态", "已跌破", "已突破", "ABC", f"近{STRUCT_DAYS}日", "近期", "MA", "0.382", "0.500", "0.618")
 
 
 def _is_major(level: dict) -> bool:

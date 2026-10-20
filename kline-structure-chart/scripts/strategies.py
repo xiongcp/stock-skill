@@ -447,15 +447,21 @@ def compute_multi_timeframe_score(
             "NEUTRAL_WATCH": "中性",
         }[rating]
         rating_cn = f"均值回归体制评分{mr_label}"
+        rev_dir_cn = (
+            f"当前短期偏离均线超买压制扣分 {rev_adj:+.1f}"
+            if rev_adj < -0.5
+            else (f"当前回落超卖补偿加分 {rev_adj:+.1f}" if rev_adj > 0.5 else f"位置微调 {rev_adj:+.1f}")
+        )
         regime_adjustment = {
             "applied": True,
             "scoring_regime": "MEAN_REVERSION_ADAPTED",
             "components_total": components_total,
             "adjusted_rule_score": total_score,
+            "reversion_score_adj": round(rev_adj, 2),
             "causal_momentum_ic_15d": round(mom_ic, 3),
             "note_cn": (
                 f"均值回归体制：近 240 日 20 日均线偏离与随后 15 日收益的秩相关为 {mom_ic:.3f}（≤ -0.10）且长期均线偏弱，"
-                f"四组规则分项合计 {components_total:.1f} 经反转调整为 {total_score:.1f}；"
+                f"四组规则分项合计 {components_total:.1f} 经反转调整为 {total_score:.1f}（{rev_dir_cn}）；"
                 "该分数衡量的是均值回归下的追高/回落位置，不代表多周期共振或承压"
             ),
         }

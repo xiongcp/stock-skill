@@ -27,19 +27,22 @@ _CONFLICT_ID_RE = re.compile(r"\bC\d+\b")
 # 剔除非价格数字的模式：日期、证据编号、指标参数名、百分比、百分点、样本量、天数/根数/手数/股数/倍数/ATR/分数/基点
 _NON_PRICE_PATTERNS = (
     re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
-    re.compile(r"\b(?:RSI|ATR|ADX|RVOL|BBW|HV|IC|BSS|Brier)\d*\s*(?:\(\s*\d+\s*\))?\s*(?:[=:：约为达]|处于|位于)\s*[+-]?\d+(?:\.\d+)?", re.I),
+    re.compile(r"\b(?:RSI|ATR|ADX|RVOL|BBW|HV|IC|BSS|Brier|RS|C/A)\d*\s*(?:\(\s*\d+\s*\))?\s*(?:[=:：约为达]|处于|位于)\s*[+-]?\d+(?:\.\d+)?", re.I),
+    re.compile(r"(?:盈亏比|风险收益比)\s*(?:[=:：约为达]|处于)?\s*\d+(?:\.\d+)?"),
     re.compile(r"\b(?:E|C|MA|EMA|SMA|RSI|ATR|ADX|RVOL|TP|Wave|W)\d+\b", re.I),
     re.compile(r"\b(?:Supertrend|MACD)\s*\(\s*\d+(?:\s*,\s*\d+)*\s*\)", re.I),
     re.compile(r"\b(?:RSI|ATR|ADX|RVOL|MA|EMA|SMA)\s*\(\s*\d+\s*\)", re.I),
     re.compile(r"[+-]?\d+(?:\.\d+)?\s*%"),
     re.compile(r"[+-]?\d+(?:\.\d+)?\s*个?百分点"),
     re.compile(r"\bn\s*=\s*\d+\b", re.I),
+    re.compile(r"(?<![\d.])\d+(?:\.\d+)?\s*/\s*100\b"),
     # 中文单位后面通常紧跟汉字（\b 在两个汉字之间不成立），用前后断言代替 \b
     re.compile(r"(?<![\d.])\d+(?:\.\d+)?\s*(?:个?交易日|日|天|根|手|股|笔|次|浪|分|bps|倍)(?![A-Za-z0-9])"),
-    # 波浪编号（「浪 1」「第 3 浪」「Wave 4」）不是价格，必须先从价格候选中剔除
-    re.compile(r"(?:第\s*)?[浪Ww](?:ave)?\s*[1-5ABCDEabcde](?![A-Za-z0-9])"),
+    # 波浪编号（「浪 1」「第 3 浪」「第 3 主升浪」「浪 3/5」「Wave 4」）不是价格，必须先从价格候选中剔除
+    re.compile(r"(?:第\s*\d+\s*[一-鿿]{0,4}\s*浪|(?:第\s*)?[浪Ww](?:ave)?\s*[1-5ABCDEabcde](?:\s*/\s*[1-5ABCDEabcde])?)(?![A-Za-z0-9])"),
+    re.compile(r"(?<![\d.])(?:0\.236|0\.382|0\.500?|0\.618|0\.786|1\.000|1\.618)\s*(?:倍位?|回撤位?|反弹位?|延伸位?|测算位?|[×*xX])"),
     re.compile(r"\b\d+(?:\.\d+)?\s*个\s*ATR\b", re.I),
-    re.compile(r"\b\d+(?:\.\d+)?\s*[×xX]\b"),
+    re.compile(r"(?<![\d.])\d+(?:\.\d+)?\s*(?:[×*]|[xX]\b)"),
     re.compile(r"[+-]?\d+(?:\.\d+)?\s*R\b"),
     re.compile(r"±\s*\d+(?:\.\d+)?"),
 )

@@ -494,6 +494,7 @@ def get_daily_price_limit_pct(
     """
     if market != "CN" or asset_type == "index" or is_ipo_no_limit:
         return None
+    st_flag = is_st_instrument(symbol, name=name, is_st=is_st)
     day = (day_str or date.today().isoformat())[:10]
     code = symbol.upper().split(".")[0]
     if symbol.upper().endswith(".BJ") or code.startswith(("8", "4", "92")):
@@ -502,11 +503,11 @@ def get_daily_price_limit_pct(
         return 0.20
     if code.startswith(("300", "301")):
         if day < CHINEXT_REGISTRATION_DAY:
-            return 0.05 if is_st else 0.10
+            return 0.05 if st_flag else 0.10
         return 0.20
     if (asset_type == "etf" or code.startswith(("15", "51", "56", "58"))) and is_cn_20pct_etf(symbol, name):
         return 0.10 if day < CHINEXT_REGISTRATION_DAY else 0.20
-    if is_st:
+    if st_flag:
         return 0.05 if day < MAIN_BOARD_ST_10PCT_DAY else 0.10
     return 0.10
 
@@ -715,6 +716,7 @@ def get_market_microstructure_rules(
         ),
         "can_intraday_roundtrip": tradable,
         "daily_price_limit_pct": None,
+        "tick_size": float(tick_size_for(10.0, "US", asset_type, day_str)),
         "lot_size": 1,
         "min_order_shares": 1,
         "lot_step": 1,
@@ -766,7 +768,7 @@ def apply_point_in_time_adjustment(
         adj_bar["raw_high"] = float(bar["high"])
         adj_bar["raw_low"] = float(bar["low"])
         adj_bar["raw_close"] = float(bar["close"])
-        adj_bar["adj_factor"] = round(factor, 8)
+        adj_bar["adj_factor"] = round(factor, 12)
         adj_bar["open"] = round(float(bar["open"]) * factor, 4)
         adj_bar["high"] = round(float(bar["high"]) * factor, 4)
         adj_bar["low"] = round(float(bar["low"]) * factor, 4)
@@ -784,13 +786,13 @@ def rescale_bars_as_of(bars: list[dict[str, Any]], cut_idx: int) -> list[dict[st
     if not bars:
         return []
     base_factor = float(bars[cut_idx].get("adj_factor") or 1.0)
-    if abs(base_factor - 1.0) <= 1e-9 or base_factor <= 0:
+    if abs(base_factor - 1.0) <= 1e-12 or base_factor <= 0:
         return [dict(b) for b in bars]
     out: list[dict[str, Any]] = []
     for b in bars:
         bf = float(b.get("adj_factor") or 1.0)
         nb = dict(b)
-        if abs(bf - base_factor) <= 1e-9 and "raw_close" in b:
+        if abs(bf - base_factor) <= 1e-12 and "raw_close" in b:
             nb["open"] = float(b["raw_open"])
             nb["high"] = float(b["raw_high"])
             nb["low"] = float(b["raw_low"])
@@ -802,6 +804,6 @@ def rescale_bars_as_of(bars: list[dict[str, Any]], cut_idx: int) -> list[dict[st
             nb["high"] = round(float(b.get("raw_high", b["high"])) * rel, 4)
             nb["low"] = round(float(b.get("raw_low", b["low"])) * rel, 4)
             nb["close"] = round(float(b.get("raw_close", b["close"])) * rel, 4)
-            nb["adj_factor"] = round(rel, 8)
+            nb["adj_factor"] = round(rel, 12)
         out.append(nb)
     return out

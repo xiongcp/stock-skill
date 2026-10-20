@@ -289,6 +289,11 @@ def render_report_markdown(
         lines += [f"- 仓位：{sizing['reason']}"]
     if debate.get("risk_officer_veto"):
         lines += ["- 风控已否决：以上点位只用于观察与复核，不构成做多建议。"]
+    elif decision.get("action") not in ("LONG_CONFIRMED", "WATCH_LONG_SETUP"):
+        lines += ["- 非做多评级提示：当前未触发做多确认，以下点位仅作结构观察与条件触发参考，当前不构成买入建议。"]
+    aq_traps = decision.get("anti_quant_traps") or {}
+    for aq_w in aq_traps.get("warnings_cn") or []:
+        lines += [f"- 反量化收割风险提示：{aq_w}。"]
     defense = plan.get("holder_defense_plan") or {}
     if defense.get("available"):
         lines += ["", "**持仓防守计划**（已持有该标的时参考）", ""] + [f"- {r}" for r in defense["rules"]]
@@ -527,6 +532,13 @@ def render_report_markdown(
             lines += [f"- 关键观察价位（均取自 JSON 白名单）：{'；'.join(kl_bits)}。"]
         if active_judgment.get("falsification_condition"):
             lines += [f"- 证伪条件（什么情况说明判断错了）：{active_judgment['falsification_condition']}"]
+        for c in jpack.get("conflicting_signals") or []:
+            bull_ids = ", ".join(str(x) for x in (c.get("bullish_evidence_ids") or []))
+            bear_ids = ", ".join(str(x) for x in (c.get("bearish_evidence_ids") or []))
+            lines += [
+                f"- 冲突信号 **{c.get('id', 'C?')}**：{c.get('summary_cn', '')}"
+                f"（偏多证据：{bull_ids or '—'}；偏空/风控证据：{bear_ids or '—'}）"
+            ]
         score_sum = judgment_score_summary or active_judgment.get("historical_score_summary")
         if isinstance(score_sum, dict) and score_sum.get("matured_judgments", 0) >= 30:
             bss_val = float(score_sum.get("brier_skill_score") or 0.0)

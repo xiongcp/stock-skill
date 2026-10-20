@@ -37,7 +37,7 @@ if str(SKILL_SCRIPTS) not in sys.path:
 
 from analysis import analyze_bundle  # noqa: E402
 from evaluation import label_triple_barrier_event  # noqa: E402
-from market_rules import resolve_instrument, rescale_bars_as_of  # noqa: E402
+from market_rules import is_st_instrument, resolve_instrument, rescale_bars_as_of  # noqa: E402
 
 WARMUP_BARS = 420
 WINDOW_BARS = 760
@@ -100,12 +100,15 @@ def _analyze_stock_day(symbol: str, payload: dict, bars: list[dict], idx: dict[s
     market = _W["market"]
     horizon = _W["horizon"]
     n = len(bars)
-    inst = resolve_instrument(symbol, market=market, asset_type="equity", name=payload.get("name", ""), is_st=False)
+    sym_name = str(payload.get("name") or "")
+    sym_is_st = is_st_instrument(symbol, name=sym_name)
+    inst = resolve_instrument(symbol, market=market, asset_type="equity", name=sym_name, is_st=sym_is_st)
     request = {
         "symbol": symbol,
         "market": market,
         "asset_type": "equity",
-        "name": payload.get("name", ""),
+        "name": sym_name,
+        "is_st": sym_is_st,
         "display_bars": 120,
         "horizon_bars": horizon,
         "account_equity": None,
@@ -134,11 +137,11 @@ def _analyze_stock_day(symbol: str, payload: dict, bars: list[dict], idx: dict[s
                 "vix_source": f"CACHE(^VIX,{day})" if vix_value is not None else "CACHE_MISS",
                 "earnings_date": None,
                 "earnings_date_source": "NOT_AVAILABLE",
-                "is_st": False,
+                "is_st": sym_is_st,
                 "is_ipo_no_limit": False,
             },
             "provenance": {
-                "source": payload.get("source", "CACHE"),
+                "source": payload.get("source", f"CACHED_{market}_DAILY"),
                 "as_of": day,
                 "adjustment": "total_return",
                 "adjustment_status": {"requested": "total_return", "applied": "total_return",
@@ -183,13 +186,13 @@ def _analyze_stock_day(symbol: str, payload: dict, bars: list[dict], idx: dict[s
             market=market,
             asset_type="equity",
             symbol=symbol,
-            is_st=False,
+            is_st=sym_is_st,
             is_ipo_no_limit=False,
             trailing_stop=bool(ratchet.get("enabled", True)),
             trigger_r=float(ratchet.get("trigger_r", 0.90)),
             confirm_close_r=float(ratchet.get("confirm_close_r", 0.30)),
             lock_r=float(ratchet.get("lock_r", 0.08)),
-            name=payload.get("name", ""),
+            name=sym_name,
         )
         mbs = rep.get("market_benchmark") or {}
         hf = None
@@ -233,13 +236,13 @@ def _analyze_stock_day(symbol: str, payload: dict, bars: list[dict], idx: dict[s
                 market=market,
                 asset_type="equity",
                 symbol=symbol,
-                is_st=False,
+                is_st=sym_is_st,
                 is_ipo_no_limit=False,
                 trailing_stop=bool(ratchet.get("enabled", True)),
                 trigger_r=float(ratchet.get("trigger_r", 0.90)),
                 confirm_close_r=float(ratchet.get("confirm_close_r", 0.30)),
                 lock_r=float(ratchet.get("lock_r", 0.08)),
-                name=payload.get("name", ""),
+                name=sym_name,
                 entry_price_override=fill_px,
             )
             if cand_res.get("tradable"):

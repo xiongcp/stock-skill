@@ -179,7 +179,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     width: 100%;
     height: auto;
     aspect-ratio: 1440 / 760;
-    min-height: 240px;
+    min-height: 160px;
     display: block;
     border-radius: 6px;
     background: #0b0f17;
@@ -443,7 +443,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   const settleRaw = tb.market_microstructure.settlement;
   const settleLabel = SETTLEMENT_CN[settleRaw] || settleRaw;
   addKv(barGrid, '计划类型', dec.setup_label_cn);
-  addKv(barGrid, debate.risk_officer_veto ? '观察区 (风控已否决)' : '建议入场区', fmtPrice(tb.entry_zone[0]) + ' ~ ' + fmtPrice(tb.entry_zone[1]));
+  addKv(barGrid, debate.risk_officer_veto ? '观察区（风控已否决）' : '建议入场区', fmtPrice(tb.entry_zone[0]) + ' ~ ' + fmtPrice(tb.entry_zone[1]));
   addKv(barGrid, '下屏障 (硬止损 SL)', fmtPrice(tb.stop_loss_barrier));
   addKv(barGrid, '上屏障 (TP1 / TP2)', fmtPrice(tb.take_profit_1) + ' / ' + fmtPrice(tb.take_profit_2));
   addKv(barGrid, '时间屏障 / 净盈亏比', tb.time_barrier_bars + ' bars / ' + tb.risk_reward_ratio + ' R');
@@ -452,6 +452,9 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     ? sizing.recommended_shares + '股'
     : (sizing.account_equity ? '不给出（见报告风控）' : '需账户净值');
   addKv(barGrid, '制度 / 建议股数', settleLabel + ' / ' + sharesLabel);
+  if (dec.decision_probability && dec.decision_probability.available) {{
+    addKv(barGrid, '开发集校准先验 (L4)', (dec.decision_probability.p_net_positive * 100).toFixed(1) + '% 净正 / ' + (dec.decision_probability.p_tp_before_sl * 100).toFixed(1) + '% 先到TP1');
+  }}
 
   const scenList = document.getElementById('scenarioList');
   const activeScenarios = (REPORT.rule_scenarios && REPORT.rule_scenarios.scenarios) ? REPORT.rule_scenarios.scenarios : [];
@@ -489,6 +492,12 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     const bearIds = (c.bearish_evidence_ids || []).join(', ') || '—';
     li.textContent = '[冲突信号 ' + (c.id || 'C?') + '] ' + (c.summary_cn || '') +
       '（偏多证据：' + bullIds + '；偏空/风控证据：' + bearIds + '）';
+    debList.appendChild(li);
+  }});
+  const aqWarnings = (dec.anti_quant_traps && dec.anti_quant_traps.warnings_cn) ? dec.anti_quant_traps.warnings_cn : [];
+  aqWarnings.forEach(function(w) {{
+    const li = document.createElement('li');
+    li.textContent = '[反量化防收割提示] ' + w;
     debList.appendChild(li);
   }});
 
@@ -1062,7 +1071,12 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   }}
 
   function drawRsComparison(W, H, padL, padR, padT, mainB) {{
-    const rs = bench.rs_series;
+    let rs = bench.rs_series;
+    if (activeReplayIdx < replays.length && replays[activeReplayIdx] && replays[activeReplayIdx].as_of) {{
+      const cutDay = replays[activeReplayIdx].as_of;
+      const cutRs = rs.filter(function(r) {{ return r.day <= cutDay; }});
+      if (cutRs.length > 2) rs = cutRs;
+    }}
     const plotW = W - padL - padR;
     const vals = [];
     rs.forEach(function(r) {{ vals.push(r.target_norm, r.benchmark_norm, r.rs_line); }});
