@@ -20,7 +20,7 @@
     "market": "CN",
     "asset_type": "equity",
     "horizon_bars": 15,
-    "total_bars": 760,
+    "total_bars": 1023,
     "method": "LIVE_PLAN_REPLAY_V6",
     "decision_window": {
       "start_day": "2025-06-25",
@@ -92,7 +92,7 @@
       "BENCHMARK_WEAK": 31
     },
     "rule_score_ic": {
-      "spearman": 0.348,
+      "spearman": 0.349,
       "decisions": 301,
       "effective_independent_samples": 20,
       "forward_horizon_bars": 15,
@@ -304,10 +304,10 @@
     "sample_trades": [
       {
         "tradable": true,
-        "entry_idx": 671,
+        "entry_idx": 934,
         "entry_day": "2026-06-04",
         "entry_price": 1278.99,
-        "exit_idx": 681,
+        "exit_idx": 944,
         "exit_day": "2026-06-18",
         "exit_price": 1233.4,
         "holding_bars": 11,
@@ -337,10 +337,10 @@
       },
       {
         "tradable": true,
-        "entry_idx": 683,
+        "entry_idx": 946,
         "entry_day": "2026-06-23",
         "entry_price": 1239.0,
-        "exit_idx": 685,
+        "exit_idx": 948,
         "exit_day": "2026-06-25",
         "exit_price": 1201.11,
         "holding_bars": 3,
@@ -370,10 +370,10 @@
       },
       {
         "tradable": true,
-        "entry_idx": 688,
+        "entry_idx": 951,
         "entry_day": "2026-06-30",
         "entry_price": 1187.0,
-        "exit_idx": 699,
+        "exit_idx": 962,
         "exit_day": "2026-07-15",
         "exit_price": 1251.02,
         "holding_bars": 12,
@@ -409,9 +409,9 @@
       "nominal_80pct_coverage": 0.905,
       "q50_mae_pct": 2.52,
       "random_walk_mae_pct": 2.52,
-      "rolling_all_cutoffs_coverage_50": 0.502,
-      "rolling_all_cutoffs_coverage_80": 0.783,
-      "rolling_evaluation_samples": 631,
+      "rolling_all_cutoffs_coverage_50": 0.512,
+      "rolling_all_cutoffs_coverage_80": 0.79,
+      "rolling_evaluation_samples": 894,
       "note": "evaluated_cutoffs 为按步长 H 抽样的无重叠独立截面子集；rolling_all_cutoffs_* 与主报告 calibration_audit 完全一致。q50 采用最新收盘价（无漂移），因此与随机游走误差一致。"
     }
   }

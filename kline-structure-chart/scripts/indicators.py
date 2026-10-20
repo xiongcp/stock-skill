@@ -369,6 +369,7 @@ def compute_qlib_orthogonal_factors(bars: list[dict[str, Any]], atr_vals: list[f
     o, h, l, c = float(last["open"]), float(last["high"]), float(last["low"]), float(last["close"])
     rng = max(1e-9, h - l)
     body_ratio = abs(c - o) / rng
+    close_in_range = (c - l) / rng
     upper_wick = (h - max(o, c)) / rng
     lower_wick = (min(o, c) - l) / rng
     wick_skew = round(lower_wick - upper_wick, 4)
@@ -377,6 +378,10 @@ def compute_qlib_orthogonal_factors(bars: list[dict[str, Any]], atr_vals: list[f
     pv_corr = pv_corr_series[-1] if pv_corr_series[-1] is not None else 0.0
 
     atr_last = atr_vals[-1] if (atr_vals and atr_vals[-1]) else max(1e-6, h - l)
+    prev_c = closes[-2] if len(closes) >= 2 else o
+    rv_vals = rvol(volumes, 20)
+    rv_last = float(rv_vals[-1]) if (rv_vals and rv_vals[-1] is not None) else 1.0
+    effort_vs_result = ((c - prev_c) / max(1e-6, float(atr_last))) / max(0.25, rv_last)
     mom10 = (c - closes[-11]) / (atr_last * math.sqrt(10)) if len(closes) >= 11 and atr_last > 0 else 0.0
 
     # HV20 / HV60 ratio
@@ -386,10 +391,12 @@ def compute_qlib_orthogonal_factors(bars: list[dict[str, Any]], atr_vals: list[f
     hv_ratio = round(hv20 / hv60, 3) if hv60 > 0 else 1.0
 
     return {
+        "close_in_range": round(close_in_range, 4),
         "body_to_range": round(body_ratio, 4),
         "upper_wick_ratio": round(upper_wick, 4),
         "lower_wick_ratio": round(lower_wick, 4),
         "wick_skewness": wick_skew,
+        "effort_vs_result": round(effort_vs_result, 4),
         "corr_close_logvol_20d": pv_corr,
         "atr_norm_momentum_10d": round(mom10, 4),
         "hv20_annualized": round(hv20, 4),

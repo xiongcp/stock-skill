@@ -9,12 +9,34 @@ from market_rules import (
     round_shares_to_lot,
     round_to_tick,
     round_trip_cost_rate,
+    tick_size_for,
 )
 
 
 def _num_or(mapping: dict[str, Any], key: str, default: float) -> float:
     val = mapping.get(key)
     return default if val is None else float(val)
+
+
+def _avoid_round_number_stop(
+    raw_stop: float,
+    entry_low: float,
+    market: str,
+    asset_type: str,
+    as_of_day: str | None,
+) -> float:
+    """防程序化扫损（Anti-Stop-Hunt）：若量化后的止损位恰好落在整数/半整数拥挤挂单关口，向下偏移 2 个 tick 避让。"""
+    st = round_to_tick(raw_stop, market, asset_type, as_of_day)
+    if st <= 0:
+        return st
+    tick = float(tick_size_for(st, market, asset_type, as_of_day))
+    if st >= 5.0 and tick > 0:
+        nearest_half = round(st * 2.0) / 2.0
+        if abs(st - nearest_half) <= 1.05 * tick:
+            shifted = round_to_tick(st - 2.0 * tick, market, asset_type, as_of_day)
+            if 0 < shifted < entry_low:
+                return shifted
+    return st
 
 
 # 开发集（2021-01-04..2024-12-09，三市场各 1500 只/日 PIT 真实股票池）校准的高置信超跌/共振反转先验
@@ -43,6 +65,14 @@ _DEV_CALIBRATED_REBOUND_PRIORS: dict[str, dict[str, Any]] = {
         "dev_effective_episodes": 8875,
         "ci95": [0.7378, 0.7559],
     },
+}
+
+
+# 反量化规则的门禁范围（Dev 2021–2024 + Val 2025H1 的拦截归因结果，见 research/anti_quant_filter_study.py）：
+# 证据支持的规则才改变 setup/评级；证据相反或样本不足的规则只输出提示，不降级、不否决。
+_ANTI_QUANT_GATES: dict[str, frozenset[str]] = {
+    "ignition_trap_downgrade": frozenset({"US"}),  # CN/HK 的"被拦截组"反而更好
+    "algo_bleed_gate": frozenset({"CN", "US"}),  # HK Dev 拦截组反而更好
 }
 
 
@@ -95,27 +125,80 @@ def compute_triple_barrier_plan(
     s1 = float(projections["breakdown_level"]["price"])
     bull_target_ladder = float(projections["bull"]["target_price"])
 
-    # Determine setup type: RIGHT_SIDE_BREAKOUT vs LEFT_SIDE_SUPPORT_RETEST vs ABSTAIN_WAIT
+    # Determine setup type: RIGHT_SIDE_BREAKOUT vs LEFT_SIDE_PULLBACK vs WAIT_CONFIRMATION
     has_bull_div = any(p["pattern"] == "RSI_BULLISH_DIVERGENCE" for p in algebraic_patterns)
     has_bull_candle = any(p["category"] == "candlestick" and p["direction"] == "BULLISH" for p in algebraic_patterns)
+    recent_3_days = {b["day"] for b in bars[-3:]}
+    has_liquidity_sweep = any(
+        p["pattern"] == "LIQUIDITY_SWEEP_BULLISH" and p.get("observed_at") in recent_3_days for p in algebraic_patterns
+    )
+    has_bull_engulfing_recent = any(
+        p["pattern"] == "CDL_BULLISH_ENGULFING" and p.get("observed_at") in recent_3_days for p in algebraic_patterns
+    )
     last_o = float(last_bar["open"])
     last_h = float(last_bar["high"])
     last_l = float(last_bar["low"])
-    lower_wick_ratio = (min(last_c, last_o) - last_l) / max(1e-6, last_h - last_l)
-    is_stabilizing_bar = (last_c >= last_o) or (lower_wick_ratio >= 0.35) or has_bull_div or has_bull_candle
-    is_volume_contraction = rv <= 1.10
+    prev_c = float(bars[-2]["close"]) if len(bars) >= 2 else last_o
+    bar_span = max(1e-9, last_h - last_l)
+    close_in_range = (last_c - last_l) / bar_span
+    upper_wick_ratio = (last_h - max(last_c, last_o)) / bar_span
+    lower_wick_ratio = (min(last_c, last_o) - last_l) / bar_span
+    body_to_range = abs(last_c - last_o) / bar_span
+    effort_vs_result = ((last_c - prev_c) / max(1e-6, atr14)) / max(0.25, rv)
 
     win60 = bars[-min(60, len(bars)) :]
     hi60 = max(float(b["high"]) for b in win60) if win60 else last_c
     lo60 = min(float(b["low"]) for b in win60) if win60 else last_c
     win20 = bars[-min(20, len(bars)) :]
     hi20 = max(float(b["high"]) for b in win20) if win20 else last_c
+    lo20 = min(float(b["low"]) for b in win20) if win20 else last_l
+    high_rank_20 = 0.5 if hi20 <= lo20 else (max(last_c, last_o) - lo20) / max(1e-9, hi20 - lo20)
     ema20 = _num_or(ind_snapshot["trend"], "ema20", last_c)
+    ema50 = _num_or(ind_snapshot["trend"], "ema50", ema20)
+    sma5 = sum(float(b["close"]) for b in bars[-5:]) / max(1, min(5, len(bars)))
+    highs_falling_5d = (
+        len(bars) >= 5
+        and float(bars[-1]["high"]) < float(bars[-3]["high"]) < float(bars[-5]["high"])
+        and last_c < sma5
+    )
     ext_atr = (last_c - ema20) / atr14
     tf_aligned = mtf_score.get("timeframes_aligned") or {}
     scoring_regime = tf_aligned.get("scoring_regime", "MOMENTUM_TREND")
     w_pos = _num_or(tf_aligned, "weekly_60w_position_pct", 50.0)
     climax_distribution = (hi60 / max(1e-6, lo60) >= 1.60) and (last_c <= hi20 - 2.0 * atr14) and (last_c < ema20)
+
+    # 反量化机制 3：识别机构 TWAP/VWAP 算法拆单阴跌（中短期均线空头排列 last_c < ema20 <= ema50），禁止仅凭单根缩量微阳线左侧接飞刀
+    algo_grinding_bleed = (last_c < ema20) and (ema20 <= ema50)
+    micro_bos = (
+        len(bars) >= 4
+        and last_c > max(float(b["high"]) for b in bars[-4:-1])
+        and close_in_range >= 0.65
+    )
+    right_turn_confirmed = (
+        micro_bos
+        or has_bull_engulfing_recent
+        or (has_liquidity_sweep and (has_bull_div or close_in_range >= 0.58))
+        or (has_bull_div and last_c > last_o and close_in_range >= 0.60)
+    )
+    if algo_grinding_bleed and scoring_regime != "MEAN_REVERSION_ADAPTED" and market in _ANTI_QUANT_GATES["algo_bleed_gate"]:
+        is_stabilizing_bar = right_turn_confirmed
+    else:
+        is_stabilizing_bar = (
+            (last_c >= last_o)
+            or (lower_wick_ratio >= 0.35)
+            or has_bull_div
+            or has_bull_candle
+            or has_liquidity_sweep
+        )
+    is_volume_contraction = rv <= 1.10
+
+    # 反量化机制 1：识别量化点火假突破/冲高回落派发（假阳真阴、长上影线 >40%、收盘未能站稳日内上半区 <58%）
+    is_ignition_bull_trap = (last_c < last_o) or (upper_wick_ratio > 0.40) or (close_in_range < 0.58)
+    is_bull_trap_churn = (
+        rv >= 2.2
+        and (body_to_range < 0.28 or upper_wick_ratio >= 0.42)
+        and high_rank_20 >= 0.75
+    )
 
     is_mr_left_pullback = (
         scoring_regime == "MEAN_REVERSION_ADAPTED"
@@ -124,41 +207,67 @@ def compute_triple_barrier_plan(
         and wedge.get("status") != "below"
         and ext_atr <= 0.15
         and w_pos <= 78.0
-        and (is_volume_contraction or has_bull_div or has_bull_candle)
+        and (is_volume_contraction or has_bull_div or has_bull_candle or has_liquidity_sweep)
     )
     is_std_left_pullback = (
         rule_score >= 65.0
         and not climax_distribution
         and is_stabilizing_bar
-        and (has_bull_div or has_bull_candle or (abs(last_c - s1) <= 0.8 * atr14 and is_volume_contraction))
+        and (
+            has_bull_div
+            or has_bull_candle
+            or has_liquidity_sweep
+            or (abs(last_c - s1) <= 0.8 * atr14 and is_volume_contraction)
+        )
     )
 
-    if wedge.get("status") == "above" or (last_c >= r1 and rv >= 1.35):
+    raw_breakout_signal = wedge.get("status") == "above" or (last_c >= r1 and rv >= 1.35)
+    ignition_gate_active = market in _ANTI_QUANT_GATES["ignition_trap_downgrade"]
+    if raw_breakout_signal and not (is_ignition_bull_trap and ignition_gate_active):
         setup_type = "RIGHT_SIDE_BREAKOUT"
         setup_label_cn = "右侧顺势突破确认"
+        single_day_spike = ((last_c - prev_c) > 1.8 * atr14) and (last_c > r1 > s1)
         if last_c >= r1:
-            entry_low = round_to_tick(min(last_c, r1 * 0.996), market, asset_type, as_of_day)
-            entry_high = round_to_tick(max(last_c, r1 * 1.005), market, asset_type, as_of_day)
+            if single_day_spike:
+                # 突破日脉冲涨幅过大：禁止将入场区上沿追在最高点，收敛至突破位 r1 附近的回踩承接带
+                retest_anchor = min(last_c - 0.10 * atr14, max(s1 + 0.20 * atr14, r1))
+                entry_low = round_to_tick(max(s1 * 1.002, retest_anchor - 0.30 * atr14), market, asset_type, as_of_day)
+                entry_high = round_to_tick(max(entry_low, min(last_c, retest_anchor + 0.15 * atr14)), market, asset_type, as_of_day)
+            else:
+                entry_low = round_to_tick(min(last_c, r1 * 0.996), market, asset_type, as_of_day)
+                entry_high = round_to_tick(max(last_c, r1 * 1.005), market, asset_type, as_of_day)
         else:
             entry_low = round_to_tick(max(s1, last_c - 0.35 * atr14), market, asset_type, as_of_day)
             entry_high = round_to_tick(min(r1, last_c + 0.30 * atr14), market, asset_type, as_of_day)
-        stop_loss = round_to_tick(min(s1, max(s1 - 0.25 * atr14, last_c - 1.35 * atr14)), market, asset_type, as_of_day)
+        raw_sl = min(s1, max(s1 - 0.35 * atr14, last_c - 1.35 * atr14))
+        stop_loss = _avoid_round_number_stop(raw_sl, entry_low, market, asset_type, as_of_day)
     elif is_std_left_pullback or is_mr_left_pullback:
         setup_type = "LEFT_SIDE_PULLBACK"
         setup_label_cn = "左侧支撑回踩观察"
         entry_low = round_to_tick(max(s1 * 0.995, last_c - 0.45 * atr14), market, asset_type, as_of_day)
         entry_high = round_to_tick(min(r1, last_c + 0.20 * atr14), market, asset_type, as_of_day)
-        stop_loss = round_to_tick(min(s1 - 0.15 * atr14, max(s1 - 0.50 * atr14, last_c - 1.45 * atr14)), market, asset_type, as_of_day)
+        if has_liquidity_sweep:
+            sweep_anchor = min(s1, last_l)
+            raw_sl = min(sweep_anchor - 0.35 * atr14, max(sweep_anchor - 0.60 * atr14, last_c - 1.50 * atr14))
+            stop_loss = _avoid_round_number_stop(raw_sl, entry_low, market, asset_type, as_of_day)
+        else:
+            raw_sl = min(s1 - 0.15 * atr14, max(s1 - 0.50 * atr14, last_c - 1.45 * atr14))
+            stop_loss = _avoid_round_number_stop(raw_sl, entry_low, market, asset_type, as_of_day)
     else:
         setup_type = "WAIT_CONFIRMATION"
-        setup_label_cn = "区间观察/等待右侧收盘突破"
+        setup_label_cn = (
+            "冲高回落/假阳线待右侧二次确认"
+            if (raw_breakout_signal and is_ignition_bull_trap and ignition_gate_active)
+            else "区间观察/等待右侧收盘突破"
+        )
         if last_c < last_o:
             entry_low = round_to_tick(max(s1, min(r1, last_c + 0.08 * atr14)), market, asset_type, as_of_day)
             entry_high = round_to_tick(max(entry_low, min(r1 * 1.003, last_c + 0.45 * atr14)), market, asset_type, as_of_day)
         else:
             entry_low = round_to_tick(max(s1, last_c - 0.20 * atr14), market, asset_type, as_of_day)
             entry_high = round_to_tick(min(r1, last_c + 0.35 * atr14), market, asset_type, as_of_day)
-        stop_loss = round_to_tick(min(s1 - 0.15 * atr14, max(s1 - 0.50 * atr14, last_c - 1.40 * atr14)), market, asset_type, as_of_day)
+        raw_sl = min(s1 - 0.15 * atr14, max(s1 - 0.50 * atr14, last_c - 1.40 * atr14))
+        stop_loss = _avoid_round_number_stop(raw_sl, entry_low, market, asset_type, as_of_day)
     if entry_low > entry_high:
         entry_low = round_to_tick(last_c * 0.995, market, asset_type, as_of_day)
         entry_high = round_to_tick(last_c * 1.005, market, asset_type, as_of_day)
@@ -208,10 +317,58 @@ def compute_triple_barrier_plan(
         )
 
     vetoed = len(veto_reasons) > 0
-    overextended = (ext_atr > 2.0) or (rsi14 >= 70.0) or climax_distribution
+    ret5_atr = (last_c - float(bars[-6]["close"])) / max(1e-6, atr14) if len(bars) >= 6 else 0.0
+    momentum_crowding = (
+        (ret5_atr > 2.4)
+        or (ext_atr > 1.65)
+        or (w_pos >= 82.0)
+    )
+    overextended = (
+        (ext_atr > 2.0)
+        or (rsi14 >= 70.0)
+        or climax_distribution
+    )
     if scoring_regime == "MEAN_REVERSION_ADAPTED":
         if ext_atr > 0.35 or w_pos > 78.0 or setup_type == "RIGHT_SIDE_BREAKOUT":
             overextended = True
+
+    anti_quant_warnings: list[str] = []
+    if is_bull_trap_churn:
+        anti_quant_warnings.append(
+            f"【仅提示·高位放量滞涨】近20日高位（分位 {high_rank_20*100:.0f}%）放巨量（量比 {rv:.2f}x）却收长上影/窄实体（上影 {upper_wick_ratio*100:.0f}%、实体 {body_to_range*100:.0f}%），形态上接近量化对倒冲高派发；历史回溯未证实其预测力，不改变评级，请自行评估追高风险"
+        )
+    elif raw_breakout_signal and is_ignition_bull_trap:
+        if ignition_gate_active:
+            anti_quant_warnings.append(
+                f"【防冲高回落假突破】盘中虽刺破压力位但收盘拉出上影线（上影占比 {upper_wick_ratio*100:.0f}%、日内收盘分位 {close_in_range*100:.0f}%）或收假阳真阴，已从右侧突破降级为观望确认"
+            )
+        else:
+            anti_quant_warnings.append(
+                f"【仅提示·冲高回落形态】收盘拉出上影线（上影占比 {upper_wick_ratio*100:.0f}%、日内收盘分位 {close_in_range*100:.0f}%）或收假阳真阴；"
+                + ("A 股 T+1 下当日追入次日可能低开，" if market == "CN" else "")
+                + "该市场历史回溯未证实此形态预测力，不改变评级"
+            )
+    if algo_grinding_bleed and not right_turn_confirmed:
+        if market in _ANTI_QUANT_GATES["algo_bleed_gate"]:
+            anti_quant_warnings.append(
+                "【防阴跌接飞刀】收盘低于 EMA20 且 EMA20 不高于 EMA50（中短期均线走弱）；未见右侧微观破位收回（Micro-BOS）或放量吞没前，左侧回踩计划不予确认"
+            )
+        else:
+            anti_quant_warnings.append(
+                "【仅提示·均线走弱】收盘低于 EMA20 且 EMA20 不高于 EMA50；该市场历史回溯未证实此条件的预测力，不改变评级，左侧抄底风险请自行评估"
+            )
+    if momentum_crowding:
+        anti_quant_warnings.append(
+            f"【仅提示·短期涨幅偏大】5日推进 {ret5_atr:+.2f} ATR，偏离 EMA20 {ext_atr:+.2f} ATR，60周分位 {w_pos:.1f}%；历史回溯中此类截面表现并不差，不改变评级，仅提示追高回撤风险"
+        )
+    elif overextended:
+        anti_quant_warnings.append(
+            f"【过热降级】偏离 EMA20 {ext_atr:+.2f} ATR、RSI14 {rsi14:.1f} 或高位派发结构触发过热条件，已不给出做多确认"
+        )
+    if has_liquidity_sweep:
+        anti_quant_warnings.append(
+            "【破底翻扫损收回提示】近期出现盘中刺穿波段前低扫损后放量收阳站回支撑（LIQUIDITY_SWEEP_BULLISH），防守止损已设置于扫损极值下方并避开整数挂单关口"
+        )
 
     if not vetoed and not overextended and rule_score >= 65.0 and setup_type in ("RIGHT_SIDE_BREAKOUT", "LEFT_SIDE_PULLBACK"):
         action = "LONG_CONFIRMED"
@@ -311,6 +468,26 @@ def compute_triple_barrier_plan(
         "risk_veto_applied": vetoed,
         "veto_reasons": veto_reasons,
         "veto_codes": veto_codes,
+        "overextended": overextended,
+        "anti_quant_traps": {
+            "bull_trap_churn": is_bull_trap_churn,
+            "ignition_bull_trap_downgraded": bool(raw_breakout_signal and is_ignition_bull_trap and ignition_gate_active),
+            "gates_active": {
+                "ignition_trap_downgrade": ignition_gate_active,
+                "algo_bleed_gate": market in _ANTI_QUANT_GATES["algo_bleed_gate"],
+                "bull_trap_churn": False,
+                "momentum_crowding": False,
+            },
+            "algo_grinding_bleed": algo_grinding_bleed,
+            "right_turn_confirmed": right_turn_confirmed,
+            "momentum_crowding": momentum_crowding,
+            "liquidity_sweep_reclaim": has_liquidity_sweep,
+            "close_in_range": round(close_in_range, 4),
+            "upper_wick_ratio": round(upper_wick_ratio, 4),
+            "body_to_range": round(body_to_range, 4),
+            "effort_vs_result": round(effort_vs_result, 4),
+            "warnings_cn": anti_quant_warnings,
+        },
     }
 
     # 高置信超跌/大盘共振反转层（2021-2024 开发集校准，用于识别日线级别具有 >=70% 扣费后正收益命中率与正期望收益的反转截面）

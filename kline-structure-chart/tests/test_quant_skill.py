@@ -2203,7 +2203,7 @@ def test_expert_audit_fixes_regression(replay_recorded, tmp_path: Path) -> None:
             pval = sc_item.get(pk)
             if pval is not None:
                 assert round_to_tick(float(pval), "HK", "equity", rep_hk["meta"]["as_of"]) == float(pval)
-    assert "观察区 (风控已否决)" in hk_html
+    assert "观察区（风控已否决）" in hk_html
 
     # 2. A 股 600519.SH：HTML 历史回放快照使用当时点位复权价（2026-05-19 截面不泄漏 2026-06-26 分红），且 Lint 拦截浪型测算位冒充目标价、否决下做多建议与伪造回测胜率
     rep_cn = run_pipeline(
@@ -2407,3 +2407,156 @@ def test_high_conviction_rebound_and_decision_probability_contract(replay_record
     hcp = tb["high_conviction_plan"]
     assert hcp["triggered"] is True
     assert hcp["stop_loss_barrier"] < hcp["entry_zone"][0] <= hcp["entry_zone"][1] < hcp["take_profit_1"]
+
+
+# ---------------------------------------------------------------------------
+# 反量化收割 / 全栈审计修复回归（真实录制行情，不使用任何合成K线）
+# ---------------------------------------------------------------------------
+
+
+def test_liquidity_sweep_bullish_detected_on_real_bars_and_is_causal() -> None:
+    """破底翻扫损收回：真实茅台 2025-07-02 出现形态；截断到该日之前时不得提前出现（因果性）。"""
+    bars = load_recorded("sina_daily/sh600519.json")
+    ind = compute_all_indicators(bars)
+    pats = detect_candlestick_patterns(bars, ind["series"]["atr14"], ind["series"]["rvol20"], lookback=len(bars), max_items=None)
+    sweeps = {p["observed_at"]: p for p in pats if p["pattern"] == "LIQUIDITY_SWEEP_BULLISH"}
+    assert "2025-07-02" in sweeps
+    p = sweeps["2025-07-02"]
+    assert p["direction"] == "BULLISH" and "PriorLow20" in p["formula_verified"]
+    idx = next(i for i, b in enumerate(bars) if b["day"] == "2025-07-02")
+    cut = bars[:idx]
+    ind_cut = compute_all_indicators(cut)
+    pats_cut = detect_candlestick_patterns(cut, ind_cut["series"]["atr14"], ind_cut["series"]["rvol20"], lookback=len(cut), max_items=None)
+    assert "2025-07-02" not in {x["observed_at"] for x in pats_cut}
+
+
+def _ignition_case(replay_recorded, market_override: str | None):
+    """在真实茅台最后一根K线上只改日内形态（高开低走 + 长上影），其余结构原样；可切换 meta.market 验证门禁范围。"""
+    from risk import compute_triple_barrier_plan
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    rep = analyze_bundle(bundle, req, include_replay=False)
+    bars = copy.deepcopy(bundle["target"]["bars"])
+    last = bars[-1]
+    c0 = float(last["close"])
+    last["open"], last["high"], last["low"], last["close"] = c0 * 1.01, c0 * 1.03, c0 * 0.995, c0
+    meta = {**rep["meta"], **({"market": market_override} if market_override else {})}
+    wedge = {**rep["mathematical_indicators"]["structure_levels"]["wedge_structure"], "status": "above"}
+    bench = {**rep["market_benchmark"], "regime_score": 60.0, "benchmark_missing": False}
+    ind = copy.deepcopy(rep["mathematical_indicators"])
+    ind["momentum"]["rvol20"] = 1.60
+    return compute_triple_barrier_plan(bars, meta, ind, wedge, {}, rep["rule_scenarios"], rep["multi_timeframe_score"], [], bench)[0]
+
+
+def test_ignition_trap_downgrades_only_where_evidence_supports(replay_recorded) -> None:
+    """Dev/Val 归因：US 上点火假突破降级有效；CN 上被拦截组反而更好，只提示不降级。"""
+    us = _ignition_case(replay_recorded, "US")
+    assert us["setup_type"] == "WAIT_CONFIRMATION"
+    assert us["anti_quant_traps"]["ignition_bull_trap_downgraded"] is True
+    assert us["anti_quant_traps"]["gates_active"]["ignition_trap_downgrade"] is True
+    assert any("防冲高回落假突破" in w for w in us["anti_quant_traps"]["warnings_cn"])
+
+    cn = _ignition_case(replay_recorded, None)
+    assert cn["setup_type"] == "RIGHT_SIDE_BREAKOUT"
+    assert cn["anti_quant_traps"]["ignition_bull_trap_downgraded"] is False
+    assert cn["anti_quant_traps"]["gates_active"]["ignition_trap_downgrade"] is False
+    assert any("仅提示" in w for w in cn["anti_quant_traps"]["warnings_cn"])
+
+
+def test_hint_only_rules_never_veto_or_downgrade(replay_recorded) -> None:
+    """高位对倒与动量拥挤不再产生否决码，也不改变 overextended。"""
+    dec = _ignition_case(replay_recorded, None)
+    assert "QUANT_BULL_TRAP_CHURN" not in dec["veto_codes"]
+    gates = dec["anti_quant_traps"]["gates_active"]
+    assert gates["bull_trap_churn"] is False and gates["momentum_crowding"] is False
+
+
+def test_st_limit_pct_uses_name_when_flag_missing() -> None:
+    """名称含 ST 时即使调用方没传 is_st，主板涨跌停也必须按 ±5% 处理（2026-07-06 前）。"""
+    assert get_daily_price_limit_pct("CN", "equity", "600079.SH", day_str="2024-03-01", name="ST人福") == 0.05
+    assert get_daily_price_limit_pct("CN", "equity", "600079.SH", day_str="2024-03-01", name="人福医药") == 0.10
+
+
+def test_cached_and_recorded_sources_are_not_unknown() -> None:
+    for src in ("CACHE", "CACHED_CN_BENCHMARK", "CACHED_US_DAILY", "RECORDED_FIXTURE"):
+        assert classify_data_source(src) == "LIVE"
+        assert assess_data_quality(src, src, needs_benchmark=True)["status"] == "OK"
+    assert classify_data_source("DETERMINISTIC_SYNTHETIC_FIXTURE") == "SYNTHETIC"
+
+
+def test_pit_rescale_precision_after_large_split() -> None:
+    """adj_factor 保留 12 位小数：大比例拆股后 rescale 与直接按截面复权的差异 < 1e-9（收盘价 4 位小数内一致）。"""
+    bars = [{"day": f"2024-01-{d:02d}", "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0 + d * 0.01, "volume": 1000} for d in range(1, 21)]
+    actions = [{"ex_date": "2024-01-15", "split_ratio": 40.0, "dividend_factor": 1.0}]
+    full = apply_point_in_time_adjustment(bars, actions, mode="split", as_of_day="2024-01-20")
+    cut_idx = 9  # 2024-01-10，早于拆股日
+    direct = apply_point_in_time_adjustment(bars[: cut_idx + 1], actions, mode="split", as_of_day="2024-01-10")
+    rescaled = rescale_bars_as_of(full, cut_idx)[: cut_idx + 1]
+    for a, b in zip(direct, rescaled):
+        assert abs(a["close"] - b["close"]) < 1e-9
+
+
+def _real_report_for_lint(replay_recorded) -> dict:
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    return analyze_bundle(load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC)), req, include_replay=False)
+
+
+def test_lint_blocks_probability_bragging_variants_but_allows_negations(replay_recorded) -> None:
+    from lint_response import lint_agent_response
+
+    report = copy.deepcopy(_real_report_for_lint(replay_recorded))
+    report["debate_and_veto"]["risk_officer_veto"] = False
+    bt = {"backtest": {"all_long_signals": {"trades": 6, "win_rate_pct": 83.3}}}
+    base = "不构成投资建议。"
+    for bad in (
+        "该信号命中概率达到 72%。",
+        "形态准确率超 75%。",
+        "多周期规则评分的确定性很高。",
+        "主力真实筹码正在吸筹。",
+    ):
+        assert lint_agent_response(bad + base, report), bad
+    ok = "Volume Profile 是成交分布近似，不是真实持仓筹码，也不代表获利盘比例。" + base
+    assert not [e for e in lint_agent_response(ok, report) if "违规表述" in e]
+    small = "回测胜率为 83.3%（n=6），足以说明已达到 70% 目标。" + base
+    assert any("小样本" in e for e in lint_agent_response(small, report, bt))
+
+
+def test_lint_catches_every_buy_shares_mention_under_veto(replay_recorded) -> None:
+    from lint_response import lint_agent_response
+
+    rep = copy.deepcopy(_real_report_for_lint(replay_recorded))
+    rep["debate_and_veto"]["risk_officer_veto"] = True
+    rep["triple_barrier_plan"]["position_sizing"]["recommended_shares"] = None
+    text = "【风控否决】观察。港股每手 100 股，仓位按 100 股/手假设计算。直接买入 500 股。不构成投资建议。"
+    assert any("买入股数" in e for e in lint_agent_response(text, rep))
+    clean = "【风控否决】观察。仓位按 100 股/手假设计算。不构成投资建议。"
+    assert not any("买入股数" in e for e in lint_agent_response(clean, rep))
+
+
+def test_validate_judgment_ignores_wave_numbers_and_ratios() -> None:
+    from validate_judgment import _extract_candidate_prices_from_text
+
+    txt = "收盘跌破浪 1 起点；看至第 3 主升浪，浪 3/5 延伸，1.618 × 浪 1，0.382 反弹位，净盈亏比 1.15，规则综合分为 36.7/100。"
+    assert _extract_candidate_prices_from_text(txt) == []
+
+
+def test_png_draws_volume_profile_poc_and_low_sample_tag(replay_recorded, tmp_path: Path) -> None:
+    """PNG 必须同源绘制 POC（图例与右侧标签），且 L1 情景低样本时带 [低样本]；报告里 HTML 观察区全角一致。"""
+    rep = run_pipeline(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        output_dir=tmp_path,
+    )
+    src = Path(render_structure_chart.__file__).read_text(encoding="utf-8")
+    assert "volume_profile" in src and "POC 成交分布近似" in src and "[低样本] " in src
+    assert rep["volume_profile"]["poc_price"] > 0
+    assert "获利盘" not in src and "主力筹码" not in src
+
+
+def test_structure_fib_ratios_complete(replay_recorded) -> None:
+    from structure import RETRACE_RATIOS
+
+    assert RETRACE_RATIOS == (0.236, 0.382, 0.5, 0.618, 0.786)
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    layer = compute_structure_layer(load_recorded("sina_daily/sh600519.json"), None, 120)
+    assert [lv["ratio"] for lv in layer["fibs"]["retracements"]] == list(RETRACE_RATIOS)

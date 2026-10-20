@@ -96,6 +96,7 @@ def run_pipeline(
         quality_status=quality["status"],
         risk_veto=report["debate_and_veto"],
         conformal_forecast=report["future_projection_15d"],
+        volume_profile=report.get("volume_profile"),
     )
     report["legacy_summary"] = legacy_summary
     report["rendered_paths"] = {

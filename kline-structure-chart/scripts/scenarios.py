@@ -392,8 +392,8 @@ def build_scenarios_with_base_rates(
             elif direction == "BEARISH" and inv_p_clean <= ref:
                 inv_p_clean = rp(ref * (1.0 + max(0.01, 0.4 * atr)))
             # 文案中的失效价必须与写入白名单的价位表量化值一致，否则 lint 会把未量化价判为捏造价格。
-            for old in {f"{float(invalidation_price):.2f}", f"{float(invalidation_price):.3f}"}:
-                new = f"{float(inv_p_clean):.2f}"
+            for old in {f"{float(invalidation_price):.2f}", f"{float(invalidation_price):.3f}", fp(invalidation_price)}:
+                new = fp(inv_p_clean)
                 if old != new and re.search(rf"(?<![\d.]){re.escape(old)}(?![\d])", invalidation_text):
                     invalidation_text = re.sub(rf"(?<![\d.]){re.escape(old)}(?![\d])", new, invalidation_text)
         step1_txt = f"进行中 {fp(ref)}" if is_active else f"触发 {fp(raw_trigger_price)}"
@@ -481,10 +481,10 @@ def build_scenarios_with_base_rates(
     broke_up_recent = bool(broken_up_candidates)
     near_breakout = (not broke_up_recent) and (abs(r1 / ref - 1.0) <= max(0.035, 1.8 * atr) or abs(u / ref - 1.0) <= 1.5 * atr)
     strict_2 = bool(broke_up_recent)
-    rail_ref = _money(max(broken_up_candidates)) if broke_up_recent else _money(max(r1, ref * (1.0 + 0.55 * atr)))
+    rail_ref = rp(_money(max(broken_up_candidates)) if broke_up_recent else _money(max(r1, ref * (1.0 + 0.55 * atr))))
     meas_target = _money(rail_ref + (min(height, ref * 3.0 * atr) if height > 0 else ref * 2.2 * atr))
-    tgt_2 = _money(max(meas_target, float(bull_base["target_price"]), ref * (1.0 + 0.8 * atr)))
-    inv_2 = _money(min(rail_ref - 0.5 * atr_abs, ref - 0.4 * atr_abs))
+    tgt_2 = rp(_money(max(meas_target, float(bull_base["target_price"]), ref * (1.0 + 0.8 * atr))))
+    inv_2 = rp(_money(min(rail_ref - 0.5 * atr_abs, ref - 0.4 * atr_abs)))
     candidates.append(
         build_item(
             sc_id="BREAKOUT_RETEST",
@@ -603,9 +603,9 @@ def build_scenarios_with_base_rates(
     broke_dn_recent = bool(broken_dn_candidates)
     near_support = ref <= mid_rail or abs(ref / s1 - 1.0) <= max(0.035, 1.8 * atr)
     strict_5 = bool(broke_dn_recent)
-    dn_ref = _money(min(broken_dn_candidates)) if broke_dn_recent else _money(min(s1, ref * (1.0 - 0.55 * atr)))
-    inv_5 = _money(max(dn_ref + 0.4 * atr_abs, ref + 0.4 * atr_abs))
-    tgt_5 = _money(min(float(bear_base["target_price"]), max(0.01, ref * (1.0 - 0.8 * atr))))
+    dn_ref = rp(_money(min(broken_dn_candidates)) if broke_dn_recent else _money(min(s1, ref * (1.0 - 0.55 * atr))))
+    inv_5 = rp(_money(max(dn_ref + 0.4 * atr_abs, ref + 0.4 * atr_abs)))
+    tgt_5 = rp(_money(min(float(bear_base["target_price"]), max(0.01, ref * (1.0 - 0.8 * atr)))))
     candidates.append(
         build_item(
             sc_id="BREAKDOWN_DECLINE",
@@ -668,8 +668,8 @@ def build_scenarios_with_base_rates(
                 if rev_dir == "BULLISH"
                 else _money(min(b_end_p, max(0.01, ref * (1.0 - 0.8 * atr))))
             )
-            trig_6 = _money(ref * (1.0 + 0.55 * atr)) if rev_dir == "BULLISH" else _money(ref * (1.0 - 0.55 * atr))
-            raw_trig_6 = (
+            trig_6 = rp(_money(ref * (1.0 + 0.55 * atr)) if rev_dir == "BULLISH" else _money(ref * (1.0 - 0.55 * atr)))
+            raw_trig_6 = rp(
                 r1
                 if (rev_dir == "BULLISH" and r1 >= ref * (1.0 + 0.55 * atr) and abs(r1 / ref - 1.0) <= 1.5 * atr)
                 else (
@@ -712,9 +712,9 @@ def build_scenarios_with_base_rates(
     if strict_7 or (rsi_now <= 40.0 and dev_ma20_atr >= 1.1):
         fib_382 = next((lv["price"] for lv in fibs.get("retracements", []) if abs(lv["ratio"] - 0.382) < 0.01), None)
         cand_bounce = [x for x in (ma20, fib_382, r1) if x is not None and x > ref * (1.0 + 0.5 * atr)]
-        bounce_tgt = _money(min(cand_bounce) if cand_bounce else max(ma20, r1, ref * (1.0 + 1.2 * atr)))
-        inv_7 = _money(min(recent_lo5, ref * (1.0 - 0.8 * atr)))
-        trig_7 = _money(min(r1, ref * (1.0 + 0.8 * atr)) if r1 >= ref * (1.0 + 0.55 * atr) else ref * (1.0 + 0.55 * atr))
+        bounce_tgt = rp(_money(min(cand_bounce) if cand_bounce else max(ma20, r1, ref * (1.0 + 1.2 * atr))))
+        inv_7 = rp(_money(min(recent_lo5, ref * (1.0 - 0.8 * atr))))
+        trig_7 = rp(_money(min(r1, ref * (1.0 + 0.8 * atr)) if r1 >= ref * (1.0 + 0.55 * atr) else ref * (1.0 + 0.55 * atr)))
         candidates.append(
             build_item(
                 sc_id="OVERSOLD_BOUNCE",
@@ -745,29 +745,29 @@ def build_scenarios_with_base_rates(
     )
     if strict_8 or (is_converging and not struct.get("expired") and apex_ahead is not None and 0.0 <= float(apex_ahead) <= 18.0):
         span_h = height if height > 0 else 2.5 * atr_abs
-        up_apex_tgt = _money(max(r1 + span_h * 0.65, float(bull_base["target_price"])))
-        dn_apex_tgt = _money(min(max(0.01, s1 - span_h * 0.65), float(bear_base["target_price"])))
+        up_apex_tgt = rp(_money(max(r1 + span_h * 0.65, float(bull_base["target_price"]))))
+        dn_apex_tgt = rp(_money(min(max(0.01, s1 - span_h * 0.65), float(bear_base["target_price"]))))
         pref_up = ref >= mid_rail
         apex_note = f"距收敛顶点 {apex_ahead} 根 K 线" if apex_ahead is not None else "已抵近收敛顶点"
-        candidates.append(
-            build_item(
-                sc_id="APEX_BREAKOUT",
-                direction="BIDIRECTIONAL",
-                precondition_met=strict_8,
-                applicability_score=90.0 if strict_8 else 67.0,
-                rationale=f"{pat_name}进入末端（{apex_note}），通道宽度已收窄至 {abs(u - l) / atr_abs:.1f} 个 ATR",
-                raw_trigger_price=r1 if pref_up else s1,
-                pending_trigger_text=f"双向变盘：放量上破 {fp(r1)} 看至 {fp(up_apex_tgt)}，或下破 {fp(s1)} 看至 {fp(dn_apex_tgt)}",
-                active_trigger_text=f"已在进行中（{apex_note}，现价正在争夺变盘边界 {fp(r1 if pref_up else s1)}）",
-                mid_waypoint_price=r1 if pref_up else s1,
-                mid_step_label=f"变盘 {fp(r1 if pref_up else s1)}",
-                target_price=up_apex_tgt if pref_up else dn_apex_tgt,
-                target_source_detail=f"双向，形态起点高度（上向 {fp(up_apex_tgt)} / 下向 {fp(dn_apex_tgt)}）",
-                invalidation_price=float(neut_base["target_price"]),
-                invalidation_text="—",
-                already_active=False,
-            )
+        apex_item = build_item(
+            sc_id="APEX_BREAKOUT",
+            direction="BIDIRECTIONAL",
+            precondition_met=strict_8,
+            applicability_score=90.0 if strict_8 else 67.0,
+            rationale=f"{pat_name}进入末端（{apex_note}），通道宽度已收窄至 {abs(u - l) / atr_abs:.1f} 个 ATR",
+            raw_trigger_price=r1 if pref_up else s1,
+            pending_trigger_text=f"双向变盘：放量上破 {fp(r1)} 看至 {fp(up_apex_tgt)}，或下破 {fp(s1)} 看至 {fp(dn_apex_tgt)}",
+            active_trigger_text=f"已在进行中（{apex_note}，现价正在争夺变盘边界 {fp(r1 if pref_up else s1)}）",
+            mid_waypoint_price=r1 if pref_up else s1,
+            mid_step_label=f"变盘 {fp(r1 if pref_up else s1)}",
+            target_price=up_apex_tgt if pref_up else dn_apex_tgt,
+            target_source_detail=f"双向，形态起点高度（上向 {fp(up_apex_tgt)} / 下向 {fp(dn_apex_tgt)}）",
+            invalidation_price=float(neut_base["target_price"]),
+            invalidation_text="—",
+            already_active=False,
         )
+        apex_item["alt_target_price"] = dn_apex_tgt if pref_up else up_apex_tgt
+        candidates.append(apex_item)
 
     # 筛选规则：优先输出所有 precondition_met=True 的情景（按 applicability_score 降序，最多 5 个）；
     # 若满足前提的情景不足 2 个，仅补充 1 个最高分的待触发条件备选情景（保留 precondition_met=False，严禁篡改为 True）。

@@ -274,6 +274,38 @@ def detect_candlestick_patterns(
                 }
             )
 
+        # 7. 破底翻 / 流动性扫损收回 (Bullish Liquidity Sweep / Stop-Hunt Reclaim)
+        prior_bars = win20[:-1]
+        if prior_bars:
+            ref_swing_low = min(float(x["low"]) for x in prior_bars)
+            sweep_depth = ref_swing_low - l
+            close_in_rng = (c - l) / rng
+            lower_wick_r = lower_wick / rng
+            if (
+                0.0 < sweep_depth <= 0.65 * atr
+                and c > ref_swing_low
+                and c > o
+                and lower_wick_r >= 0.42
+                and close_in_rng >= 0.58
+            ):
+                detected.append(
+                    {
+                        "pattern": "LIQUIDITY_SWEEP_BULLISH",
+                        "name_cn": "破底翻扫损收回",
+                        "category": "candlestick",
+                        "direction": "BULLISH",
+                        "bar_idx": t,
+                        "observed_at": b["day"],
+                        "confirmed_at": b["day"],
+                        "volume_confirmed": rv >= 1.10,
+                        "formula_verified": (
+                            f"0 < PriorLow20({ref_swing_low:.2f})-Low({l:.2f})={sweep_depth:.2f} <= 0.65*ATR({atr:.2f}) "
+                            f"AND Close({c:.2f}) > PriorLow20 AND Close > Open({o:.2f}) "
+                            f"AND LowerWickRatio({lower_wick_r:.2f}) >= 0.42 (RVOL={rv:.2f})"
+                        ),
+                    }
+                )
+
     return detected[-max_items:] if max_items is not None else detected
 
 

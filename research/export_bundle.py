@@ -27,7 +27,7 @@ def main() -> None:
     t = bisect_right(days, args.as_of) - 1
     if t < 420:
         raise SystemExit(f"not enough history before {args.as_of}: index {t}")
-    from market_rules import rescale_bars_as_of
+    from market_rules import is_st_instrument, rescale_bars_as_of
 
     lo = max(0, t - WINDOW_BARS + 1)
     pit = rescale_bars_as_of(bars[lo:t + 1], t - lo)
@@ -46,9 +46,11 @@ def main() -> None:
         except Exception:  # noqa: BLE001
             vix_src = "CACHE_MISS"
 
+    sym_name = str(payload.get("name") or args.symbol)
+    sym_is_st = is_st_instrument(args.symbol, name=sym_name)
     inst = {"symbol": args.symbol, "market": args.market, "asset_type": "equity",
-            "name": payload.get("name", args.symbol), "currency": {"CN": "CNY", "HK": "HKD", "US": "USD"}[args.market],
-            "is_st": False}
+            "name": sym_name, "currency": {"CN": "CNY", "HK": "HKD", "US": "USD"}[args.market],
+            "is_st": sym_is_st}
     bundle = {
         "schema_version": "5.3.0",
         "market": args.market,
@@ -57,12 +59,12 @@ def main() -> None:
             "instrument": {"symbol": BENCHMARKS[args.market]["symbol"], "market": args.market,
                            "asset_type": BENCHMARKS[args.market]["asset_type"],
                            "name": BENCHMARKS[args.market]["name"], "is_st": False},
-            "bars": bench, "source": bench_payload.get("source", "CACHE"), "errors": [],
+            "bars": bench, "source": bench_payload.get("source", f"CACHED_{args.market}_BENCHMARK"), "errors": [],
         },
         "extra_context": {"vix": vix, "vix_source": vix_src, "earnings_date": None,
-                          "earnings_date_source": "NOT_AVAILABLE", "is_st": False, "is_ipo_no_limit": False},
+                          "earnings_date_source": "NOT_AVAILABLE", "is_st": sym_is_st, "is_ipo_no_limit": False},
         "provenance": {
-            "source": payload.get("source", "CACHE"),
+            "source": payload.get("source", f"CACHED_{args.market}_DAILY"),
             "as_of": args.as_of,
             "adjustment": "total_return",
             "adjustment_status": {"requested": "total_return", "applied": "total_return",
