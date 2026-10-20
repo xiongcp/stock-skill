@@ -311,6 +311,17 @@ def analyze_bundle(
         b_ind = compute_all_indicators(b_bars[-HISTORY_BARS:])
         b_reg = classify_market_regime(b_bars[-struct_days:], b_ind["snapshot"], vix_value=extra_ctx.get("vix"))
         rs_val, rs_series = _compute_relative_strength(completed, b_bars, lookback=20)
+        b_ret1 = (
+            round(float(b_bars[-1]["close"]) / float(b_bars[-2]["close"]) - 1.0, 6)
+            if len(b_bars) >= 2 and float(b_bars[-2]["close"]) > 0
+            else 0.0
+        )
+        b_ret5 = (
+            round(float(b_bars[-1]["close"]) / float(b_bars[-6]["close"]) - 1.0, 6)
+            if len(b_bars) >= 6 and float(b_bars[-6]["close"]) > 0
+            else 0.0
+        )
+        b_bull = bool(float(b_bars[-1]["close"]) > float(b_bars[-1]["open"]))
         benchmark_info = {
             "index_symbol": bench_bundle["instrument"]["symbol"],
             "index_name": bench_bundle["instrument"]["name"],
@@ -319,6 +330,9 @@ def analyze_bundle(
             "regime_score": b_reg["regime_score"],
             "relative_strength_vs_index": rs_val,
             "rs_series": rs_series,
+            "bench_ret1": b_ret1,
+            "bench_ret5": b_ret5,
+            "bench_bull_bar": b_bull,
             "source": bench_bundle.get("source", "BUNDLE"),
             "benchmark_missing": False,
         }

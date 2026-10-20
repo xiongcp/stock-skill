@@ -34,7 +34,18 @@ _UNVALIDATED_PROB_PHRASES = (
     re.compile(r"[一二三四五六七八九]成(?:把握|胜算|概率|机会|以上)?(?=[^\d]|$)"),
 )
 _NEGATION_RE = re.compile(r"不是|不叫|不代表|并非|不得|不能|严禁|禁止|不构成|不等于|不要|不应|不宜|而非|不含|没有")
-_PROB_ALLOWED_CONTEXT_RE = re.compile(r"历史条件频率|主观研判|脚本预填|研判模板|覆盖率|95% 区间|95%区间|Wilson|回测")
+_PROB_ALLOWED_CONTEXT_RE = re.compile(r"历史条件频率|主观研判|脚本预填|研判模板|覆盖率|95% 区间|95%区间|Wilson")
+# 回测胜率专用：必须与 backtest.json 的成交样本一致；小样本不得被包装为 70% 目标证据
+_BACKTEST_RATE_RE = re.compile(
+    r"(?:胜率|成功率|命中率)\s*(?:为|是|约|达|达到|高达|超过|高于|在|>=?|攀升至)?\s*(\d+(?:\.\d+)?)\s*%"
+    r"|(\d+(?:\.\d+)?)\s*%\s*的(?:胜率|成功率|命中率)"
+)
+_SAMPLE_HINT_RE = re.compile(r"(?:n\s*=\s*\d+|\d+\s*笔(?:成交|交易)?|\d+\s*个?样本)")
+_SMALL_SAMPLE_CLAIM_RE = re.compile(
+    r"(?:证明|充分证据|足以说明|可作为)[^。；\n]{0,24}(?:70\s*%|目标)"
+    r"|(?<!未)(?<!尚未)(?:达到|超过|高于|实现)\s*70\s*%"
+    r"|(?:70\s*%|目标)[^。；\n]{0,8}(?:已达成|已实现)"
+)
 _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?；;\n]")
 
 # 价格语境（比 validate_judgment 更宽）：交易动作或价位词之后 4 个字符内的数字，以及紧跟交易动作的数字
@@ -47,10 +58,14 @@ _LINT_PRICE_BEFORE_RE = re.compile(
     r"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:元|港元|美元|港币)?\s*(?:附近|一线|上方|下方|左右|处|之上|之下|上下)?\s*"
     r"(?:买入|卖出|建仓|加仓|减仓|止损|止盈|挂单|入场|抄底|离场|低吸)"
 )
-VETO_HEAD_CHARS = 400
+VETO_HEAD_CHARS = 200
 # 买入/建仓语境下的股数（「每手 100 股」「最小申报 200 股」等制度描述不在此列）
 _BUY_SHARES_RE = re.compile(r"(?:买入|买进|建仓|加仓|开仓|仓位|可买|买)[^。；\n股手]{0,8}?\d[\d,]*\s*股")
-_VETO_POSITIVE_BUY_RE = re.compile(r"(?:建议|可以|应当|不妨|推荐|宜)[^。；\n]{0,8}?(?:买入|建仓|加仓|做多|抄底|低吸)")
+# 子句级匹配：允许价格/介词插在建议与动作之间，覆盖「可于…建仓」「逢低吸纳」等话术。
+_VETO_POSITIVE_BUY_RE = re.compile(
+    r"(?:建议|可以?|应当|不妨|推荐|宜|考虑|适合|值得|投资者可|逢低)"
+    r"[^。；\n]{0,30}?(?:买入|建仓|加仓|做多|抄底|低吸|进场|吸纳|吸筹)"
+)
 _TARGET_ROLE_PRICE_RE = re.compile(r"(?:目标位|目标价|目标看至|上看目标)\s*[为=:：约至]?\s*(\d+(?:\.\d+)?)")
 
 
@@ -127,7 +142,10 @@ def lint_agent_response(
     if sizing.get("recommended_shares") is None:
         m_sh = _BUY_SHARES_RE.search(text)
         if m_sh:
-            errors.append(f"报告未给出建议股数（{sizing.get('reason') or '无账户净值'}），回复不得出现买入股数: {m_sh.group(0)!r}")
+            sent_sh = _sentence_around(text, m_sh.start(), m_sh.end())
+            # 「每手 100 股」「按 100 股/手假设」「最小申报 200 股」是制度说明，不是建议买入股数。
+            if not any(tok in sent_sh for tok in ("假设", "每手", "最小申报", "步长", "交易制度")):
+                errors.append(f"报告未给出建议股数（{sizing.get('reason') or '无账户净值'}），回复不得出现买入股数: {m_sh.group(0)!r}")
 
     # 4. 禁用术语检查
     for pat in _FORBIDDEN_PROB_PHRASES:
@@ -155,15 +173,26 @@ def lint_agent_response(
     if backtest is not None:
         bt_node = backtest.get("backtest") if isinstance(backtest.get("backtest"), dict) else backtest
         allowed_wr: list[float] = []
+        sample_sizes: list[int] = []
         for bk in ("all_long_signals", "long_confirmed", "watch_long_setup"):
             row = bt_node.get(bk) if isinstance(bt_node, dict) else None
-            if isinstance(row, dict) and row.get("win_rate_pct") is not None:
-                allowed_wr.append(float(row["win_rate_pct"]))
-        if allowed_wr:
-            for m_wr in re.finditer(r"胜率\s*(?:为|是|约)?\s*(\d+(?:\.\d+)?)\s*%", text):
-                val_wr = float(m_wr.group(1))
-                if not any(abs(val_wr - w) <= 0.25 for w in allowed_wr):
-                    errors.append(f"回复中的回测胜率 {val_wr}% 与 backtest.json ({allowed_wr}) 不一致")
+            if isinstance(row, dict):
+                if row.get("win_rate_pct") is not None:
+                    allowed_wr.append(float(row["win_rate_pct"]))
+                if row.get("trades") is not None:
+                    sample_sizes.append(int(row["trades"]))
+        small_sample = bool(sample_sizes) and min(sample_sizes) < 30
+        for m_wr in _BACKTEST_RATE_RE.finditer(text):
+            raw = m_wr.group(1) or m_wr.group(2)
+            val_wr = float(raw)
+            if allowed_wr and not any(abs(val_wr - w) <= 0.25 for w in allowed_wr):
+                errors.append(f"回复中的回测胜率 {val_wr}% 与 backtest.json ({allowed_wr}) 不一致")
+            if small_sample:
+                sent = _sentence_around(text, m_wr.start(), m_wr.end())
+                if not _SAMPLE_HINT_RE.search(sent):
+                    errors.append("小样本回测胜率必须同时给出样本量 n（禁止只报百分比，n<30 不构成统计证据）")
+                if _SMALL_SAMPLE_CLAIM_RE.search(sent):
+                    errors.append("小样本回测（n<30）不得被表述为达到/证明 70% 目标或作为充分证据")
 
     # 5. 价格白名单检查（针对带价格语境的数值）
     pack = report.get("judgment_pack") or build_judgment_pack(report)

@@ -783,6 +783,30 @@ def test_c06_fetch_length_does_not_depend_on_days(monkeypatch: pytest.MonkeyPatc
     assert set(seen) == {data_gateway.FETCH_BARS}
 
 
+def test_c06_historical_asof_uses_deeper_fetch_window(monkeypatch: pytest.MonkeyPatch, replay_recorded) -> None:
+    """历史截面必须取到 as_of 之前足够的预热K线，不能先截最新窗口再过滤。"""
+    seen: list[int] = []
+    orig_sina = data_gateway.fetch_sina_daily_bars
+
+    def tracked_sina(code: str, datalen: int = 450) -> list[dict]:
+        seen.append(datalen)
+        return orig_sina(code, datalen)
+
+    monkeypatch.setattr(data_gateway, "fetch_sina_daily_bars", tracked_sina)
+    with pytest.raises(RuntimeError, match="历史长度不足"):
+        load_bundle(
+            {
+                "symbol": "600519.SH",
+                "market": "CN",
+                "asset_type": "equity",
+                "display_bars": 120,
+                "as_of": "2021-12-31",
+            },
+            now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC),
+        )
+    assert seen == [data_gateway.HISTORICAL_FETCH_BARS]
+
+
 def test_c14_momentum_10d_and_flat_rsi_initial_value() -> None:
     bars = load_recorded("sina_daily/sh600519.json")
     ind = compute_all_indicators(bars)
@@ -2200,3 +2224,186 @@ def test_expert_audit_fixes_regression(replay_recorded, tmp_path: Path) -> None:
     fake_bt = {"backtest": {"all_long_signals": {"win_rate_pct": 46.15}, "long_confirmed": {"win_rate_pct": 83.33}, "watch_long_setup": {"win_rate_pct": 38.46}}}
     errs_fake_wr = lint_agent_response(f"风控否决：大盘偏弱。回测胜率 95.0%（95% 区间 80%~99%）。{disclaimer}", rep_cn, backtest=fake_bt)
     assert any("回测胜率" in e for e in errs_fake_wr)
+
+
+def test_lint_audit_regressions_wave_numbers_small_sample_and_veto_bypass(replay_recorded, tmp_path: Path) -> None:
+    """审计回归：浪号不误判为价格；n<30 胜率不得包装成 70% 证据；否决下带价格的买入建议必须拦截。"""
+    from lint_response import lint_agent_response
+
+    rep = run_pipeline(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        output_dir=tmp_path / "lint_audit",
+    )
+    price = float(rep["triple_barrier_plan"]["stop_loss_barrier"])
+    disclaimer = "以上为规则化技术分析，仅供研究参考，不构成投资建议。"
+
+    wave_text = f"风控否决：大盘偏弱。若收盘跌破浪 1 起点 {price:.2f} 则上升推动浪计数失效。{disclaimer}"
+    errs_wave = lint_agent_response(wave_text, rep)
+    assert not any("白名单中的价格" in e for e in errs_wave), errs_wave
+
+    fake_bt = {"backtest": {
+        "all_long_signals": {"win_rate_pct": 83.33, "trades": 6},
+        "long_confirmed": {"win_rate_pct": 71.43, "trades": 14},
+        "watch_long_setup": {"win_rate_pct": 50.0, "trades": 4},
+    }}
+    small_text = f"风控否决：大盘偏弱。回测胜率 83.3%（n=6），证明该系统达到 70% 目标。{disclaimer}"
+    errs_small = lint_agent_response(small_text, rep, backtest=fake_bt)
+    assert any("小样本回测" in e for e in errs_small), errs_small
+
+    bypass_text = (
+        f"风控否决：大盘偏弱。建议在 {price:.2f} 附近买入做多；投资者亦可于 {price:.2f} 建仓，逢低吸纳。{disclaimer}"
+    )
+    errs_bypass = lint_agent_response(bypass_text, rep)
+    assert sum(1 for e in errs_bypass if "严禁给出做多/买入建议" in e) >= 2, errs_bypass
+
+
+def test_historical_as_of_vix_fetches_ten_year_window(monkeypatch) -> None:
+    """历史截面 VIX 必须取 10 年窗口；3mo 窗口过滤后会变成 null。"""
+    seen: dict[str, str] = {}
+    bars = load_recorded("yahoo_daily/VIX.json")
+
+    def fake_vix(symbol: str, range_str: str = "5y", datalen: int | None = data_gateway.FETCH_BARS):
+        seen["symbol"], seen["range"] = symbol, range_str
+        return [dict(b) for b in bars]
+
+    monkeypatch.setattr(data_gateway, "fetch_yahoo_daily_bars", fake_vix)
+    value, source = data_gateway._fetch_vix("2024-06-14", True)
+    assert seen == {"symbol": "^VIX", "range": "10y"}
+    assert value is not None
+    assert source.startswith("YAHOO_DAILY(^VIX")
+
+
+def test_historical_as_of_never_uses_live_st_name(monkeypatch) -> None:
+    """历史截面的实时快照简称含未来 ST 信息，必须禁用。"""
+    inst = resolve_instrument("600519.SH", market="CN", asset_type="equity")
+    monkeypatch.setattr(
+        data_gateway, "fetch_tencent_quote_meta",
+        lambda code: {"code": code, "name": "ST测试", "lot_size": None},
+    )
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity"}
+    hist_out, hist_meta = data_gateway._enrich_instrument(inst, req, True, as_of="2021-06-15")
+    assert hist_out["is_st"] is False
+    assert hist_meta["error"] == "HISTORICAL_AS_OF_LIVE_METADATA_DISABLED"
+    live_out, live_meta = data_gateway._enrich_instrument(dict(inst), req, True, as_of=None)
+    assert live_out["is_st"] is True
+    assert live_meta["vendor_name"] == "ST测试"
+
+
+def test_tencent_index_fetch_is_capped_at_service_limit(monkeypatch) -> None:
+    """腾讯指数请求 2600 根会返回空；必须按服务上限截断并披露。"""
+    bars = load_recorded("tencent_daily/hkHSTECH.json")
+    seen: dict[str, int] = {}
+
+    def fake_tencent(code: str, datalen: int = 760):
+        seen["datalen"] = datalen
+        return [dict(b) for b in bars][-datalen:]
+
+    monkeypatch.setattr(data_gateway, "fetch_tencent_index_daily_bars", fake_tencent)
+    inst = resolve_instrument("HSTECH.HK", market="HK", asset_type="index")
+    got, source, _errors = data_gateway._load_single_series(
+        inst, datalen=2600, as_of="2024-06-14", allow_network=True
+    )
+    assert seen["datalen"] == data_gateway.TENCENT_INDEX_MAX_BARS
+    assert "max=" in source
+    assert got
+
+
+def test_label_event_rejects_missing_next_bar_and_inverted_geometry() -> None:
+    """T+1 市场末根入场不得 T+0 平仓；倒挂屏障不得产出胜场标签。"""
+    bars = [dict(b) for b in load_recorded("sina_daily/sh600519.json")]
+    last = len(bars) - 1
+    entry = float(bars[last]["open"])
+    res = label_triple_barrier_event(
+        bars, last, entry * 1.05, entry * 0.95, horizon_bars=15,
+        market="CN", asset_type="equity", symbol="600519.SH",
+    )
+    assert res["tradable"] is False
+    assert res["reason"] == "INSUFFICIENT_FUTURE_BARS"
+    prev = last - 1
+    entry_prev = float(bars[prev]["open"])
+    res_bad = label_triple_barrier_event(
+        bars[:-1], prev, entry_prev * 0.95, entry_prev * 1.05, horizon_bars=15,
+        market="CN", asset_type="equity", symbol="600519.SH",
+    )
+    assert res_bad["tradable"] is False
+    assert res_bad["reason"] == "INVALID_PLAN_GEOMETRY"
+
+
+def test_stamp_duty_uses_historical_effective_rates() -> None:
+    from market_rules import get_market_microstructure_rules, round_trip_cost_rate
+
+    cn_2021 = get_market_microstructure_rules("CN", "equity", "600519.SH", day_str="2021-06-15")
+    cn_2024 = get_market_microstructure_rules("CN", "equity", "600519.SH", day_str="2024-06-15")
+    assert cn_2021["stamp_duty_sell_bps"] == 10.0
+    assert cn_2024["stamp_duty_sell_bps"] == 5.0
+    hk_2022 = get_market_microstructure_rules("HK", "equity", "00700.HK", day_str="2022-06-15")
+    hk_2024 = get_market_microstructure_rules("HK", "equity", "00700.HK", day_str="2024-06-15")
+    assert hk_2022["stamp_duty_buy_bps"] == 13.0
+    assert hk_2024["stamp_duty_buy_bps"] == 10.0
+    assert round_trip_cost_rate(cn_2021) > round_trip_cost_rate(cn_2024)
+
+
+def test_score_judgments_offline_bars_payload_parsing() -> None:
+    """单标的缓存字典不得丢失 symbol；bundle 与 symbol->bars 映射都要可离线评分。"""
+    from score_judgments import _bars_map_from_payload
+
+    bars = load_recorded("sina_daily/sh600519.json")
+    entries = [{"symbol": "600519.SH", "as_of": "2026-10-15"}]
+    single = _bars_map_from_payload({"symbol": "600519.SH", "bars": bars, "events": []}, entries)
+    assert list(single) == ["600519.SH"] and len(single["600519.SH"]) == len(bars)
+    bundle = _bars_map_from_payload(
+        {"target": {"instrument": {"symbol": "600519.SH"}, "bars": bars}}, entries
+    )
+    assert list(bundle) == ["600519.SH"]
+    mapping = _bars_map_from_payload({"600519.SH": bars}, entries)
+    assert list(mapping) == ["600519.SH"]
+
+
+def test_high_conviction_rebound_and_decision_probability_contract(replay_recorded) -> None:
+    """高置信超跌/大盘共振反转层：触发时输出校准后的 decision_probability (>=70%) 与 high_conviction_plan。"""
+    from risk import compute_triple_barrier_plan
+
+    bundle = load_bundle(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC),
+    )
+    rep = analyze_bundle(bundle, {"symbol": "600519.SH", "display_bars": 120, "horizon_bars": 15}, include_replay=False)
+    assert "decision_probability" in rep["meta_labeling_decision"]
+    assert "high_conviction_plan" in rep["triple_barrier_plan"]
+
+    bars = copy.deepcopy(bundle["target"]["bars"])
+    bars[-1]["open"] = 1300.0
+    bars[-1]["low"] = 1295.0
+    bars[-1]["high"] = 1330.0
+    bars[-1]["close"] = 1325.0
+    bars[-1]["raw_close"] = 1325.0
+    ind = copy.deepcopy(rep["mathematical_indicators"])
+    ind["volatility"]["atr14"] = 30.0
+    ind["trend"]["ema20"] = 1370.0  # ext_atr = (1325 - 1370) / 30 = -1.5 <= -1.0
+    ind["momentum"]["rsi14"] = 25.0
+    bench = {
+        **rep["market_benchmark"],
+        "benchmark_missing": False,
+        "bench_ret5": -0.035,
+        "bench_ret1": 0.012,
+        "bench_bull_bar": True,
+    }
+    dec, tb, _ = compute_triple_barrier_plan(
+        bars,
+        rep["meta"],
+        ind,
+        rep["mathematical_indicators"]["structure_levels"]["wedge_structure"],
+        {},
+        rep["rule_scenarios"],
+        rep["multi_timeframe_score"],
+        [],
+        bench,
+    )
+    assert dec["high_conviction_rebound"] is True
+    assert dec["high_conviction_subtype"] == "BENCH_SYNC_REBOUND"
+    dp = dec["decision_probability"]
+    assert dp["available"] is True and dp["p_net_positive"] >= 0.70 and dp["p_episode_net_positive"] >= 0.70
+    assert dp["dev_effective_episodes"] >= 100
+    hcp = tb["high_conviction_plan"]
+    assert hcp["triggered"] is True
+    assert hcp["stop_loss_barrier"] < hcp["entry_zone"][0] <= hcp["entry_zone"][1] < hcp["take_profit_1"]

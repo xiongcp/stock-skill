@@ -36,6 +36,8 @@ _NON_PRICE_PATTERNS = (
     re.compile(r"\bn\s*=\s*\d+\b", re.I),
     # 中文单位后面通常紧跟汉字（\b 在两个汉字之间不成立），用前后断言代替 \b
     re.compile(r"(?<![\d.])\d+(?:\.\d+)?\s*(?:个?交易日|日|天|根|手|股|笔|次|浪|分|bps|倍)(?![A-Za-z0-9])"),
+    # 波浪编号（「浪 1」「第 3 浪」「Wave 4」）不是价格，必须先从价格候选中剔除
+    re.compile(r"(?:第\s*)?[浪Ww](?:ave)?\s*[1-5ABCDEabcde](?![A-Za-z0-9])"),
     re.compile(r"\b\d+(?:\.\d+)?\s*个\s*ATR\b", re.I),
     re.compile(r"\b\d+(?:\.\d+)?\s*[×xX]\b"),
     re.compile(r"[+-]?\d+(?:\.\d+)?\s*R\b"),

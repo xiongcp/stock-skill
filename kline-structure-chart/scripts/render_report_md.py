@@ -101,6 +101,7 @@ def render_report_markdown(
         if debate.get("risk_officer_veto")
         else ""
     )
+    plan_zone_label = "观察区（风控已否决）" if debate.get("risk_officer_veto") else "入场区"
     mr_adj = mtf.get("regime_adjustment") or {}
     mr_note = f"{mr_adj['note_cn']}。" if mr_adj.get("applied") else ""
     flash_digest = (
@@ -108,7 +109,7 @@ def render_report_markdown(
         f"基准 {bench['index_name']}（{bench['index_symbol']}）处于{bench['regime_label_cn']}（状态分 {bench['regime_score']:.1f}/100）。"
         f"本标的规则分 {mtf['rule_score']:.1f}/100（{mtf['rating_cn']}，确定性规则加权分，不是胜率或上涨概率），{mr_note}"
         f"当前评级为「{decision['action_cn']}」（{decision['setup_label_cn']}），最新收盘 {price(last_close)}，"
-        f"三重屏障计划入场区 {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])}、止损 {price(plan['stop_loss_barrier'])}、"
+        f"三重屏障计划{plan_zone_label} {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])}、止损 {price(plan['stop_loss_barrier'])}、"
         f"TP1 {price(plan['take_profit_1'])}（扣费后净盈亏比 {plan['risk_reward_ratio']:.2f}）；"
         f"未来 {fp['horizon_bars']} 日 80% 保形区间为 {price(fp['q10'][-1])} ~ {price(fp['q90'][-1])}（中枢 q50 = {price(fp['base_median_q50'][-1])}，只描述波动幅度，不含方向预测）。"
     )
@@ -243,7 +244,7 @@ def render_report_markdown(
     lines += [
         "## 4. 风控计划（三重屏障）",
         "",
-        "| 计划类型 | 入场区 | 止损 | TP1 | TP2 | 时间屏障 | 扣费后盈亏比 |",
+        f"| 计划类型 | {plan_zone_label} | 止损 | TP1 | TP2 | 时间屏障 | 扣费后盈亏比 |",
         "| --- | --- | --- | --- | --- | --- | --- |",
         f"| {decision['setup_label_cn']} | {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])} "
         f"| {price(plan['stop_loss_barrier'])} | {price(plan['take_profit_1'])} | {price(plan['take_profit_2'])} "
@@ -545,6 +546,14 @@ def render_report_markdown(
             "Agent 按 `references/llm-judgment-protocol.md` 完成 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验后，将在此展示调整前后的主观研判概率。",
             "",
         ]
+        for c in confs:
+            bull_ids = ", ".join(str(x) for x in (c.get("bullish_evidence_ids") or []))
+            bear_ids = ", ".join(str(x) for x in (c.get("bearish_evidence_ids") or []))
+            lines += [
+                f"- 冲突信号 **{c.get('id', 'C?')}**：{c.get('summary_cn', '')}"
+                f"（偏多证据：{bull_ids or '—'}；偏空/风控证据：{bear_ids or '—'}）"
+            ]
+        lines += [""]
 
     # 9. 文件
     paths = report.get("rendered_paths") or {}

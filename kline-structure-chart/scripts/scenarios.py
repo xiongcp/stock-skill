@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
@@ -390,6 +391,11 @@ def build_scenarios_with_base_rates(
                 inv_p_clean = rp(max(0.01, ref * (1.0 - max(0.01, 0.4 * atr))))
             elif direction == "BEARISH" and inv_p_clean <= ref:
                 inv_p_clean = rp(ref * (1.0 + max(0.01, 0.4 * atr)))
+            # 文案中的失效价必须与写入白名单的价位表量化值一致，否则 lint 会把未量化价判为捏造价格。
+            for old in {f"{float(invalidation_price):.2f}", f"{float(invalidation_price):.3f}"}:
+                new = f"{float(inv_p_clean):.2f}"
+                if old != new and re.search(rf"(?<![\d.]){re.escape(old)}(?![\d])", invalidation_text):
+                    invalidation_text = re.sub(rf"(?<![\d.]){re.escape(old)}(?![\d])", new, invalidation_text)
         step1_txt = f"进行中 {fp(ref)}" if is_active else f"触发 {fp(raw_trigger_price)}"
 
         return {

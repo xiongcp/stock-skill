@@ -177,7 +177,9 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   }}
   canvas {{
     width: 100%;
-    height: 620px;
+    height: auto;
+    aspect-ratio: 1440 / 760;
+    min-height: 240px;
     display: block;
     border-radius: 6px;
     background: #0b0f17;
@@ -478,6 +480,15 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   (debate.bear_case || []).forEach(function(item) {{
     const li = document.createElement('li');
     li.textContent = '[空头证伪/风险] ' + item;
+    debList.appendChild(li);
+  }});
+  const conflictSignals = (REPORT.judgment_pack && REPORT.judgment_pack.conflicting_signals) ? REPORT.judgment_pack.conflicting_signals : [];
+  conflictSignals.forEach(function(c) {{
+    const li = document.createElement('li');
+    const bullIds = (c.bullish_evidence_ids || []).join(', ') || '—';
+    const bearIds = (c.bearish_evidence_ids || []).join(', ') || '—';
+    li.textContent = '[冲突信号 ' + (c.id || 'C?') + '] ' + (c.summary_cn || '') +
+      '（偏多证据：' + bullIds + '；偏空/风控证据：' + bearIds + '）';
     debList.appendChild(li);
   }});
 

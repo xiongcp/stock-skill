@@ -177,9 +177,10 @@ def label_triple_barrier_event(
     confirm_close_r: float = 0.30,
     lock_r: float = 0.08,
     name: str = "",
+    entry_price_override: float | None = None,
 ) -> dict[str, Any]:
     """三重屏障事件标定器（López de Prado, 2018）：
-    - 在 signal_idx 收盘触发后，于 entry_idx = signal_idx + 1 开盘执行入场。
+    - 在 signal_idx 收盘触发后，于 entry_idx = signal_idx + 1 开盘（或限价单成交价 entry_price_override）执行入场。
     - 同根 K 线若同时触及止盈与止损，采用保守规则（先判止损 SL_FIRST）。
     - A股 T+1 约束：入场当日 (entry_idx) 不可卖出离场，最早从 entry_idx + 1 起检测出场。
     - 时间屏障：最多持有 horizon_bars 根 K 线（entry_idx .. entry_idx + horizon_bars - 1）。
@@ -190,7 +191,14 @@ def label_triple_barrier_event(
         return {"tradable": False, "reason": "OUT_OF_RANGE"}
 
     entry_bar = bars[entry_idx]
-    entry_open = float(entry_bar["open"])
+    entry_open = float(entry_price_override) if entry_price_override is not None else float(entry_bar["open"])
+    if sl_price >= entry_open or tp_price <= entry_open:
+        return {
+            "tradable": False,
+            "reason": "INVALID_PLAN_GEOMETRY",
+            "entry_day": entry_bar["day"],
+            "note": "止损必须低于入场价、止盈必须高于入场价；拒绝用倒挂屏障产出胜场标签",
+        }
 
     limit_pct = get_daily_price_limit_pct(
         market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=entry_bar["day"], name=name
@@ -219,6 +227,9 @@ def label_triple_barrier_event(
         market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=entry_bar["day"], name=name
     )
     start_exit_idx = entry_idx + 1 if not rules["can_intraday_roundtrip"] else entry_idx
+    if start_exit_idx >= n:
+        # T+1 市场在最后一根 K 线入场时没有可卖出的下一根 K 线；不得退化成 T+0 当日平仓。
+        return {"tradable": False, "reason": "INSUFFICIENT_FUTURE_BARS", "entry_day": entry_bar["day"]}
     end_idx = min(n - 1, max(start_exit_idx, entry_idx + max(1, horizon_bars) - 1))
 
     exit_idx = end_idx
