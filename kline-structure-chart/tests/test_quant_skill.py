@@ -2436,6 +2436,45 @@ def test_high_conviction_rebound_and_decision_probability_contract(replay_record
     assert tb_w["high_conviction_plan"]["triggered"] is False
 
 
+
+def test_high_conviction_paused_market_only_hints(replay_recorded) -> None:
+    """港股（HC_PAUSED_MARKETS）触发反转条件时只记录子类型，不给反转计划与统计数字。"""
+    from risk import HC_PAUSED_MARKETS, compute_triple_barrier_plan
+
+    assert "HK" in HC_PAUSED_MARKETS
+    req = {"symbol": "00700.HK", "market": "HK", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    rep = analyze_bundle(bundle, req, include_replay=False)
+    bars = copy.deepcopy(bundle["target"]["bars"])
+    last = bars[-1]
+    o = float(last["close"])
+    atr = o * 0.03  # 港股门槛 ATR/价格 >= 2%
+    last.update(open=o, low=o - 0.1 * atr, high=o + 1.0 * atr, close=o + 0.8 * atr, raw_close=o + 0.8 * atr)
+    ind = copy.deepcopy(rep["mathematical_indicators"])
+    ind["volatility"]["atr14"] = atr
+    ind["trend"]["ema20"] = float(last["close"]) + 1.5 * atr  # ext_atr = -1.5
+    bench = {**rep["market_benchmark"], "regime_score": 60.0, "benchmark_missing": False,
+             "bench_ret5": -0.04, "bench_ret1": 0.012, "bench_bull_bar": True}
+    dec, tb, _ = compute_triple_barrier_plan(
+        bars,
+        rep["meta"],
+        ind,
+        rep["mathematical_indicators"]["structure_levels"]["wedge_structure"],
+        {},
+        rep["rule_scenarios"],
+        rep["multi_timeframe_score"],
+        [],
+        bench,
+    )
+    assert dec["high_conviction_paused_subtype"] == "BENCH_SYNC_REBOUND"
+    assert dec["high_conviction_rebound"] is False and dec["high_conviction_subtype"] is None
+    assert dec["high_conviction_suppressed_by_veto"] is False
+    dp = dec["decision_probability"]
+    assert dp["available"] is False and dp["p_net_positive"] is None and dp["method"] == "PAUSED_NO_DEV_EDGE"
+    hcp = tb["high_conviction_plan"]
+    assert hcp["triggered"] is False and "暂不给出反转入场计划" in hcp["rule_cn"]
+
+
 def test_overextended_warning_not_masked_by_momentum_crowding(replay_recorded) -> None:
     """过热（会阻止做多确认）与动量拥挤（仅提示）同时成立时，必须披露过热降级，而不是"不改变评级"。"""
     from risk import compute_triple_barrier_plan

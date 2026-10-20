@@ -99,3 +99,28 @@ def test_date_block_bootstrap_resamples_whole_days() -> None:
     diff = date_block_bootstrap(rows, lambda r: r["v"], rows)
     assert diff == [0.0, 0.0]
     assert date_block_bootstrap(rows[:2], lambda r: r["v"]) is None
+
+
+def _fake_seg(p1: bool, p3: bool, low: float | None) -> dict:
+    return {"all": {
+        "criteria_diagnostic": {"P1_mean_net_positive": p1, "P3_sample": p3},
+        "excess_vs_same_day_random": {"mean_pct_date_cluster95": None if low is None else [low, low + 1.0]},
+    }}
+
+
+def test_select_config_follows_predeclared_rule() -> None:
+    """选择规则：CN、US 都满足 P1 与 P3；得分取两市场 P2b 下限的较小值；与最优差距 <= 0.10pp 时保留默认。"""
+    default = f"{v2.geo_key(*v2.DEFAULT_GEOMETRY)}|ALL"
+    other = "tp1.25_sl2.20|ALL"
+    failing = "tp1.75_sl1.50|ALL"
+    grid = {
+        "CN": {default: _fake_seg(True, True, 0.40), other: _fake_seg(True, True, 0.48), failing: _fake_seg(False, True, 2.0)},
+        "US": {default: _fake_seg(True, True, 0.35), other: _fake_seg(True, True, 0.44), failing: _fake_seg(True, True, 2.0)},
+    }
+    sel = v2.select_config(grid)
+    assert sel["scores_pct"][failing] is None  # CN 未通过 P1，不参与
+    assert sel["best"] == other and sel["selected"] == default and sel["kept_default_by_parsimony"] is True
+    grid["CN"][other] = _fake_seg(True, True, 0.60)
+    grid["US"][other] = _fake_seg(True, True, 0.55)
+    sel = v2.select_config(grid)
+    assert sel["selected"] == other and sel["kept_default_by_parsimony"] is False

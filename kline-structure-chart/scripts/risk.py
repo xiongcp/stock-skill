@@ -86,6 +86,8 @@ _ANTI_QUANT_GATES: dict[str, frozenset[str]] = {
 HC_ENTRY_ZONE_ATR = (-0.50, 0.25)
 HC_TP1_ATR = 0.85
 HC_SL_ATR = 2.20
+# 开发区回测 v2 未显示超额的市场：触发时只提示，不给反转计划与统计数字（方案 D6，docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md 第 7 节）
+HC_PAUSED_MARKETS = frozenset({"HK"})
 
 
 def detect_high_conviction_rebound(
@@ -140,13 +142,18 @@ def high_conviction_plan_levels(
     market: str,
     asset_type: str,
     as_of_day: str | None,
+    tp_atr: float = HC_TP1_ATR,
+    sl_atr: float = HC_SL_ATR,
 ) -> tuple[float, float, float, float]:
-    """高置信反转计划的固定价位 (entry_low, entry_high, take_profit_1, stop_loss)，信号日确定后不随成交价移动。"""
+    """高置信反转计划的固定价位 (entry_low, entry_high, take_profit_1, stop_loss)，信号日确定后不随成交价移动。
+
+    tp_atr / sl_atr 只供研究回测的几何网格使用，线上一律取默认常量。
+    """
     entry_low = round_to_tick(max(0.01, close + HC_ENTRY_ZONE_ATR[0] * atr14), market, asset_type, as_of_day)
     entry_high = round_to_tick(close + HC_ENTRY_ZONE_ATR[1] * atr14, market, asset_type, as_of_day)
     entry_mid = 0.5 * (entry_low + entry_high)
-    tp1 = round_to_tick(entry_mid + HC_TP1_ATR * atr14, market, asset_type, as_of_day)
-    sl = round_to_tick(max(0.01, entry_mid - HC_SL_ATR * atr14), market, asset_type, as_of_day)
+    tp1 = round_to_tick(entry_mid + tp_atr * atr14, market, asset_type, as_of_day)
+    sl = round_to_tick(max(0.01, entry_mid - sl_atr * atr14), market, asset_type, as_of_day)
     return entry_low, entry_high, tp1, sl
 
 
@@ -589,6 +596,9 @@ def compute_triple_barrier_plan(
     hc_suppressed_subtype = hc_subtype if hc_suppressed_by_veto else None
     if hc_suppressed_by_veto:
         hc_subtype = None
+    hc_paused_subtype = hc_subtype if market in HC_PAUSED_MARKETS else None
+    if hc_paused_subtype is not None:
+        hc_subtype = None
 
     prior = _DEV_CALIBRATED_REBOUND_PRIORS.get(market, _DEV_CALIBRATED_REBOUND_PRIORS["CN"])
     hc_entry_low, hc_entry_high, hc_tp1, hc_sl = high_conviction_plan_levels(last_c, atr14, market, asset_type, as_of_day)
@@ -596,10 +606,11 @@ def compute_triple_barrier_plan(
     meta_decision["high_conviction_subtype"] = hc_subtype
     meta_decision["high_conviction_suppressed_by_veto"] = hc_suppressed_by_veto
     meta_decision["high_conviction_suppressed_subtype"] = hc_suppressed_subtype
+    meta_decision["high_conviction_paused_subtype"] = hc_paused_subtype
     meta_decision["decision_probability"] = (
         {
             "available": True,
-            "event_definition": "5日限价入场后15根K线内扣费净收益>0（TP=+0.85*ATR, SL=-2.20*ATR）",
+            "event_definition": f"5日限价入场后15根K线内扣费净收益>0（TP=+{HC_TP1_ATR:.2f}*ATR, SL=-{HC_SL_ATR:.2f}*ATR）",
             "p_net_positive": prior["p_net_positive"],
             "p_episode_net_positive": prior["p_episode_net_positive"],
             "p_tp_before_sl": prior["p_tp_before_sl"],
@@ -616,12 +627,20 @@ def compute_triple_barrier_plan(
             "event_definition": (
                 "反转条件已触发，但大盘环境评分偏弱触发风控否决，不输出校准概率"
                 if hc_suppressed_by_veto
+                else "反转条件已触发，但该市场开发区回测未显示超额，暂停输出统计数字"
+                if hc_paused_subtype is not None
                 else "未触发高置信超跌/大盘共振反转条件，不输出 >=70% 校准概率"
             ),
             "p_net_positive": None,
             "p_episode_net_positive": None,
             "p_tp_before_sl": None,
-            "method": "SUPPRESSED_BY_BENCHMARK_VETO" if hc_suppressed_by_veto else "NOT_TRIGGERED",
+            "method": (
+                "SUPPRESSED_BY_BENCHMARK_VETO"
+                if hc_suppressed_by_veto
+                else "PAUSED_NO_DEV_EDGE"
+                if hc_paused_subtype is not None
+                else "NOT_TRIGGERED"
+            ),
             "dev_sample_size": prior["dev_sample_size"],
             "dev_effective_episodes": prior["dev_effective_episodes"],
             "episode_ci95": None,
@@ -700,11 +719,13 @@ def compute_triple_barrier_plan(
             "limit_order_sessions": 5,
             "rule_cn": (
                 f"高置信超跌/大盘共振反转计划（{hc_subtype}）：5日内于 {hc_entry_low:.{p_dec}f}~{hc_entry_high:.{p_dec}f} 限价入场，"
-                f"均值回归修复目标 TP1 {hc_tp1:.{p_dec}f}（+0.85*ATR），结构崩溃止损 {hc_sl:.{p_dec}f}（-2.20*ATR），时间屏障 {horizon_bars} 根K线"
+                f"均值回归修复目标 TP1 {hc_tp1:.{p_dec}f}（+{HC_TP1_ATR:.2f}*ATR），结构崩溃止损 {hc_sl:.{p_dec}f}（-{HC_SL_ATR:.2f}*ATR），时间屏障 {horizon_bars} 根K线"
                 if hc_subtype is not None
                 else (
                     "反转条件已触发，但大盘环境评分偏弱触发风控否决，不给出反转入场计划"
                     if hc_suppressed_by_veto
+                    else f"反转条件已触发（{hc_paused_subtype}），但该市场开发区回测未显示超额，暂不给出反转入场计划"
+                    if hc_paused_subtype is not None
                     else "当前截面未触发高置信超跌/大盘共振反转条件"
                 )
             ),

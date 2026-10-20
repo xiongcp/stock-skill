@@ -36,7 +36,7 @@ from analysis import analyze_bundle  # noqa: E402  (common 已把技能 scripts 
 from evaluation import label_triple_barrier_event  # noqa: E402
 from indicators import atr_series, ema, rsi  # noqa: E402
 from market_rules import is_st_instrument, resolve_instrument  # noqa: E402
-from risk import high_conviction_plan_levels  # noqa: E402
+from risk import HC_SL_ATR, HC_TP1_ATR, high_conviction_plan_levels  # noqa: E402
 
 DEV_REGION = ("2021-01-04", "2026-09-24")
 H1_LAST_DAY = "2020-11-30"
@@ -55,6 +55,14 @@ SAME_DAY_MULTIPLE = 18  # 按"信号日股票池"折算的抽样倍数；扣除�
 ALL_DAYS_RATE = 0.02
 OVERSOLD_RATE = 0.25
 OUT = ART / "dev_region_v2_metrics.json"
+GRID_OUT = ART / "dev_region_v2_grid.json"
+
+# 第 4 步调参网格与选择规则（运行前写定，见方案第 8 节）。只调 TP/SL 几何与子类型，不动触发阈值。
+GEOMETRIES = [(0.85, 2.20), (0.85, 1.50), (1.25, 2.20), (1.25, 1.50), (1.75, 2.20), (1.75, 1.50)]
+DEFAULT_GEOMETRY = (HC_TP1_ATR, HC_SL_ATR)
+SUBTYPE_FILTERS = ("ALL", "DEEP_OVERSOLD_TURN", "BENCH_SYNC_REBOUND")
+SELECTION_MARKETS = ("CN", "US")  # 港股按 D6 暂停，只作诊断
+PARSIMONY_PP = 0.10  # 默认配置得分与最优差距不超过 0.10 个百分点时保留默认
 LEDGER = ART / "trial_ledger.jsonl"
 
 _C: dict = {}
@@ -74,6 +82,10 @@ def prefilter(market: str, c: float, o: float, h: float, lo: float, raw_c: float
     if market == "HK":
         return bf["ret1"] >= -1e-6
     return bf["ret1"] >= -1e-6 or bool(bf["bull_bar"])
+
+
+def geo_key(tp_atr: float, sl_atr: float) -> str:
+    return f"tp{tp_atr:.2f}_sl{sl_atr:.2f}"
 
 
 def _hash_unit(*parts: str) -> float:
@@ -216,6 +228,10 @@ def live_high_conviction(symbol: str, data: dict, t: int, day: str) -> dict:
         "cut": cut,
         "subtype": ml.get("high_conviction_subtype"),
         "suppressed_subtype": ml.get("high_conviction_suppressed_subtype"),
+        # 港股按 D6 暂停：线上只记录子类型，回测照常评估作诊断
+        "paused_subtype": ml.get("high_conviction_paused_subtype"),
+        # 线上计划所用 ATR（快照值，下限为收盘价的 0.5%），网格中其他几何沿用同一 ATR
+        "atr_live": max(float(pit[cut]["close"]) * 0.005, float(rep["mathematical_indicators"]["volatility"]["atr14"])),
         "veto_codes": ml.get("veto_codes") or [],
         "regime_score": rep["market_benchmark"].get("regime_score"),
         "entry_zone": [float(x) for x in plan["entry_zone"]],
@@ -225,14 +241,16 @@ def live_high_conviction(symbol: str, data: dict, t: int, day: str) -> dict:
 
 
 def execute_plan(symbol: str, data: dict, pit: list[dict], cut: int, b_pos: int,
-                 entry_high: float, tp: float, sl: float) -> dict:
-    """按固定价位撮合：次日开盘层（诊断）与 5 日限价成交层（主口径）。"""
+                 entry_high: float, tp: float, sl: float, open_layer: bool = True) -> dict:
+    """按固定价位撮合：次日开盘层（诊断，open_layer=False 时跳过）与 5 日限价成交层（主口径）。"""
     market = _C["market"]
     kw = {"horizon_bars": HORIZON, "market": market, "asset_type": "equity", "symbol": symbol,
           "is_st": data["is_st"], "trailing_stop": False, "name": data["name"]}
     out: dict = {}
     op = float(pit[cut + 1]["open"])
-    if sl < op < tp:
+    if not open_layer:
+        pass
+    elif sl < op < tp:
         r = label_triple_barrier_event(pit, entry_idx=cut + 1, tp_price=tp, sl_price=sl, **kw)
         out["open_status"] = "FILL" if r.get("tradable") else f"NOT_TRADABLE:{r.get('reason')}"
         if r.get("tradable"):
@@ -267,6 +285,13 @@ def execute_plan(symbol: str, data: dict, pit: list[dict], cut: int, b_pos: int,
     return out
 
 
+def _grid_entry(ex: dict, geometry: tuple[float, float]) -> dict:
+    """默认几何保留完整撮合结果；其余几何只留汇总需要的字段，控制内存。"""
+    if geometry == DEFAULT_GEOMETRY:
+        return ex
+    return {k: ex[k] for k in ("fill_status", "net", "outcome") if k in ex}
+
+
 def _scan_signals(symbol: str) -> tuple[list[dict], int]:
     data = _load_symbol(symbol)
     if data is None:
@@ -281,17 +306,27 @@ def _scan_signals(symbol: str) -> tuple[list[dict], int]:
             continue
         n_candidates += 1
         live = live_high_conviction(symbol, data, t, day)
-        raw_sub = live["subtype"] or live["suppressed_subtype"]
+        raw_sub = live["subtype"] or live["suppressed_subtype"] or live["paused_subtype"]
         if raw_sub is None:
             continue
-        ex = execute_plan(symbol, data, live["pit"], live["cut"], b_pos,
-                          live["entry_zone"][1], live["take_profit_1"], live["stop_loss"])
+        c_pit = float(live["pit"][live["cut"]]["close"])
+        geo: dict[str, dict] = {}
+        for tp_atr, sl_atr in GEOMETRIES:
+            _, entry_high, tp, sl = high_conviction_plan_levels(c_pit, live["atr_live"], market, "equity", day, tp_atr, sl_atr)
+            if (tp_atr, sl_atr) == DEFAULT_GEOMETRY and [entry_high, tp, sl] != [live["entry_zone"][1], live["take_profit_1"], live["stop_loss"]]:
+                raise RuntimeError(f"网格默认几何与线上计划不一致：{symbol} {day}")
+            geo[geo_key(tp_atr, sl_atr)] = _grid_entry(
+                execute_plan(symbol, data, live["pit"], live["cut"], b_pos, entry_high, tp, sl,
+                             open_layer=(tp_atr, sl_atr) == DEFAULT_GEOMETRY),
+                (tp_atr, sl_atr),
+            )
         rows.append({
             "symbol": symbol, "day": day, "subtype": raw_sub,
             "vetoed": live["suppressed_subtype"] is not None,
             "regime_score": live["regime_score"],
             "entry_zone": live["entry_zone"], "tp": live["take_profit_1"], "sl": live["stop_loss"],
-            **ex,
+            **geo[geo_key(*DEFAULT_GEOMETRY)],
+            "geo": geo,
         })
     return rows, n_candidates
 
@@ -320,10 +355,16 @@ def _scan_baselines(symbol: str) -> list[dict]:
         pit, cut = make_pit_slice(data["bars"], t, HORIZON)
         c_pit = float(pit[cut]["close"])
         atr_pit = max(c_pit * 0.005, atr * (c_pit / c))
-        entry_low, entry_high, tp, sl = high_conviction_plan_levels(c_pit, atr_pit, market, "equity", day)
-        ex = execute_plan(symbol, data, pit, cut, b_pos, entry_high, tp, sl)
+        geo: dict[str, dict] = {}
+        for tp_atr, sl_atr in GEOMETRIES:
+            _, entry_high, tp, sl = high_conviction_plan_levels(c_pit, atr_pit, market, "equity", day, tp_atr, sl_atr)
+            geo[geo_key(tp_atr, sl_atr)] = _grid_entry(
+                execute_plan(symbol, data, pit, cut, b_pos, entry_high, tp, sl,
+                             open_layer=(tp_atr, sl_atr) == DEFAULT_GEOMETRY),
+                (tp_atr, sl_atr),
+            )
         for kind in kinds:
-            rows.append({"kind": kind, "symbol": symbol, "day": day, **ex})
+            rows.append({"kind": kind, "symbol": symbol, "day": day, **geo[geo_key(*DEFAULT_GEOMETRY)], "geo": geo})
     return rows
 
 
@@ -376,7 +417,9 @@ def summarize(signals: list[dict], baselines: list[dict], lo: str, hi: str) -> d
     eps = _fill_eps(kept)
     main = _layer_stats(eps)
     status = Counter(r["fill_status"] for r in kept)
-    by_kind = {k: _fill_eps([r for r in base if r["kind"] == k]) for k in ("same_day", "all_days", "oversold")}
+    kept_days = {r["day"] for r in kept}
+    by_kind = {k: _fill_eps([r for r in base if r["kind"] == k and (k != "same_day" or r["day"] in kept_days)])
+               for k in ("same_day", "all_days", "oversold")}
     same = by_kind["same_day"]
     out: dict = {
         "n_signals_pre_veto": len(sig),
@@ -424,7 +467,7 @@ def summarize(signals: list[dict], baselines: list[dict], lo: str, hi: str) -> d
     return out
 
 
-def run_market(market: str, workers: int, limit_symbols: int | None = None) -> dict:
+def run_market(market: str, workers: int, limit_symbols: int | None = None, grid: bool = False) -> dict:
     _init(market)
     symbols = sorted(_C["periods"])
     if limit_symbols:
@@ -445,11 +488,58 @@ def run_market(market: str, workers: int, limit_symbols: int | None = None) -> d
     baselines = _pool_map(_scan_baselines, symbols, workers, (market, same_day_rate))
     baselines = [r for rows in baselines for r in rows]
 
-    return {
+    out = {
         "n_symbols_scanned": len(symbols),
         "n_prefilter_candidates": n_candidates,
         "same_day_sampling_rate": round(rate, 4),
         "segments": {name: summarize(signals, baselines, lo, hi) for name, (lo, hi) in SEGMENTS.items()},
+    }
+    if grid:
+        out["grid"] = {}
+        for tp_atr, sl_atr in GEOMETRIES:
+            gk = geo_key(tp_atr, sl_atr)
+            g_base = [{**r, **_flat(r, gk)} for r in baselines]
+            for sub in SUBTYPE_FILTERS:
+                g_sig = [{**r, **_flat(r, gk)} for r in signals if sub == "ALL" or r["subtype"] == sub]
+                out["grid"][f"{gk}|{sub}"] = {
+                    name: summarize(g_sig, g_base, lo, hi) for name, (lo, hi) in SEGMENTS.items()
+                }
+    return out
+
+
+def _flat(row: dict, gk: str) -> dict:
+    """取某个几何的撮合结果覆盖行上的默认结果；缺失的字段（如成交失败时的 net）显式置空。"""
+    g = row["geo"][gk]
+    return {"fill_status": g.get("fill_status"), "net": g.get("net"), "outcome": g.get("outcome")}
+
+
+def select_config(grid_results: dict) -> dict:
+    """方案第 8 节写定的选择规则：在 CN、US 全开发区都满足 P1 与 P3 的配置中，取两市场 P2b 下限的较小值最大者；
+    默认配置得分与最优差距不超过 PARSIMONY_PP 时保留默认。"""
+    default_key = f"{geo_key(*DEFAULT_GEOMETRY)}|ALL"
+    scores: dict[str, float | None] = {}
+    for key in grid_results[SELECTION_MARKETS[0]]:
+        lows = []
+        for m in SELECTION_MARKETS:
+            seg = grid_results[m][key]["all"]
+            crit = seg["criteria_diagnostic"]
+            ci = (seg.get("excess_vs_same_day_random") or {}).get("mean_pct_date_cluster95")
+            if not (crit["P1_mean_net_positive"] and crit["P3_sample"]) or ci is None:
+                lows = None
+                break
+            lows.append(ci[0])
+        scores[key] = None if lows is None else round(min(lows), 3)
+    eligible = {k: v for k, v in scores.items() if v is not None}
+    if not eligible:
+        return {"rule": "见方案第 8 节", "scores_pct": scores, "selected": None, "reason": "没有配置在 CN、US 同时满足 P1 与 P3"}
+    best = max(eligible, key=eligible.get)
+    keep_default = default_key in eligible and eligible[default_key] >= eligible[best] - PARSIMONY_PP
+    return {
+        "rule": "见方案第 8 节",
+        "scores_pct": scores,
+        "best": best,
+        "selected": default_key if keep_default else best,
+        "kept_default_by_parsimony": keep_default and best != default_key,
     }
 
 
@@ -469,8 +559,10 @@ def main() -> None:
     ap.add_argument("--markets", default="CN,HK,US")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--limit-symbols", type=int, default=None, help="冒烟测试：每市场只取等间隔抽样的 N 只")
-    ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--grid", action="store_true", help="第 4 步：同时评估方案第 8 节写定的几何 × 子类型网格并按规则选择")
+    ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
+    args.out = args.out or (GRID_OUT if args.grid else OUT)
 
     result: dict = {
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -480,22 +572,29 @@ def main() -> None:
         "in_sample_note": "开发区结果均为样本内，不构成验收",
         "config": {"limit_sessions": LIMIT_SESSIONS, "horizon": HORIZON, "seed": SEED,
                    "same_day_multiple": SAME_DAY_MULTIPLE, "all_days_rate": ALL_DAYS_RATE,
-                   "oversold_rate": OVERSOLD_RATE, "limit_symbols": args.limit_symbols},
+                   "oversold_rate": OVERSOLD_RATE, "limit_symbols": args.limit_symbols,
+                   "grid": {"geometries": GEOMETRIES, "subtype_filters": SUBTYPE_FILTERS,
+                            "selection_markets": SELECTION_MARKETS, "parsimony_pp": PARSIMONY_PP} if args.grid else None},
         "markets": {},
     }
     for market in [m.strip() for m in args.markets.split(",") if m.strip()]:
-        result["markets"][market] = run_market(market, args.workers, args.limit_symbols)
+        result["markets"][market] = run_market(market, args.workers, args.limit_symbols, grid=args.grid)
         seg = result["markets"][market]["segments"]["all"]
         fl = seg["fill_layer"]
         print(f"[{market}] pre_veto={seg['n_signals_pre_veto']} vetoed={seg['n_vetoed_benchmark_weak']} "
               f"episodes={fl.get('n_episodes')} days={fl.get('n_signal_days')} rate={fl.get('net_positive_rate_pct')}% "
               f"mean={fl.get('mean_net_return_pct')}% excess={seg.get('excess_vs_same_day_random')}", flush=True)
+    if args.grid and all(m in result["markets"] for m in SELECTION_MARKETS):
+        result["selection"] = select_config({m: result["markets"][m]["grid"] for m in SELECTION_MARKETS})
+        print(f"selection: {result['selection']['selected']} (best={result['selection'].get('best')})", flush=True)
     args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"wrote {args.out}")
     with LEDGER.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({
             "ts": result["generated_at_utc"], "script": "research/run_dev_region_v2.py",
             "code_commit": result["code_commit"], "config": result["config"], "out": str(args.out.relative_to(ROOT)) if args.out.is_relative_to(ROOT) else str(args.out),
+            "n_configs_evaluated": len(GEOMETRIES) * len(SUBTYPE_FILTERS) if args.grid else 1,
+            "selection": (result.get("selection") or {}).get("selected"),
             "summary": {m: {k: v["segments"]["all"]["fill_layer"].get(k) for k in
                             ("n_episodes", "net_positive_rate_pct", "mean_net_return_pct")}
                         for m, v in result["markets"].items()},
