@@ -2383,6 +2383,7 @@ def test_high_conviction_rebound_and_decision_probability_contract(replay_record
     ind["momentum"]["rsi14"] = 25.0
     bench = {
         **rep["market_benchmark"],
+        "regime_score": 60.0,  # 录制截面的真实评分为 16（已触发 BENCHMARK_WEAK 否决），触发场景须显式给出正常大盘
         "benchmark_missing": False,
         "bench_ret5": -0.035,
         "bench_ret1": 0.012,
@@ -2407,6 +2408,78 @@ def test_high_conviction_rebound_and_decision_probability_contract(replay_record
     hcp = tb["high_conviction_plan"]
     assert hcp["triggered"] is True
     assert hcp["stop_loss_barrier"] < hcp["entry_zone"][0] <= hcp["entry_zone"][1] < hcp["take_profit_1"]
+    # 区间必须与它所描述的 episode 净正率配套，点估计落在区间内
+    lo, hi = dp["episode_ci95"]
+    assert lo <= dp["p_episode_net_positive"] <= hi
+    assert "ci95" not in dp
+
+    # 先大盘、后个股：大盘极弱触发否决时，同一截面不得再输出反转计划与校准概率
+    weak_bench = {**bench, "regime_score": 30.0}
+    dec_w, tb_w, _ = compute_triple_barrier_plan(
+        bars,
+        rep["meta"],
+        ind,
+        rep["mathematical_indicators"]["structure_levels"]["wedge_structure"],
+        {},
+        rep["rule_scenarios"],
+        rep["multi_timeframe_score"],
+        [],
+        weak_bench,
+    )
+    assert "BENCHMARK_WEAK" in dec_w["veto_codes"]
+    assert dec_w["high_conviction_rebound"] is False
+    assert dec_w["high_conviction_suppressed_by_veto"] is True
+    assert dec_w["decision_probability"]["available"] is False
+    assert dec_w["decision_probability"]["p_net_positive"] is None
+    assert dec_w["decision_probability"]["method"] == "SUPPRESSED_BY_BENCHMARK_VETO"
+    assert tb_w["high_conviction_plan"]["triggered"] is False
+
+
+def test_overextended_warning_not_masked_by_momentum_crowding(replay_recorded) -> None:
+    """过热（会阻止做多确认）与动量拥挤（仅提示）同时成立时，必须披露过热降级，而不是"不改变评级"。"""
+    from risk import compute_triple_barrier_plan
+
+    bundle = load_bundle(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
+        now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC),
+    )
+    rep = analyze_bundle(bundle, {"symbol": "600519.SH", "display_bars": 120, "horizon_bars": 15}, include_replay=False)
+    bars = bundle["target"]["bars"]
+    last_c = float(bars[-1]["close"])
+    ind = copy.deepcopy(rep["mathematical_indicators"])
+    atr = float(ind["volatility"]["atr14"])
+    ind["trend"]["ema20"] = last_c - 2.5 * atr  # ext_atr = +2.5：同时满足过热(>2.0)与拥挤(>1.65)
+    bench = {**rep["market_benchmark"], "regime_score": 60.0, "benchmark_missing": False}
+    dec, _, _ = compute_triple_barrier_plan(
+        bars,
+        rep["meta"],
+        ind,
+        rep["mathematical_indicators"]["structure_levels"]["wedge_structure"],
+        {},
+        rep["rule_scenarios"],
+        rep["multi_timeframe_score"],
+        [],
+        bench,
+    )
+    warnings = dec["anti_quant_traps"]["warnings_cn"]
+    assert dec["overextended"] is True and dec["anti_quant_traps"]["momentum_crowding"] is True
+    assert any(w.startswith("【过热降级】") for w in warnings)
+    assert not any("不改变评级" in w and "短期涨幅偏大" in w for w in warnings)
+    assert dec["action"] != "LONG_CONFIRMED"
+
+
+def test_round_number_stop_avoidance_only_on_fine_tick_grids() -> None:
+    """整数关口避让只在 tick 远小于 0.5 时生效；移动以关口为锚，移完不再贴着关口。"""
+    from risk import _avoid_round_number_stop
+
+    # A 股 tick 0.01：落在关口 ±1 tick 内都移到关口下方 2 tick
+    assert _avoid_round_number_stop(10.00, 11.0, "CN", "equity", "2026-10-16") == pytest.approx(9.98)
+    assert _avoid_round_number_stop(10.01, 11.0, "CN", "equity", "2026-10-16") == pytest.approx(9.98)
+    assert _avoid_round_number_stop(10.51, 11.0, "CN", "equity", "2026-10-16") == pytest.approx(10.48)
+    assert _avoid_round_number_stop(10.23, 11.0, "CN", "equity", "2026-10-16") == pytest.approx(10.23)
+    # 港股 200~500 档 tick 0.2：每个价位都离 0.5 关口不超过 1 tick，不能一律下移
+    for px in (400.0, 400.2, 400.4, 400.6, 400.8):
+        assert _avoid_round_number_stop(px, 450.0, "HK", "equity", "2026-10-16") == pytest.approx(px)
 
 
 # ---------------------------------------------------------------------------

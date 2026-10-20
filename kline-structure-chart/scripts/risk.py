@@ -25,15 +25,20 @@ def _avoid_round_number_stop(
     asset_type: str,
     as_of_day: str | None,
 ) -> float:
-    """防程序化扫损（Anti-Stop-Hunt）：若量化后的止损位恰好落在整数/半整数拥挤挂单关口，向下偏移 2 个 tick 避让。"""
+    """防程序化扫损（Anti-Stop-Hunt）：若量化后的止损位落在整数/半整数关口 ±1 tick 内，移到该关口下方 2 个 tick。
+
+    只在 tick 远小于 0.5 的价位档生效（0.5 至少 20 个 tick）：港股 0.05 及以上价位档里几乎每个价位都离
+    0.5 关口不超过 1 tick，若照常避让就等于把所有止损都放宽两档。
+    """
     st = round_to_tick(raw_stop, market, asset_type, as_of_day)
     if st <= 0:
         return st
     tick = float(tick_size_for(st, market, asset_type, as_of_day))
-    if st >= 5.0 and tick > 0:
+    if st >= 5.0 and 0 < tick <= 0.025:
         nearest_half = round(st * 2.0) / 2.0
         if abs(st - nearest_half) <= 1.05 * tick:
-            shifted = round_to_tick(st - 2.0 * tick, market, asset_type, as_of_day)
+            # 以关口为锚下移，避免 x.01 -> x.99 这类移动后仍贴着关口
+            shifted = round_to_tick(nearest_half - 2.0 * tick, market, asset_type, as_of_day)
             if 0 < shifted < entry_low:
                 return shifted
     return st
@@ -47,7 +52,8 @@ _DEV_CALIBRATED_REBOUND_PRIORS: dict[str, dict[str, Any]] = {
         "p_tp_before_sl": 0.7722,
         "dev_sample_size": 13215,
         "dev_effective_episodes": 9488,
-        "ci95": [0.6942, 0.7126],
+        # Wilson 95% 区间对应 p_episode_net_positive（独立 episode 净正率），不是 p_net_positive
+        "episode_ci95": [0.6942, 0.7126],
     },
     "HK": {
         "p_net_positive": 0.7174,
@@ -55,7 +61,7 @@ _DEV_CALIBRATED_REBOUND_PRIORS: dict[str, dict[str, Any]] = {
         "p_tp_before_sl": 0.7727,
         "dev_sample_size": 2714,
         "dev_effective_episodes": 2367,
-        "ci95": [0.6899, 0.7265],
+        "episode_ci95": [0.6899, 0.7265],
     },
     "US": {
         "p_net_positive": 0.7430,
@@ -63,7 +69,7 @@ _DEV_CALIBRATED_REBOUND_PRIORS: dict[str, dict[str, Any]] = {
         "p_tp_before_sl": 0.8007,
         "dev_sample_size": 12966,
         "dev_effective_episodes": 8875,
-        "ci95": [0.7378, 0.7559],
+        "episode_ci95": [0.7378, 0.7559],
     },
 }
 
@@ -357,13 +363,14 @@ def compute_triple_barrier_plan(
             anti_quant_warnings.append(
                 "【仅提示·均线走弱】收盘低于 EMA20 且 EMA20 不高于 EMA50；该市场历史回溯未证实此条件的预测力，不改变评级，左侧抄底风险请自行评估"
             )
-    if momentum_crowding:
-        anti_quant_warnings.append(
-            f"【仅提示·短期涨幅偏大】5日推进 {ret5_atr:+.2f} ATR，偏离 EMA20 {ext_atr:+.2f} ATR，60周分位 {w_pos:.1f}%；历史回溯中此类截面表现并不差，不改变评级，仅提示追高回撤风险"
-        )
-    elif overextended:
+    # 过热会实际阻止做多确认，必须优先披露；动量拥挤阈值更宽，放在前面会把降级说明盖成"不改变评级"
+    if overextended:
         anti_quant_warnings.append(
             f"【过热降级】偏离 EMA20 {ext_atr:+.2f} ATR、RSI14 {rsi14:.1f} 或高位派发结构触发过热条件，已不给出做多确认"
+        )
+    elif momentum_crowding:
+        anti_quant_warnings.append(
+            f"【仅提示·短期涨幅偏大】5日推进 {ret5_atr:+.2f} ATR，偏离 EMA20 {ext_atr:+.2f} ATR，60周分位 {w_pos:.1f}%；历史回溯中此类截面表现并不差，不改变评级，仅提示追高回撤风险"
         )
     if has_liquidity_sweep:
         anti_quant_warnings.append(
@@ -515,6 +522,11 @@ def compute_triple_barrier_plan(
             elif ((rsi14 <= 28.0 and rsi_turned_up) or ext_atr <= -1.85) and body_ratio >= 0.35 and (bf_bull or bf_ret1 >= 0.0):
                 hc_subtype = "DEEP_OVERSOLD_TURN"
 
+    # 先大盘、后个股：大盘极弱（BENCHMARK_WEAK）已触发风控否决时，不得再给出反转入场计划与校准概率
+    hc_suppressed_by_veto = hc_subtype is not None and "BENCHMARK_WEAK" in veto_codes
+    if hc_suppressed_by_veto:
+        hc_subtype = None
+
     prior = _DEV_CALIBRATED_REBOUND_PRIORS.get(market, _DEV_CALIBRATED_REBOUND_PRIORS["CN"])
     hc_entry_low = round_to_tick(max(0.01, last_c - 0.50 * atr14), market, asset_type, as_of_day)
     hc_entry_high = round_to_tick(last_c + 0.25 * atr14, market, asset_type, as_of_day)
@@ -523,6 +535,7 @@ def compute_triple_barrier_plan(
     hc_sl = round_to_tick(max(0.01, hc_entry_mid - 2.20 * atr14), market, asset_type, as_of_day)
     meta_decision["high_conviction_rebound"] = hc_subtype is not None
     meta_decision["high_conviction_subtype"] = hc_subtype
+    meta_decision["high_conviction_suppressed_by_veto"] = hc_suppressed_by_veto
     meta_decision["decision_probability"] = (
         {
             "available": True,
@@ -533,21 +546,25 @@ def compute_triple_barrier_plan(
             "method": "DEV_CALIBRATED_REBOUND_EMPIRICAL_PRIOR",
             "dev_sample_size": prior["dev_sample_size"],
             "dev_effective_episodes": prior["dev_effective_episodes"],
-            "ci95": prior["ci95"],
+            "episode_ci95": prior["episode_ci95"],
             "calibration_version": "rebound_v1_dev_2021_2024",
             "as_of": as_of_day,
         }
         if hc_subtype is not None
         else {
             "available": False,
-            "event_definition": "未触发高置信超跌/大盘共振反转条件，不输出 >=70% 校准概率",
+            "event_definition": (
+                "反转条件已触发，但大盘环境评分偏弱触发风控否决，不输出校准概率"
+                if hc_suppressed_by_veto
+                else "未触发高置信超跌/大盘共振反转条件，不输出 >=70% 校准概率"
+            ),
             "p_net_positive": None,
             "p_episode_net_positive": None,
             "p_tp_before_sl": None,
-            "method": "NOT_TRIGGERED",
+            "method": "SUPPRESSED_BY_BENCHMARK_VETO" if hc_suppressed_by_veto else "NOT_TRIGGERED",
             "dev_sample_size": prior["dev_sample_size"],
             "dev_effective_episodes": prior["dev_effective_episodes"],
-            "ci95": None,
+            "episode_ci95": None,
             "calibration_version": "rebound_v1_dev_2021_2024",
             "as_of": as_of_day,
         }
@@ -625,7 +642,11 @@ def compute_triple_barrier_plan(
                 f"高置信超跌/大盘共振反转计划（{hc_subtype}）：5日内于 {hc_entry_low:.{p_dec}f}~{hc_entry_high:.{p_dec}f} 限价入场，"
                 f"均值回归修复目标 TP1 {hc_tp1:.{p_dec}f}（+0.85*ATR），结构崩溃止损 {hc_sl:.{p_dec}f}（-2.20*ATR），时间屏障 {horizon_bars} 根K线"
                 if hc_subtype is not None
-                else "当前截面未触发高置信超跌/大盘共振反转条件"
+                else (
+                    "反转条件已触发，但大盘环境评分偏弱触发风控否决，不给出反转入场计划"
+                    if hc_suppressed_by_veto
+                    else "当前截面未触发高置信超跌/大盘共振反转条件"
+                )
             ),
         },
     }
