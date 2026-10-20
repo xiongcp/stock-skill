@@ -29,6 +29,10 @@ from market_rules import (
 MIN_LIVE_BARS = 130
 # 取数长度固定（覆盖 --days 上限 500 + MA250 预热），保证所有计算与展示参数 --days 无关
 FETCH_BARS = 760
+# 历史回放需要额外覆盖 as_of 之前的指标预热窗口；新浪单次请求可返回 3000 根。
+HISTORICAL_FETCH_BARS = 2600
+# 腾讯 fqkline 历史窗口上限（请求更多会返回空）。
+TENCENT_INDEX_MAX_BARS = 1000
 
 
 def _http_get(url: str, encoding: str = "utf-8", timeout: int = 12) -> str:
@@ -173,6 +177,7 @@ def _enrich_instrument(
     inst: dict[str, Any],
     request: AnalysisRequest,
     allow_network: bool,
+    as_of: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """用行情快照补全证券简称、A 股 ST 标识与港股每手股数；取不到时保留原值并在状态中写明原因（非致命）。
 
@@ -180,7 +185,12 @@ def _enrich_instrument(
     """
     status: dict[str, Any] = {"source": None, "vendor_name": None, "lot_size_source": None, "error": None}
     quote: dict[str, Any] | None = None
-    if not allow_network:
+    # 历史截面不得用实时快照补全简称/ST：当前简称包含未来的 ST/*ST 变更信息，
+    # 会把 2021-2025 的涨跌停与风控规则按今天的状态回放（前视）。
+    historical_as_of = bool(as_of) and str(as_of)[:10] < latest_closed_session(inst["market"])
+    if historical_as_of:
+        status["error"] = "HISTORICAL_AS_OF_LIVE_METADATA_DISABLED"
+    elif not allow_network:
         status["error"] = "网络已禁用(--offline)"
     else:
         try:
@@ -309,7 +319,8 @@ def _load_corporate_actions(
         return [], status
     try:
         y_sym = yahoo_events_symbol_for(inst["symbol"])
-        events = fetch_yahoo_corporate_actions(y_sym)
+        # 历史截面可能早于最近 5 年；取 10 年事件，避免 2021 年前的除权除息被漏掉。
+        events = fetch_yahoo_corporate_actions(y_sym, range_str="10y")
     except Exception as exc:  # noqa: BLE001 - 失败原因写入复权状态
         status["error"] = f"{type(exc).__name__}: {exc}"
         return [], status
@@ -344,11 +355,22 @@ def _load_single_series(
                 src = "SINA_LIVE_DAILY"
             elif symbol in TENCENT_INDEX_SOURCES:
                 t_code = TENCENT_INDEX_SOURCES[symbol]
-                bars = fetch_tencent_index_daily_bars(t_code, datalen=datalen)
-                src = f"TENCENT_INDEX_DAILY({t_code})"
+                # 腾讯 fqkline 超过约 1000 根会直接返回空；历史截面只能取可用上限并如实披露，
+                # 不允许用其它来源补数，也不允许把空响应当成 0 根继续计算。
+                capped = min(datalen, TENCENT_INDEX_MAX_BARS)
+                bars = fetch_tencent_index_daily_bars(t_code, datalen=capped)
+                src = (
+                    f"TENCENT_INDEX_DAILY({t_code},max={TENCENT_INDEX_MAX_BARS})"
+                    if datalen > TENCENT_INDEX_MAX_BARS
+                    else f"TENCENT_INDEX_DAILY({t_code})"
+                )
             else:
                 y_sym = yahoo_symbol_for(symbol)
-                bars = fetch_yahoo_daily_bars(y_sym, datalen=datalen)
+                bars = fetch_yahoo_daily_bars(
+                    y_sym,
+                    range_str="10y" if datalen > FETCH_BARS else "5y",
+                    datalen=datalen,
+                )
                 src = f"YAHOO_DAILY({y_sym})"
             validate_bars(bars, f"{src}:{symbol}")  # 厂商数据也要过 OHLC 包络 / 时间单调 / 正价格校验
             if as_of:
@@ -393,7 +415,8 @@ def _fetch_vix(as_of: str | None, allow_network: bool) -> tuple[float | None, st
     if not allow_network:
         return None, "NOT_FETCHED(offline)"
     try:
-        bars = fetch_yahoo_daily_bars("^VIX", range_str="3mo", datalen=None)
+        # 历史截面需要覆盖 as_of 之前 10 年，避免 3 个月窗口过滤后为空。
+        bars = fetch_yahoo_daily_bars("^VIX", range_str="10y" if as_of else "3mo", datalen=None)
         if as_of:
             bars = [b for b in bars if b["day"] <= as_of[:10]]
         if not bars:
@@ -506,10 +529,12 @@ def load_bundle(
         name=request.get("name"),
         is_st=bool(request.get("is_st", False)),
     )
-    inst, instrument_meta = _enrich_instrument(inst, request, allow_network)
-    market = inst["market"]
     as_of = request.get("as_of")
-    datalen = FETCH_BARS
+    inst, instrument_meta = _enrich_instrument(inst, request, allow_network, as_of=as_of)
+    market = inst["market"]
+    # 实时分析只需固定窗口；历史截面必须把取数窗口锚定到更早的 as_of，否则会先截到最新
+    # 760 根再过滤，导致 2021 等较早截面直接变成 0 根。
+    datalen = HISTORICAL_FETCH_BARS if as_of else FETCH_BARS
 
     target_bars, target_src, target_errors = _load_single_series(
         inst,

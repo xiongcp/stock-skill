@@ -13,3 +13,5 @@ kline-structure-chart/artifacts/
 
 # Agent worktrees & IDE state
 .claude/
+.planning/
+.playwright-mcp/

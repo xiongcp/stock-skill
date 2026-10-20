@@ -245,10 +245,44 @@ def load_judgment_log(log_path: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _read_json_any(path: Path) -> Any:
+    if path.suffix == ".gz":
+        import gzip
+
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            return json.load(fh)
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _bars_map_from_payload(
+    raw: Any,
+    entries: list[dict[str, Any]],
+    symbol_hint: str | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """解析 --bars-file：支持 bundle、单标的缓存字典、symbol->bars 映射与裸 K 线数组。"""
+    if isinstance(raw, list):
+        sym = symbol_hint or (entries[0]["symbol"] if entries else "UNKNOWN")
+        return {str(sym): raw}
+    if not isinstance(raw, dict):
+        return {}
+    if "target" in raw and isinstance(raw["target"], dict) and "bars" in raw["target"]:
+        sym = symbol_hint or raw["target"].get("instrument", {}).get("symbol") or "UNKNOWN"
+        return {str(sym): raw["target"]["bars"]}
+    if isinstance(raw.get("bars"), list):
+        # 单标的缓存字典：{"symbol": "601288.SH", "bars": [...], "events": [...]}
+        sym = symbol_hint or raw.get("symbol") or (entries[0]["symbol"] if entries else "UNKNOWN")
+        return {str(sym): raw["bars"]}
+    return {
+        str(k): v for k, v in raw.items()
+        if isinstance(v, list) and (not v or (isinstance(v[0], dict) and "day" in v[0]))
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Score matured L3 LLM judgments in judgment_log.jsonl")
     parser.add_argument("--log", required=True, help="Path to judgment_log.jsonl")
-    parser.add_argument("--bars-file", default=None, help="Optional JSON file mapping symbol -> bars or single bar array")
+    parser.add_argument("--bars-file", default=None, help="Optional .json/.json.gz with bars for offline scoring")
+    parser.add_argument("--cache-dir", default=None, help="Optional real-bar cache dir: <dir>/<market>/<symbol>.json.gz")
     parser.add_argument("--symbol", default=None, help="Symbol when --bars-file is a single bar array")
     parser.add_argument("--output", default=None, help="Optional path to write score summary JSON")
     args = parser.parse_args()
@@ -260,16 +294,18 @@ def main() -> None:
 
     bars_by_symbol: dict[str, list[dict[str, Any]]] = {}
     if args.bars_file:
-        raw = json.loads(Path(args.bars_file).read_text(encoding="utf-8"))
-        if isinstance(raw, list):
-            sym = args.symbol or (entries[0]["symbol"] if entries else "UNKNOWN")
-            bars_by_symbol[sym] = raw
-        elif isinstance(raw, dict):
-            if "target" in raw and isinstance(raw["target"], dict) and "bars" in raw["target"]:
-                sym = args.symbol or raw["target"].get("instrument", {}).get("symbol") or "UNKNOWN"
-                bars_by_symbol[sym] = raw["target"]["bars"]
-            else:
-                bars_by_symbol = {str(k): v for k, v in raw.items() if isinstance(v, list)}
+        bars_by_symbol = _bars_map_from_payload(_read_json_any(Path(args.bars_file)), entries, args.symbol)
+    elif args.cache_dir:
+        cache_dir = Path(args.cache_dir)
+        for entry in entries:
+            sym = str(entry.get("symbol") or "")
+            market = str(entry.get("market") or "")
+            if not sym:
+                continue
+            candidates = [cache_dir / market / f"{sym}.json.gz", cache_dir / f"{sym}.json.gz"]
+            found = next((p for p in candidates if p.exists()), None)
+            if found:
+                bars_by_symbol[sym] = _bars_map_from_payload(_read_json_any(found), [entry], sym).get(sym, [])
     else:
         from data_gateway import load_bundle
 

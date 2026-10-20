@@ -638,6 +638,8 @@ def get_market_microstructure_rules(
     tradable = asset_type != "index"
     if market == "CN":
         code = symbol.upper().split(".")[0]
+        # A 股证券交易印花税：2008-09-19 起卖出单边 0.1%；2023-08-28 起减半至 0.05%。
+        cn_stamp_sell = 5.0 if (not day_str or day_str >= "2023-08-28") else 10.0
         board = "MAIN"
         if asset_type == "equity":
             if code.startswith(("300", "301")):
@@ -670,12 +672,18 @@ def get_market_microstructure_rules(
             "session_hours_local": "09:30-11:30, 13:00-15:00 Asia/Shanghai",
             "commission_bps": 2.5,
             "stamp_duty_buy_bps": 0.0,
-            "stamp_duty_sell_bps": 5.0 if asset_type == "equity" else 0.0,
+            "stamp_duty_sell_bps": cn_stamp_sell if asset_type == "equity" else 0.0,
+            "stamp_duty_note": "A股卖出单边印花税：2023-08-28 起 5bps，此前 10bps",
         }
     if market == "HK":
-        # 港股印花税自 2023-11-17 起买卖双方各 0.1%；ETF 豁免
+        # 港股印花税：2021-08-01 起买卖双方各 0.13%，2023-11-17 起降回 0.1%（此前为 0.1%）；ETF 豁免
         is_hk_etp = asset_type == "etf" or is_hk_etp_code(symbol)
-        hk_stamp = 0.0 if is_hk_etp or not tradable else 10.0
+        if is_hk_etp or not tradable:
+            hk_stamp = 0.0
+        elif day_str and "2021-08-01" <= day_str < "2023-11-17":
+            hk_stamp = 13.0
+        else:
+            hk_stamp = 10.0
         if not tradable:
             lot, lot_source = 1, "NOT_TRADABLE"
         elif board_lot and int(board_lot) > 0:
@@ -696,6 +704,7 @@ def get_market_microstructure_rules(
             "commission_bps": 3.0,
             "stamp_duty_buy_bps": hk_stamp,
             "stamp_duty_sell_bps": hk_stamp,
+            "stamp_duty_note": "港股双边印花税：2021-08-01~2023-11-16 为 13bps，其余 10bps；ETF 豁免",
         }
     return {
         "market": "US",

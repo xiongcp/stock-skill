@@ -245,6 +245,27 @@ def text_size(draw: _ScaledDraw | ImageDraw.ImageDraw, value: str, face: ImageFo
     return int(round((box[2] - box[0]) / scale)), int(round((box[3] - box[1]) / scale))
 
 
+def _wrap_text(
+    draw: _ScaledDraw | ImageDraw.ImageDraw,
+    value: str,
+    face: ImageFont.FreeTypeFont,
+    max_width: int,
+) -> list[str]:
+    """按像素宽度折行；风控否决理由必须完整展示，不能静默截断。"""
+    lines: list[str] = []
+    current = ""
+    for char in value:
+        candidate = current + char
+        if current and text_size(draw, candidate, face)[0] > max_width:
+            lines.append(current)
+            current = char
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
+
+
 def y_of(price: float, pmin: float, pmax: float, top: int, bottom: int) -> int:
     return int(round(top + (pmax - price) / (pmax - pmin) * (bottom - top)))
 
@@ -620,7 +641,6 @@ def render(
     pmax += pad * 1.15
 
     # ---------------- 顶部标题与右对齐胶囊图例 ----------------
-    draw.text((left, 16), title, font=f_title, fill=TEXT)
     veto_flag = bool(risk_veto and risk_veto.get("risk_officer_veto"))
     veto_tag = "风控否决: 已触发(禁做多)" if veto_flag else "风控状态: 正常"
     subtitle = (
@@ -641,7 +661,8 @@ def render(
         pct_str = f"{raw_freq * 100:.1f}%" if n_samp > 0 else f"先验{freq * 100:.0f}%"
         w_val = round(1.8 + 2.2 * freq, 2)
         a_val = max(135, min(255, int(round((145 if low_s else 175) + 80 * freq))))
-        return f" {pct_str}(n={n_samp})", w_val, a_val, (True if low_s else default_dashed)
+        tag_prefix = "[低样本] " if low_s else ""
+        return f" {tag_prefix}{pct_str}(n={n_samp})", w_val, a_val, (True if low_s else default_dashed)
 
     bull_ftag, bull_w, bull_a, bull_dash = _branch_freq_style("bull", False)
     neut_ftag, neut_w, neut_a, neut_dash = _branch_freq_style("neutral", True)
@@ -673,6 +694,22 @@ def render(
         leg_widths = [18 + text_size(draw, name, leg_face)[0] for name, _, _ in legend]
         total_leg_w = sum(leg_widths) + leg_gap * (len(legend) - 1) + 24
     leg_x1 = width - 24 - total_leg_w
+    # 标题必须在图例左侧结束；长资产名（美股/港股全称）动态截断，禁止压到图例胶囊下方。
+    max_title_w = max(120, leg_x1 - left - 16)
+    fit_title = title
+    if text_size(draw, fit_title, f_title)[0] > max_title_w:
+        parts = fit_title.split(" · ", 1)
+        if len(parts) == 2:
+            head, tail = parts
+            while head and text_size(draw, head + "… · " + tail, f_title)[0] > max_title_w:
+                head = head[:-1]
+            fit_title = head + "… · " + tail
+        while fit_title and text_size(draw, fit_title + "…", f_title)[0] > max_title_w:
+            fit_title = fit_title[:-1]
+        if text_size(draw, fit_title, f_title)[0] > max_title_w:
+            fit_title = fit_title[:-1]
+        fit_title += "…"
+    draw.text((left, 16), fit_title, font=f_title, fill=TEXT)
     draw.rounded_rectangle((leg_x1, 16, width - 24, 44), radius=7, fill=CARD_BG, outline=CARD_BORDER, width=1)
     lx = leg_x1 + 12
     for (name, color, kind), item_w in zip(legend, leg_widths):
@@ -702,7 +739,7 @@ def render(
 
     cards = [
         (
-            "① 最新大盘位置",
+            "① 最新标的位置",
             f"{view[-1]['day']} 收 {fp(float(last_c))} ({daily_chg_pct:+.2f}%)",
             f"盘中 {fp(active_intra['close'])} ({active_intra['stamp'][11:16]})"
             if active_intra
@@ -933,11 +970,10 @@ def render(
         reasons_txt = "；".join((risk_veto or {}).get("veto_reasons") or ["风控条件未通过"])
         v_banner = f"【风控否决】{reasons_txt}"
         max_vw = chart_right - div_x - 30
-        while len(v_banner) > 10 and text_size(draw, v_banner, f_tiny_sm)[0] > max_vw:
-            v_banner = v_banner[:-2] + "…"
-        vtw, _ = text_size(draw, v_banner, f_tiny_sm)
-        vx2 = min(chart_right - 8, div_x + 22 + vtw)
-        veto_box = (div_x + 8, top + 37, vx2, top + 60)
+        v_lines = _wrap_text(draw, v_banner, f_tiny_sm, max_vw)
+        vtw = max(text_size(draw, line, f_tiny_sm)[0] for line in v_lines)
+        vx2 = min(chart_right - 8, div_x + 14 + vtw)
+        veto_box = (div_x + 8, top + 37, vx2, top + 45 + 15 * len(v_lines))
         draw.rounded_rectangle(
             veto_box,
             radius=5,
@@ -945,7 +981,8 @@ def render(
             outline=(239, 68, 68, 200),
             width=1.2,
         )
-        draw.text((div_x + 14, top + 41), v_banner, font=f_tiny_sm, fill=(254, 226, 226))
+        for idx, line in enumerate(v_lines):
+            draw.text((div_x + 14, top + 41 + idx * 15), line, font=f_tiny_sm, fill=(254, 226, 226))
 
     proj_configs = [
         ("bull", PROJ_BULL, bull_dash, bull_w, bull_a, f"上攻 {fp(projections['bull']['target_price'])}{bull_ftag}"),
