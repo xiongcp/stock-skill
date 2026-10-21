@@ -17,6 +17,9 @@ docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md）。
 from __future__ import annotations
 
 import argparse
+import gzip
+import hashlib
+import inspect
 import json
 import subprocess
 import sys
@@ -28,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from aggregate import _non_overlapping_episodes, date_block_bootstrap, wilson
-from common import ART, BENCHMARKS, PIT_UNIVERSE, ROOT, VIX_SYMBOL, adjusted_bars, load_bars, load_cache
+from common import ART, BENCHMARKS, CACHE, PIT_UNIVERSE, ROOT, VIX_SYMBOL, adjusted_bars, load_bars, load_cache
 from discover_alpha_dev import build_benchmark_features
 from run_backtest import WINDOW_BARS, make_pit_slice
 
@@ -64,6 +67,7 @@ SUBTYPE_FILTERS = ("ALL", "DEEP_OVERSOLD_TURN", "BENCH_SYNC_REBOUND")
 SELECTION_MARKETS = ("CN", "US")  # 港股按 D6 暂停，只作诊断
 PARSIMONY_PP = 0.10  # 默认配置得分与最优差距不超过 0.10 个百分点时保留默认
 LEDGER = ART / "trial_ledger.jsonl"
+LIVE_CACHE_DIR = ART / "v2_live_cache"
 
 _C: dict = {}
 
@@ -92,7 +96,7 @@ def _hash_unit(*parts: str) -> float:
     return zlib.crc32("|".join((str(SEED),) + parts).encode()) / 0xFFFFFFFF
 
 
-def _init(market: str, same_day_rate: dict | None = None) -> None:
+def _init(market: str, same_day_rate: dict | None = None, live: dict | None = None) -> None:
     pit = json.loads(PIT_UNIVERSE.read_text(encoding="utf-8"))["markets"][market]
     periods: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for p in pit["periods"]:
@@ -119,6 +123,7 @@ def _init(market: str, same_day_rate: dict | None = None) -> None:
             name=BENCHMARKS[market]["name"],
         ),
         same_day_rate=same_day_rate or {},
+        live=live or {},
     )
 
 
@@ -292,12 +297,13 @@ def _grid_entry(ex: dict, geometry: tuple[float, float]) -> dict:
     return {k: ex[k] for k in ("fill_status", "net", "outcome") if k in ex}
 
 
-def _scan_signals(symbol: str) -> tuple[list[dict], int]:
+def _live_scan(symbol: str) -> tuple[list[dict], int]:
+    """预筛候选逐个调用线上流水线（整个管线最耗时的一步），只返回触发了反转条件的记录。结果与几何无关，可缓存。"""
     data = _load_symbol(symbol)
     if data is None:
         return [], 0
     market = _C["market"]
-    rows: list[dict] = []
+    records: list[dict] = []
     n_candidates = 0
     for day, t, b_pos in _eligible_days(symbol, data):
         if not prefilter(market, data["c"][t], data["o"][t], data["h"][t], data["l"][t], data["raw"][t],
@@ -306,36 +312,60 @@ def _scan_signals(symbol: str) -> tuple[list[dict], int]:
             continue
         n_candidates += 1
         live = live_high_conviction(symbol, data, t, day)
-        raw_sub = live["subtype"] or live["suppressed_subtype"] or live["paused_subtype"]
-        if raw_sub is None:
+        if (live["subtype"] or live["suppressed_subtype"] or live["paused_subtype"]) is None:
             continue
-        c_pit = float(live["pit"][live["cut"]]["close"])
+        records.append({"day": day, "t": t, "b_pos": b_pos,
+                        **{k: v for k, v in live.items() if k not in ("pit", "cut")}})
+    return records, n_candidates
+
+
+def _execute_signals(symbol: str, data: dict, records: list[dict]) -> list[dict]:
+    """按线上记录的价位撮合；网格的其他几何沿用线上 ATR，默认几何与线上计划逐笔核对。"""
+    market = _C["market"]
+    rows: list[dict] = []
+    for rec in records:
+        day = rec["day"]
+        pit, cut = make_pit_slice(data["bars"], rec["t"], HORIZON)
+        c_pit = float(pit[cut]["close"])
         geo: dict[str, dict] = {}
         for tp_atr, sl_atr in GEOMETRIES:
-            _, entry_high, tp, sl = high_conviction_plan_levels(c_pit, live["atr_live"], market, "equity", day, tp_atr, sl_atr)
-            if (tp_atr, sl_atr) == DEFAULT_GEOMETRY and [entry_high, tp, sl] != [live["entry_zone"][1], live["take_profit_1"], live["stop_loss"]]:
+            _, entry_high, tp, sl = high_conviction_plan_levels(c_pit, rec["atr_live"], market, "equity", day, tp_atr, sl_atr)
+            if (tp_atr, sl_atr) == DEFAULT_GEOMETRY and [entry_high, tp, sl] != [rec["entry_zone"][1], rec["take_profit_1"], rec["stop_loss"]]:
                 raise RuntimeError(f"网格默认几何与线上计划不一致：{symbol} {day}")
             geo[geo_key(tp_atr, sl_atr)] = _grid_entry(
-                execute_plan(symbol, data, live["pit"], live["cut"], b_pos, entry_high, tp, sl,
+                execute_plan(symbol, data, pit, cut, rec["b_pos"], entry_high, tp, sl,
                              open_layer=(tp_atr, sl_atr) == DEFAULT_GEOMETRY),
                 (tp_atr, sl_atr),
             )
         rows.append({
-            "symbol": symbol, "day": day, "subtype": raw_sub,
-            "vetoed": live["suppressed_subtype"] is not None,
-            "regime_score": live["regime_score"],
-            "entry_zone": live["entry_zone"], "tp": live["take_profit_1"], "sl": live["stop_loss"],
+            "symbol": symbol, "day": day,
+            "subtype": rec["subtype"] or rec["suppressed_subtype"] or rec["paused_subtype"],
+            "vetoed": rec["suppressed_subtype"] is not None,
+            "regime_score": rec["regime_score"],
+            "entry_zone": rec["entry_zone"], "tp": rec["take_profit_1"], "sl": rec["stop_loss"],
             **geo[geo_key(*DEFAULT_GEOMETRY)],
             "geo": geo,
         })
-    return rows, n_candidates
+    return rows
 
 
-def _scan_baselines(symbol: str) -> list[dict]:
-    """同口径随机（信号日）、全期随机与超跌随机：用全历史序列的 ATR 按 PIT 比例换算，价位规则与线上相同。"""
+def _scan_signals(symbol: str) -> tuple[list[dict], int]:
+    """单只标的：调用线上流水线并撮合（测试与冒烟用；全量运行走缓存 + _scan_symbol）。"""
+    records, n_candidates = _live_scan(symbol)
+    data = _load_symbol(symbol) if records else None
+    return (_execute_signals(symbol, data, records) if data else []), n_candidates
+
+
+def _scan_symbol(symbol: str) -> tuple[list[dict], list[dict]]:
+    """第二遍：同一次加载里撮合缓存的线上信号并抽取三类随机基准。"""
     data = _load_symbol(symbol)
     if data is None:
-        return []
+        return [], []
+    return _execute_signals(symbol, data, _C["live"].get(symbol, [])), _baselines_for(symbol, data)
+
+
+def _baselines_for(symbol: str, data: dict) -> list[dict]:
+    """同口径随机（信号日）、全期随机与超跌随机：用全历史序列的 ATR 按 PIT 比例换算，价位规则与线上相同。"""
     market = _C["market"]
     rows: list[dict] = []
     for day, t, b_pos in _eligible_days(symbol, data):
@@ -467,17 +497,49 @@ def summarize(signals: list[dict], baselines: list[dict], lo: str, hi: str) -> d
     return out
 
 
-def run_market(market: str, workers: int, limit_symbols: int | None = None, grid: bool = False) -> dict:
+def _live_cache_key(market: str, symbols: list[str]) -> str:
+    """线上流水线结果的缓存键：技能全部脚本、本管线中决定候选与调用方式的函数、区间参数、股票池与行情缓存清单。
+    任何一项变化都会让缓存失效并重新调用线上流水线。"""
+    h = hashlib.sha256()
+    for f in sorted((ROOT / "kline-structure-chart" / "scripts").glob("*.py")):
+        h.update(f.name.encode())
+        h.update(f.read_bytes())
+    for fn in (prefilter, _eligible_days, _load_symbol, build_bundle, live_high_conviction, _live_scan):
+        h.update(inspect.getsource(fn).encode())
+    h.update(json.dumps([market, DEV_REGION, WARMUP_BARS, HORIZON, LIMIT_SESSIONS, symbols]).encode())
+    h.update(PIT_UNIVERSE.read_bytes())
+    h.update((CACHE / "MANIFEST.json").read_bytes())
+    return h.hexdigest()
+
+
+def _load_or_build_live(market: str, symbols: list[str], workers: int, refresh: bool) -> tuple[dict, int, dict]:
+    key = _live_cache_key(market, symbols)
+    path = LIVE_CACHE_DIR / f"{market}_{key[:12]}.json.gz"  # 键进文件名：冒烟（抽样标的）与全量互不覆盖
+    if not refresh and path.exists():
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            cached = json.load(fh)
+        if cached.get("key") == key:
+            return cached["records"], int(cached["n_candidates"]), {"hit": True, "key": key[:16]}
+    _init(market)
+    results = _pool_map(_live_scan, symbols, workers, (market,))
+    live = {sym: recs for sym, (recs, _) in zip(symbols, results) if recs}
+    n_candidates = sum(n for _, n in results)
+    LIVE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        json.dump({"key": key, "market": market, "n_candidates": n_candidates, "records": live}, fh, ensure_ascii=False)
+    return live, n_candidates, {"hit": False, "key": key[:16]}
+
+
+def run_market(market: str, workers: int, limit_symbols: int | None = None, grid: bool = False,
+               refresh_live: bool = False) -> dict:
     _init(market)
     symbols = sorted(_C["periods"])
     if limit_symbols:
         symbols = symbols[:: max(1, len(symbols) // limit_symbols)][:limit_symbols]
-    results = _pool_map(_scan_signals, symbols, workers, (market,))
-    signals = [r for rows, _ in results for r in rows]
-    n_candidates = sum(n for _, n in results)
+    live, n_candidates, cache_status = _load_or_build_live(market, symbols, workers, refresh_live)
 
     # 同口径随机：只在（否决后）信号日抽样，抽样率按"当日股票池规模"折算到信号数的 SAME_DAY_MULTIPLE 倍
-    kept_days = Counter(r["day"] for r in signals if not r["vetoed"])
+    kept_days = Counter(rec["day"] for recs in live.values() for rec in recs if rec["suppressed_subtype"] is None)
     day_list = sorted(kept_days)
     total_pool = 0  # 信号日上的股票池"个股-日"总数
     for sym in symbols:
@@ -485,12 +547,14 @@ def run_market(market: str, workers: int, limit_symbols: int | None = None, grid
             total_pool += bisect_right(day_list, e_d) - bisect_left(day_list, s_d)
     rate = min(1.0, SAME_DAY_MULTIPLE * sum(kept_days.values()) / max(1, total_pool))
     same_day_rate = {d: rate for d in kept_days}
-    baselines = _pool_map(_scan_baselines, symbols, workers, (market, same_day_rate))
-    baselines = [r for rows in baselines for r in rows]
+    results = _pool_map(_scan_symbol, symbols, workers, (market, same_day_rate, live))
+    signals = [r for sig, _ in results for r in sig]
+    baselines = [r for _, base in results for r in base]
 
     out = {
         "n_symbols_scanned": len(symbols),
         "n_prefilter_candidates": n_candidates,
+        "live_cache": cache_status,
         "same_day_sampling_rate": round(rate, 4),
         "segments": {name: summarize(signals, baselines, lo, hi) for name, (lo, hi) in SEGMENTS.items()},
     }
@@ -560,6 +624,7 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--limit-symbols", type=int, default=None, help="冒烟测试：每市场只取等间隔抽样的 N 只")
     ap.add_argument("--grid", action="store_true", help="第 4 步：同时评估方案第 8 节写定的几何 × 子类型网格并按规则选择")
+    ap.add_argument("--refresh-live-cache", action="store_true", help="忽略缓存，重新调用线上流水线")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
     args.out = args.out or (GRID_OUT if args.grid else OUT)
@@ -578,7 +643,8 @@ def main() -> None:
         "markets": {},
     }
     for market in [m.strip() for m in args.markets.split(",") if m.strip()]:
-        result["markets"][market] = run_market(market, args.workers, args.limit_symbols, grid=args.grid)
+        result["markets"][market] = run_market(market, args.workers, args.limit_symbols, grid=args.grid,
+                                               refresh_live=args.refresh_live_cache)
         seg = result["markets"][market]["segments"]["all"]
         fl = seg["fill_layer"]
         print(f"[{market}] pre_veto={seg['n_signals_pre_veto']} vetoed={seg['n_vetoed_benchmark_weak']} "

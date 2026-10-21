@@ -101,7 +101,10 @@ def date_block_bootstrap(
 
     同一天的所有样本作为一个块整体抽取（大盘级事件会让同日样本高度相关）；差值时两组在同一批
     抽中的日期上配对，只出现在一组里的日期只贡献该组。返回原单位（不乘 100），块数 < 3 时返回 None。
+    用 numpy 一次抽出 n_boot x 块数 的下标矩阵并向量化求和。
     """
+    import numpy as np
+
     blocks: dict[str, list[float]] = defaultdict(lambda: [0.0, 0, 0.0, 0])
     for r in rows:
         b = blocks[r["day"]]
@@ -116,23 +119,20 @@ def date_block_bootstrap(
     days = sorted(blocks)
     if len(days) < 3:
         return None
-    rng = random.Random(seed)
-    stats: list[float] = []
-    for _ in range(n_boot):
-        s_a = n_a = s_b = n_b = 0.0
-        for _ in range(len(days)):
-            b = blocks[days[rng.randrange(len(days))]]
-            s_a += b[0]
-            n_a += b[1]
-            s_b += b[2]
-            n_b += b[3]
-        if not n_a or (base_rows is not None and not n_b):
-            continue
-        stats.append(s_a / n_a - (s_b / n_b if base_rows is not None else 0.0))
-    if len(stats) < n_boot // 2:
+    arr = np.array([blocks[d] for d in days], dtype=np.float64)
+    idx = np.random.default_rng(seed).integers(0, len(days), size=(n_boot, len(days)))
+    sums = arr[idx].sum(axis=1)  # (n_boot, 4)：信号和、信号数、基准和、基准数
+    ok = sums[:, 1] > 0
+    if base_rows is not None:
+        ok &= sums[:, 3] > 0
+    if int(ok.sum()) < n_boot // 2:
         return None
+    s = sums[ok]
+    stats = s[:, 0] / s[:, 1]
+    if base_rows is not None:
+        stats = stats - s[:, 2] / s[:, 3]
     stats.sort()
-    return [stats[int(0.025 * len(stats))], stats[int(0.975 * len(stats)) - 1]]
+    return [float(stats[int(0.025 * len(stats))]), float(stats[int(0.975 * len(stats)) - 1])]
 
 
 def _non_overlapping_episodes(rows: list[dict], min_gap_days: int = 21) -> list[dict]:

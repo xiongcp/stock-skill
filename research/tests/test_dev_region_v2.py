@@ -124,3 +124,17 @@ def test_select_config_follows_predeclared_rule() -> None:
     grid["US"][other] = _fake_seg(True, True, 0.55)
     sel = v2.select_config(grid)
     assert sel["selected"] == other and sel["kept_default_by_parsimony"] is False
+
+
+def test_live_cache_hits_only_when_key_matches(tmp_path, monkeypatch) -> None:
+    """线上流水线结果缓存：同样的代码与参数第二次命中，结果相同；参数一变就失效重算。"""
+    monkeypatch.setattr(v2, "LIVE_CACHE_DIR", tmp_path)
+    v2._init("US")
+    symbols = sorted(v2._C["periods"])[::400][:3]
+    live1, n1, st1 = v2._load_or_build_live("US", symbols, workers=1, refresh=False)
+    live2, n2, st2 = v2._load_or_build_live("US", symbols, workers=1, refresh=False)
+    assert st1["hit"] is False and st2["hit"] is True
+    assert (live1, n1) == (live2, n2)
+    monkeypatch.setattr(v2, "HORIZON", v2.HORIZON + 1)
+    _, _, st3 = v2._load_or_build_live("US", symbols, workers=1, refresh=False)
+    assert st3["hit"] is False
