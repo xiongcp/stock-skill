@@ -2360,7 +2360,8 @@ def test_score_judgments_offline_bars_payload_parsing() -> None:
 
 
 def test_high_conviction_rebound_and_decision_probability_contract(replay_recorded) -> None:
-    """高置信超跌/大盘共振反转层：触发时输出校准后的 decision_probability (>=70%) 与 high_conviction_plan。"""
+    """高置信超跌/大盘共振反转层：CN 触发时只记录子类型（留出集 H1 未通过，D10），不给计划与任何统计数字；
+    大盘极弱时先被否决抑制。"""
     from risk import compute_triple_barrier_plan
 
     bundle = load_bundle(
@@ -2400,18 +2401,16 @@ def test_high_conviction_rebound_and_decision_probability_contract(replay_record
         [],
         bench,
     )
-    assert dec["high_conviction_rebound"] is True
-    assert dec["high_conviction_subtype"] == "BENCH_SYNC_REBOUND"
+    assert dec["high_conviction_rebound"] is False and dec["high_conviction_subtype"] is None
+    assert dec["high_conviction_paused_subtype"] == "BENCH_SYNC_REBOUND"
     dp = dec["decision_probability"]
-    assert dp["available"] is True and dp["p_net_positive"] >= 0.70 and dp["p_episode_net_positive"] >= 0.70
-    assert dp["dev_effective_episodes"] >= 100
+    assert dp["available"] is False and dp["method"] == "PAUSED_H1_NOT_PASSED"
+    # 反转层没有通过留出集验收的统计量：不得出现任何概率或命中率数字
+    assert not any(isinstance(v, (int, float)) and not isinstance(v, bool) for v in dp.values())
     hcp = tb["high_conviction_plan"]
-    assert hcp["triggered"] is True
+    assert hcp["triggered"] is False and "留出集 H1 验收未通过" in hcp["rule_cn"]
+    # 价位仍按固定几何给出（研究回测与 H2 前向跟踪使用），但 triggered=false 时不得对外转述
     assert hcp["stop_loss_barrier"] < hcp["entry_zone"][0] <= hcp["entry_zone"][1] < hcp["take_profit_1"]
-    # 区间必须与它所描述的 episode 净正率配套，点估计落在区间内
-    lo, hi = dp["episode_ci95"]
-    assert lo <= dp["p_episode_net_positive"] <= hi
-    assert "ci95" not in dp
 
     # 先大盘、后个股：大盘极弱触发否决时，同一截面不得再输出反转计划与校准概率
     weak_bench = {**bench, "regime_score": 30.0}
@@ -2431,17 +2430,16 @@ def test_high_conviction_rebound_and_decision_probability_contract(replay_record
     assert dec_w["high_conviction_suppressed_by_veto"] is True
     assert dec_w["high_conviction_suppressed_subtype"] == "BENCH_SYNC_REBOUND"
     assert dec_w["decision_probability"]["available"] is False
-    assert dec_w["decision_probability"]["p_net_positive"] is None
     assert dec_w["decision_probability"]["method"] == "SUPPRESSED_BY_BENCHMARK_VETO"
     assert tb_w["high_conviction_plan"]["triggered"] is False
 
 
 
 def test_high_conviction_paused_market_only_hints(replay_recorded) -> None:
-    """港股（HC_PAUSED_MARKETS）触发反转条件时只记录子类型，不给反转计划与统计数字。"""
+    """港股（HC_PAUSED_MARKETS）触发反转条件时只记录子类型，不给反转计划与统计数字；暂停原因与 CN/US 不同。"""
     from risk import HC_PAUSED_MARKETS, compute_triple_barrier_plan
 
-    assert "HK" in HC_PAUSED_MARKETS
+    assert HC_PAUSED_MARKETS == {"CN", "HK", "US"}
     req = {"symbol": "00700.HK", "market": "HK", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
     bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
     rep = analyze_bundle(bundle, req, include_replay=False)
@@ -2470,7 +2468,7 @@ def test_high_conviction_paused_market_only_hints(replay_recorded) -> None:
     assert dec["high_conviction_rebound"] is False and dec["high_conviction_subtype"] is None
     assert dec["high_conviction_suppressed_by_veto"] is False
     dp = dec["decision_probability"]
-    assert dp["available"] is False and dp["p_net_positive"] is None and dp["method"] == "PAUSED_NO_DEV_EDGE"
+    assert dp["available"] is False and dp["method"] == "PAUSED_NO_DEV_EDGE"
     hcp = tb["high_conviction_plan"]
     assert hcp["triggered"] is False and "暂不给出反转入场计划" in hcp["rule_cn"]
 

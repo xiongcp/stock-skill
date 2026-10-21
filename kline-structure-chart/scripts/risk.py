@@ -44,36 +44,6 @@ def _avoid_round_number_stop(
     return st
 
 
-# 开发集（2021-01-04..2024-12-09，三市场各 1500 只/日 PIT 真实股票池）校准的高置信超跌/共振反转先验
-_DEV_CALIBRATED_REBOUND_PRIORS: dict[str, dict[str, Any]] = {
-    "CN": {
-        "p_net_positive": 0.7223,
-        "p_episode_net_positive": 0.7035,
-        "p_tp_before_sl": 0.7722,
-        "dev_sample_size": 13215,
-        "dev_effective_episodes": 9488,
-        # Wilson 95% 区间对应 p_episode_net_positive（独立 episode 净正率），不是 p_net_positive
-        "episode_ci95": [0.6942, 0.7126],
-    },
-    "HK": {
-        "p_net_positive": 0.7174,
-        "p_episode_net_positive": 0.7085,
-        "p_tp_before_sl": 0.7727,
-        "dev_sample_size": 2714,
-        "dev_effective_episodes": 2367,
-        "episode_ci95": [0.6899, 0.7265],
-    },
-    "US": {
-        "p_net_positive": 0.7430,
-        "p_episode_net_positive": 0.7469,
-        "p_tp_before_sl": 0.8007,
-        "dev_sample_size": 12966,
-        "dev_effective_episodes": 8875,
-        "episode_ci95": [0.7378, 0.7559],
-    },
-}
-
-
 # 反量化规则的门禁范围（Dev 2021–2024 + Val 2025H1 的拦截归因结果，见 research/anti_quant_filter_study.py）：
 # 证据支持的规则才改变 setup/评级；证据相反或样本不足的规则只输出提示，不降级、不否决。
 _ANTI_QUANT_GATES: dict[str, frozenset[str]] = {
@@ -86,8 +56,15 @@ _ANTI_QUANT_GATES: dict[str, frozenset[str]] = {
 HC_ENTRY_ZONE_ATR = (-0.50, 0.25)
 HC_TP1_ATR = 0.85
 HC_SL_ATR = 2.20
-# 开发区回测 v2 未显示超额的市场：触发时只提示，不给反转计划与统计数字（方案 D6，docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md 第 7 节）
-HC_PAUSED_MARKETS = frozenset({"HK"})
+# 暂停输出反转计划的市场与原因（docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md）：
+# 港股在开发区没有超额（D6，第 7 节）；CN、US 在留出集 H1 上未通过预注册验收（D10，第 11 节）。
+# 触发时只记录子类型，不给入场计划与任何统计数字；恢复须先通过前向 H2 验收。
+HC_PAUSE_REASONS: dict[str, tuple[str, str]] = {
+    "CN": ("PAUSED_H1_NOT_PASSED", "留出集 H1 验收未通过"),
+    "US": ("PAUSED_H1_NOT_PASSED", "留出集 H1 验收未通过"),
+    "HK": ("PAUSED_NO_DEV_EDGE", "开发区回测未显示超额，留出集 H1 也未通过"),
+}
+HC_PAUSED_MARKETS = frozenset(HC_PAUSE_REASONS)
 
 
 def detect_high_conviction_rebound(
@@ -572,7 +549,7 @@ def compute_triple_barrier_plan(
         },
     }
 
-    # 高置信超跌/大盘共振反转层（2021-2024 开发集校准）。触发条件与计划价位由共享纯函数给出，研究回测调用同一实现
+    # 高置信超跌/大盘共振反转层：触发条件与计划价位由共享纯函数给出，研究回测调用同一实现；目前三个市场均暂停输出计划
     hc_subtype: str | None = None
     if not benchmark_info.get("benchmark_missing"):
         hc_subtype = detect_high_conviction_rebound(
@@ -600,54 +577,37 @@ def compute_triple_barrier_plan(
     if hc_paused_subtype is not None:
         hc_subtype = None
 
-    prior = _DEV_CALIBRATED_REBOUND_PRIORS.get(market, _DEV_CALIBRATED_REBOUND_PRIORS["CN"])
     hc_entry_low, hc_entry_high, hc_tp1, hc_sl = high_conviction_plan_levels(last_c, atr14, market, asset_type, as_of_day)
     meta_decision["high_conviction_rebound"] = hc_subtype is not None
     meta_decision["high_conviction_subtype"] = hc_subtype
     meta_decision["high_conviction_suppressed_by_veto"] = hc_suppressed_by_veto
     meta_decision["high_conviction_suppressed_subtype"] = hc_suppressed_subtype
     meta_decision["high_conviction_paused_subtype"] = hc_paused_subtype
-    meta_decision["decision_probability"] = (
-        {
-            "available": True,
-            "event_definition": f"5日限价入场后15根K线内扣费净收益>0（TP=+{HC_TP1_ATR:.2f}*ATR, SL=-{HC_SL_ATR:.2f}*ATR）",
-            "p_net_positive": prior["p_net_positive"],
-            "p_episode_net_positive": prior["p_episode_net_positive"],
-            "p_tp_before_sl": prior["p_tp_before_sl"],
-            "method": "DEV_CALIBRATED_REBOUND_EMPIRICAL_PRIOR",
-            "dev_sample_size": prior["dev_sample_size"],
-            "dev_effective_episodes": prior["dev_effective_episodes"],
-            "episode_ci95": prior["episode_ci95"],
-            "calibration_version": "rebound_v1_dev_2021_2024",
-            "as_of": as_of_day,
-        }
-        if hc_subtype is not None
-        else {
-            "available": False,
-            "event_definition": (
-                "反转条件已触发，但大盘环境评分偏弱触发风控否决，不输出校准概率"
-                if hc_suppressed_by_veto
-                else "反转条件已触发，但该市场开发区回测未显示超额，暂停输出统计数字"
-                if hc_paused_subtype is not None
-                else "未触发高置信超跌/大盘共振反转条件，不输出 >=70% 校准概率"
-            ),
-            "p_net_positive": None,
-            "p_episode_net_positive": None,
-            "p_tp_before_sl": None,
-            "method": (
-                "SUPPRESSED_BY_BENCHMARK_VETO"
-                if hc_suppressed_by_veto
-                else "PAUSED_NO_DEV_EDGE"
-                if hc_paused_subtype is not None
-                else "NOT_TRIGGERED"
-            ),
-            "dev_sample_size": prior["dev_sample_size"],
-            "dev_effective_episodes": prior["dev_effective_episodes"],
-            "episode_ci95": None,
-            "calibration_version": "rebound_v1_dev_2021_2024",
-            "as_of": as_of_day,
-        }
-    )
+    pause_method, pause_reason = HC_PAUSE_REASONS.get(market, ("", ""))
+    # 反转层没有任何通过留出集验收的统计量，不输出概率或命中率数字（方案 D4=b、D10=a）
+    meta_decision["decision_probability"] = {
+        "available": False,
+        "method": (
+            "SUPPRESSED_BY_BENCHMARK_VETO"
+            if hc_suppressed_by_veto
+            else pause_method
+            if hc_paused_subtype is not None
+            else "NO_VALIDATED_STATISTIC"
+            if hc_subtype is not None
+            else "NOT_TRIGGERED"
+        ),
+        "event_definition": (
+            "反转条件已触发，但大盘环境评分偏弱触发风控否决"
+            if hc_suppressed_by_veto
+            else f"反转条件已触发，但{pause_reason}，暂停输出反转计划与统计数字"
+            if hc_paused_subtype is not None
+            else "反转条件已触发，但没有通过留出集验收的统计量，不输出数字"
+            if hc_subtype is not None
+            else "未触发高置信超跌/大盘共振反转条件"
+        ),
+        "validation": "docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md 第 11 节：留出集 H1 未通过",
+        "as_of": as_of_day,
+    }
 
     retest_hold = float(projections["bull"]["retest_hold"])
     bear_target = float(projections["bear"]["target_price"])
@@ -724,7 +684,7 @@ def compute_triple_barrier_plan(
                 else (
                     "反转条件已触发，但大盘环境评分偏弱触发风控否决，不给出反转入场计划"
                     if hc_suppressed_by_veto
-                    else f"反转条件已触发（{hc_paused_subtype}），但该市场开发区回测未显示超额，暂不给出反转入场计划"
+                    else f"反转条件已触发（{hc_paused_subtype}），但{pause_reason}，暂不给出反转入场计划"
                     if hc_paused_subtype is not None
                     else "当前截面未触发高置信超跌/大盘共振反转条件"
                 )

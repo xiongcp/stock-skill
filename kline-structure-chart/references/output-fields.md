@@ -84,8 +84,8 @@
 | `meta_labeling_decision.risk_veto_applied` / `veto_reasons` / `veto_codes` | 是否被风控否决、原因文本及稳定编码（`BENCHMARK_MISSING`、`BENCHMARK_WEAK`、`RR_INSUFFICIENT`、`BELOW_LOWER_RAIL`、`BREAKOUT_LOW_VOLUME`、`PLAN_GEOMETRY_INVALID`（止损不低于入场区下沿或 TP1 不高于入场区上沿），与原因一一对应） | 布尔 / 文本 / 枚举 | 否 | 否决时置顶转述原因文本，编码不需要对外说 |
 | `meta_labeling_decision.high_conviction_rebound` / `high_conviction_subtype` | 是否触发高置信超跌/大盘共振反转条件，子类型 `BENCH_SYNC_REBOUND`（大盘 5 日跌 ≥2.5% 后当日反弹）或 `DEEP_OVERSOLD_TURN`（RSI 低位拐头或深度偏离 EMA20）；触发器为 `risk.detect_high_conviction_rebound`，研究回测共用 | 布尔 / 枚举 | 子类型未触发时为 `null` | 只说"触发了反转条件"，不得说成上涨概率 |
 | `meta_labeling_decision.high_conviction_suppressed_by_veto` / `high_conviction_suppressed_subtype` | 反转条件已触发、但大盘环境评分 < 35（`BENCHMARK_WEAK`）而被抑制；被抑制时记录原本的子类型 | 布尔 / 枚举 | 子类型未被抑制时为 `null` | 为 `true` 时只转述风控否决，不给反转计划 |
-| `meta_labeling_decision.high_conviction_paused_subtype` | 反转条件已触发、但所在市场在 `HC_PAUSED_MARKETS`（当前为港股：开发区回测未显示超额）而暂停时，记录触发的子类型 | 枚举 | 未暂停时为 `null` | 只说"触发了反转条件，该市场暂不给出反转计划"，不报统计数字 |
-| `meta_labeling_decision.decision_probability` | 反转层的开发区回测成交统计：`available`、`event_definition`、`p_net_positive`、`p_episode_net_positive`、`p_tp_before_sl`、`episode_ci95`（对应 `p_episode_net_positive`）、`dev_sample_size`、`dev_effective_episodes`、`method`、`calibration_version`；未触发或被抑制时数值为 `null` | 比例 / 文本 | 未触发时数值为 `null` | 属开发区样本内统计，**不是该标的的上涨概率**，留出集验收通过前不对外报数字 |
+| `meta_labeling_decision.high_conviction_paused_subtype` | 反转条件已触发、但所在市场在 `HC_PAUSED_MARKETS` 中而暂停时，记录触发的子类型。当前三个市场都暂停：CN、US 是留出集 H1 验收未通过，港股是开发区回测未显示超额、H1 也未通过 | 枚举 | 未暂停时为 `null` | 只说"触发了反转条件，暂不给出反转计划"，不报统计数字 |
+| `meta_labeling_decision.decision_probability` | 反转层统计数字的可用性说明：`available`（恒为 `false`）、`method`（`NOT_TRIGGERED`、`SUPPRESSED_BY_BENCHMARK_VETO`、`PAUSED_H1_NOT_PASSED`、`PAUSED_NO_DEV_EDGE`、`NO_VALIDATED_STATISTIC`）、`event_definition`（中文原因）、`validation`（验收记录出处）、`as_of`。反转层没有任何通过留出集验收的统计量，因此不含概率或命中率数字 | 布尔 / 枚举 / 文本 | 否 | 不得给出任何概率、命中率或"校准先验"数字；可转述 `event_definition` |
 
 ## 6. 风控计划 `triple_barrier_plan` 与否决 `debate_and_veto`
 

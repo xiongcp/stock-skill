@@ -12,6 +12,11 @@
 
 ### 变更（高置信反转层：线上与回测统一口径，见 `docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md`）
 
+- **反转层三个市场全部暂停输出入场计划与统计数字**（方案 D10=a）：按冻结的预注册 v2，在留出集 H1（2017-10 ~ 2020-11）上一次性验收，CN、US 都未通过（扣费均值及其相对同日随机入场的超额，95% 区间下限都未大于 0），港股（诊断）显著为负。具体改动：
+  1. `risk.HC_PAUSE_REASONS` 记录各市场的暂停原因（CN/US `PAUSED_H1_NOT_PASSED`，港股 `PAUSED_NO_DEV_EDGE`）。
+  2. 删除 v1 的 `_DEV_CALIBRATED_REBOUND_PRIORS`（72% 等数字移入 v1 研究脚本，仅供复现）；`decision_probability` 只保留 `available=false`、`method`、`event_definition` 与 `validation`，不再含任何数字。
+  3. HTML 删除"开发集校准先验 (L4)"一行。
+  4. `BACKTEST_AND_SKILL_AUDIT_REPORT.md` 与 v1 回测报告开头加更正说明。
 - 触发器抽成纯函数 `risk.detect_high_conviction_rebound`，计划价位抽成 `risk.high_conviction_plan_levels`，线上与研究回测共用。线上触发口径改为与开发集校准时一致：
   1. `DEEP_OVERSOLD_TURN` 的"拐头"改看 RSI14 是否高于前一根（此前看收盘价是否上涨）；指标快照新增 `momentum.rsi14_prev`。
   2. CN/US 的 `BENCH_SYNC_REBOUND` 改为要求大盘当日涨幅 ≥ 0.3%（此前要求大盘收阳）；港股门槛 0.5% 不变。

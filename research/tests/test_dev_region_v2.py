@@ -67,7 +67,7 @@ def test_pipeline_signals_come_from_live_plan() -> None:
         for r in rows[:2]:
             t = data["idx"][r["day"]]
             live = v2.live_high_conviction(symbol, data, t, r["day"])
-            assert (live["subtype"] or live["suppressed_subtype"]) == r["subtype"]
+            assert (live["subtype"] or live["suppressed_subtype"] or live["paused_subtype"]) == r["subtype"]
             assert r["vetoed"] == (live["suppressed_subtype"] is not None)
             assert [live["entry_zone"], live["take_profit_1"], live["stop_loss"]] == [r["entry_zone"], r["tp"], r["sl"]]
             # 固定价位：成交价不超过入场区上沿，止损在成交价下方
