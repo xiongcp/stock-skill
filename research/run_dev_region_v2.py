@@ -498,10 +498,13 @@ def summarize(signals: list[dict], baselines: list[dict], lo: str, hi: str) -> d
 
 
 def _live_cache_key(market: str, symbols: list[str]) -> str:
-    """线上流水线结果的缓存键：技能全部脚本、本管线中决定候选与调用方式的函数、区间参数、股票池与行情缓存清单。
+    """线上流水线结果的缓存键：技能全部脚本、研究侧行情加载与 PIT 切片、本管线中决定候选与调用方式的函数、
+    区间参数、股票池与行情缓存清单。
     任何一项变化都会让缓存失效并重新调用线上流水线。"""
     h = hashlib.sha256()
-    for f in sorted((ROOT / "kline-structure-chart" / "scripts").glob("*.py")):
+    # 研究侧的行情加载（common.py：复权、占位K线剔除）与 PIT 切片（run_backtest.py）也决定线上流水线看到的K线
+    for f in [*sorted((ROOT / "kline-structure-chart" / "scripts").glob("*.py")),
+              ROOT / "research" / "common.py", ROOT / "research" / "run_backtest.py"]:
         h.update(f.name.encode())
         h.update(f.read_bytes())
     for fn in (prefilter, _eligible_days, _load_symbol, build_bundle, live_high_conviction, _live_scan):
