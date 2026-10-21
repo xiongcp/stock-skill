@@ -18,6 +18,7 @@
 - 新增 `meta_labeling_decision.high_conviction_suppressed_subtype`：反转条件触发但被大盘否决（`BENCHMARK_WEAK`）抑制时记录原本的子类型。`references/output-fields.md` 补齐反转层全部字段（此前未登记）。
 - **港股暂停输出反转计划**（方案 D6）：`risk.HC_PAUSED_MARKETS = {"HK"}`。开发区回测 v2 中港股相对同日随机入场没有超额，触发时只记录 `high_conviction_paused_subtype`，`high_conviction_plan.triggered = false`，`decision_probability.method = PAUSED_NO_DEV_EDGE`。
 - `high_conviction_plan_levels` 新增可选参数 `tp_atr` / `sl_atr`，只供研究网格使用；计划文案改为引用 `HC_TP1_ATR` / `HC_SL_ATR`，不再写死。`references/math-patterns.md` 新增第 8 节：反转层触发、抑制与暂停、计划几何，以及不套用 1.20 盈亏比否决、改用期望口径的理由（方案 D3）。
+- 研究（第 6 步）：`run_dev_region_v2.py` 新增 `mode="h1"`（仅在 `run_h1_holdout.py` 校验预注册通过后授权）；新增 `run_h1_holdout.py`（校验冻结文件与数据 hash、git 无未提交改动，只能成功运行一次，`--check` 只校验）与 `write_preregistration_v2.py`（生成 `research/preregistration/preregistration_v2.json`）。
 - 研究提速：`aggregate.date_block_bootstrap` 改用 numpy 向量化（单次约 0.38 s → 0.07 s，点估计不变，区间因随机数生成器不同有小数点后的差异）；线上流水线结果按"技能脚本 + 管线函数源码 + 区间参数 + 股票池 + 行情清单"的哈希缓存到 `artifacts/long_backtest/v2_live_cache/`，命中后重跑不再调用线上流水线（`--refresh-live-cache` 强制重算）。
 - 研究：`run_dev_region_v2.py --grid` 评估方案第 8 节写定的 18 个配置（6 种 TP/SL 几何 × 3 种子类型），按预先写定的规则选择，结果写入 `dev_region_v2_grid.json`。
 - 研究：新增开发区回测 v2 `research/run_dev_region_v2.py`。对预筛候选逐个调用线上 `analyze_bundle`（`research/tests/test_dev_region_v2.py` 校验预筛不漏线上信号），按线上固定价位撮合、套用大盘否决；新增同日随机入场等三类基准与按信号日期分块的 bootstrap（`aggregate.date_block_bootstrap`）；只评估 2021-01-04 起的开发区，拒绝触碰留出集（2020-11-30 及以前）。每次运行追加 `artifacts/long_backtest/trial_ledger.jsonl`。v1 脚本保留不改，以便复现已发布的数字，但不再用于新结论。

@@ -43,6 +43,11 @@ from risk import HC_SL_ATR, HC_TP1_ATR, high_conviction_plan_levels  # noqa: E40
 
 DEV_REGION = ("2021-01-04", "2026-09-24")
 H1_LAST_DAY = "2020-11-30"
+# 留出集 H1：各市场首个调仓日（调仓日前已有满 420 根K线，方案第 9 节）至 H1_LAST_DAY
+H1_FIRST_DAY = {"CN": "2017-10-24", "HK": "2018-07-09", "US": "2018-06-22"}
+H1_UNIVERSE = ART / "pit_universe_h1.json"
+# 只有 run_h1_holdout.py 在校验预注册通过后才会把它设为 True；其余任何调用 mode="h1" 都会被拒绝
+H1_AUTHORIZED = False
 # 与 v1 的切分对齐，便于对照；"all" 为整个开发区
 SEGMENTS = {
     "all": DEV_REGION,
@@ -96,8 +101,20 @@ def _hash_unit(*parts: str) -> float:
     return zlib.crc32("|".join((str(SEED),) + parts).encode()) / 0xFFFFFFFF
 
 
-def _init(market: str, same_day_rate: dict | None = None, live: dict | None = None) -> None:
-    pit = json.loads(PIT_UNIVERSE.read_text(encoding="utf-8"))["markets"][market]
+def _mode_config(mode: str, market: str) -> tuple[tuple[str, str], Path]:
+    """评估区间与股票池：开发区（默认）或留出集 H1。"""
+    if mode == "dev":
+        return DEV_REGION, PIT_UNIVERSE
+    if mode == "h1":
+        if not H1_AUTHORIZED:
+            raise PermissionError("留出集 H1 只能由 run_h1_holdout.py 在校验预注册后评估")
+        return (H1_FIRST_DAY[market], H1_LAST_DAY), H1_UNIVERSE
+    raise ValueError(f"unknown mode: {mode}")
+
+
+def _init(market: str, same_day_rate: dict | None = None, live: dict | None = None, mode: str = "dev") -> None:
+    region, universe = _mode_config(mode, market)
+    pit = json.loads(universe.read_text(encoding="utf-8"))["markets"][market]
     periods: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for p in pit["periods"]:
         for s in p["symbols"]:
@@ -124,6 +141,9 @@ def _init(market: str, same_day_rate: dict | None = None, live: dict | None = No
         ),
         same_day_rate=same_day_rate or {},
         live=live or {},
+        mode=mode,
+        region=region,
+        universe=universe,
     )
 
 
@@ -159,7 +179,7 @@ def _eligible_days(symbol: str, data: dict):
     n = len(data["bars"])
     bench_days = _C["bench_days"]
     for s_d, e_d in _C["periods"].get(symbol, []):
-        lo, hi = max(s_d, DEV_REGION[0]), min(e_d, DEV_REGION[1])
+        lo, hi = max(s_d, _C["region"][0]), min(e_d, _C["region"][1])
         if lo > hi:
             continue
         for b_pos in range(bisect_left(bench_days, lo), len(bench_days)):
@@ -168,7 +188,10 @@ def _eligible_days(symbol: str, data: dict):
                 break
             if day not in _C["bf"]:
                 continue
-            assert day > H1_LAST_DAY, "留出集 H1 不得在开发区管线中评估"
+            if _C["mode"] == "dev":
+                assert day > H1_LAST_DAY, "留出集 H1 不得在开发区管线中评估"
+            else:
+                assert day <= H1_LAST_DAY, "H1 评估不得读取开发区的结果"
             t = data["idx"].get(day)
             if t is None or t < WARMUP_BARS - 1 or t + LIMIT_SESSIONS + HORIZON >= n:
                 continue
@@ -398,11 +421,18 @@ def _baselines_for(symbol: str, data: dict) -> list[dict]:
     return rows
 
 
+def _worker_init(h1_authorized: bool, *init_args) -> None:
+    """子进程会重新导入本模块，H1 授权需要由父进程显式传入。"""
+    global H1_AUTHORIZED
+    H1_AUTHORIZED = h1_authorized
+    _init(*init_args)
+
+
 def _pool_map(fn, symbols: list[str], workers: int, init_args: tuple) -> list:
     if workers <= 1:
         _init(*init_args)
         return [fn(s) for s in symbols]
-    with ProcessPoolExecutor(max_workers=workers, initializer=_init, initargs=init_args) as ex:
+    with ProcessPoolExecutor(max_workers=workers, initializer=_worker_init, initargs=(H1_AUTHORIZED, *init_args)) as ex:
         return list(ex.map(fn, symbols, chunksize=8))
 
 
@@ -509,22 +539,23 @@ def _live_cache_key(market: str, symbols: list[str]) -> str:
         h.update(f.read_bytes())
     for fn in (prefilter, _eligible_days, _load_symbol, build_bundle, live_high_conviction, _live_scan):
         h.update(inspect.getsource(fn).encode())
-    h.update(json.dumps([market, DEV_REGION, WARMUP_BARS, HORIZON, LIMIT_SESSIONS, symbols]).encode())
-    h.update(PIT_UNIVERSE.read_bytes())
+    h.update(json.dumps([_C["mode"], market, _C["region"], WARMUP_BARS, HORIZON, LIMIT_SESSIONS, symbols]).encode())
+    h.update(_C["universe"].read_bytes())
     h.update((CACHE / "MANIFEST.json").read_bytes())
     return h.hexdigest()
 
 
 def _load_or_build_live(market: str, symbols: list[str], workers: int, refresh: bool) -> tuple[dict, int, dict]:
     key = _live_cache_key(market, symbols)
-    path = LIVE_CACHE_DIR / f"{market}_{key[:12]}.json.gz"  # 键进文件名：冒烟（抽样标的）与全量互不覆盖
+    mode = _C["mode"]
+    path = LIVE_CACHE_DIR / f"{mode}_{market}_{key[:12]}.json.gz"  # 键进文件名：冒烟（抽样标的）与全量互不覆盖
     if not refresh and path.exists():
         with gzip.open(path, "rt", encoding="utf-8") as fh:
             cached = json.load(fh)
         if cached.get("key") == key:
             return cached["records"], int(cached["n_candidates"]), {"hit": True, "key": key[:16]}
-    _init(market)
-    results = _pool_map(_live_scan, symbols, workers, (market,))
+    _init(market, mode=mode)
+    results = _pool_map(_live_scan, symbols, workers, (market, None, None, mode))
     live = {sym: recs for sym, (recs, _) in zip(symbols, results) if recs}
     n_candidates = sum(n for _, n in results)
     LIVE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -534,8 +565,9 @@ def _load_or_build_live(market: str, symbols: list[str], workers: int, refresh: 
 
 
 def run_market(market: str, workers: int, limit_symbols: int | None = None, grid: bool = False,
-               refresh_live: bool = False) -> dict:
-    _init(market)
+               refresh_live: bool = False, mode: str = "dev") -> dict:
+    _init(market, mode=mode)
+    segments = SEGMENTS if mode == "dev" else {"all": _C["region"]}
     symbols = sorted(_C["periods"])
     if limit_symbols:
         symbols = symbols[:: max(1, len(symbols) // limit_symbols)][:limit_symbols]
@@ -550,7 +582,7 @@ def run_market(market: str, workers: int, limit_symbols: int | None = None, grid
             total_pool += bisect_right(day_list, e_d) - bisect_left(day_list, s_d)
     rate = min(1.0, SAME_DAY_MULTIPLE * sum(kept_days.values()) / max(1, total_pool))
     same_day_rate = {d: rate for d in kept_days}
-    results = _pool_map(_scan_symbol, symbols, workers, (market, same_day_rate, live))
+    results = _pool_map(_scan_symbol, symbols, workers, (market, same_day_rate, live, mode))
     signals = [r for sig, _ in results for r in sig]
     baselines = [r for _, base in results for r in base]
 
@@ -559,7 +591,8 @@ def run_market(market: str, workers: int, limit_symbols: int | None = None, grid
         "n_prefilter_candidates": n_candidates,
         "live_cache": cache_status,
         "same_day_sampling_rate": round(rate, 4),
-        "segments": {name: summarize(signals, baselines, lo, hi) for name, (lo, hi) in SEGMENTS.items()},
+        "region": list(_C["region"]),
+        "segments": {name: summarize(signals, baselines, lo, hi) for name, (lo, hi) in segments.items()},
     }
     if grid:
         out["grid"] = {}
@@ -569,7 +602,7 @@ def run_market(market: str, workers: int, limit_symbols: int | None = None, grid
             for sub in SUBTYPE_FILTERS:
                 g_sig = [{**r, **_flat(r, gk)} for r in signals if sub == "ALL" or r["subtype"] == sub]
                 out["grid"][f"{gk}|{sub}"] = {
-                    name: summarize(g_sig, g_base, lo, hi) for name, (lo, hi) in SEGMENTS.items()
+                    name: summarize(g_sig, g_base, lo, hi) for name, (lo, hi) in segments.items()
                 }
     return out
 
