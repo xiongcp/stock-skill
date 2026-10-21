@@ -193,6 +193,56 @@ def test_yahoo_null_and_nonpositive_rows_are_skipped(monkeypatch: pytest.MonkeyP
     assert all(min(r["open"], r["high"], r["low"], r["close"]) > 0 for r in rows)
 
 
+HK_0700_PLACEHOLDER_DAYS = [
+    "2022-01-31", "2024-12-24", "2024-12-31", "2025-01-28", "2025-12-24", "2025-12-31", "2026-02-16",
+]
+
+
+@pytest.mark.parametrize(
+    ("recorded", "expected"),
+    [
+        ("yahoo_daily/0700.HK.json", HK_0700_PLACEHOLDER_DAYS),
+        ("yahoo_daily/NVDA.json", []),
+        ("yahoo_daily/SPY.json", []),
+        ("yahoo_daily/HSI.json", []),
+    ],
+)
+def test_placeholder_bars_dropped_on_recorded_data(recorded: str, expected: list[str]) -> None:
+    """成交量为 0 且四价相同的占位K线只剔除不补数，其余K线原样保留。"""
+    raw = load_recorded(recorded)
+    kept, removed = data_gateway.drop_placeholder_bars([dict(b) for b in raw])
+    assert removed == expected
+    assert kept == [b for b in raw if b["day"] not in expected]
+
+
+def test_placeholder_bars_disclosed_in_quality_notes(replay_recorded) -> None:
+    """港股标的的占位K线不得进入计算，剔除数量与日期写入 quality.notes；基准 HSI 无此类K线。"""
+    from analysis import analyze_bundle
+
+    req = {"symbol": "00700.HK", "market": "HK", "asset_type": "equity", "as_of": "2026-10-15"}
+    bundle = load_bundle(req, now=NOW)
+    assert bundle["provenance"]["placeholder_bars_removed"] == HK_0700_PLACEHOLDER_DAYS
+    assert bundle["benchmark"]["placeholder_bars_removed"] == []
+    raw = load_recorded("yahoo_daily/0700.HK.json")
+    assert [b["day"] for b in bundle["target"]["bars"]] == [b["day"] for b in raw if b["day"] not in HK_0700_PLACEHOLDER_DAYS]
+    assert [b["day"] for b in bundle["benchmark"]["bars"]] == [b["day"] for b in load_recorded("yahoo_daily/HSI.json")]
+
+    q = analyze_bundle(bundle, req, include_replay=False, include_forecast=False)["quality"]
+    assert q["placeholder_bars_removed"] == {"target": HK_0700_PLACEHOLDER_DAYS, "benchmark": []}
+    note = next(n for n in q["notes"] if "占位K线" in n)
+    assert note.startswith("标的日线剔除 7 根占位K线") and "未用其他来源补数" in note
+    assert all(day in note for day in HK_0700_PLACEHOLDER_DAYS)
+    assert sum("占位K线" in n for n in q["notes"]) == 1
+
+
+def test_us_recorded_data_has_no_placeholder_bars(replay_recorded) -> None:
+    bundle = load_bundle(REQ_US, now=NOW)
+    assert bundle["provenance"]["placeholder_bars_removed"] == []
+    assert bundle["benchmark"]["placeholder_bars_removed"] == []
+    raw = load_recorded("yahoo_daily/NVDA.json")[-data_gateway.FETCH_BARS:]
+    assert [b["day"] for b in bundle["target"]["bars"]] == [b["day"] for b in raw]
+
+
 def test_tencent_index_failure_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(data_gateway, "_http_get", _http({"gtimg.cn": json.dumps({"data": {"hkHSTECH": {"day": []}}})}))
     with pytest.raises(RuntimeError, match="Tencent daily kline empty"):

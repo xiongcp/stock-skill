@@ -582,6 +582,21 @@ def analyze_bundle(
             f"数据只到 {completed[-1]['day']}：最近已收盘的交易日 {missing_session} 的日线数据源尚未提供（或标的停牌），"
             "本次分析不含该日行情，可稍后重跑"
         )
+    # 回放快照沿用整份 provenance，只披露截至本次最后一根已收盘K线的剔除日期
+    placeholders = {
+        "target": [d for d in bundle.get("provenance", {}).get("placeholder_bars_removed") or [] if d <= completed[-1]["day"]],
+        "benchmark": [d for d in (bench_bundle or {}).get("placeholder_bars_removed") or [] if d <= completed[-1]["day"]],
+    }
+    report["quality"]["placeholder_bars_removed"] = placeholders
+    bench_symbol = ((bench_bundle or {}).get("instrument") or {}).get("symbol", "")
+    for key, label in (("target", "标的"), ("benchmark", f"基准 {bench_symbol}".strip())):
+        removed = placeholders[key]
+        if removed:
+            shown = "、".join(removed) if len(removed) <= 10 else f"最近 10 根为 {'、'.join(removed[-10:])}"
+            report["quality"]["notes"].append(
+                f"{label}日线剔除 {len(removed)} 根占位K线（成交量为 0 且开高低收四价相同，多为半日市缺数、停牌或停市日"
+                f"按前收盘价补出，非真实成交），未用其他来源补数：{shown}"
+            )
     inst_meta = bundle.get("provenance", {}).get("instrument_meta") or {}
     if rules.get("lot_size_source") == "ASSUMED_DEFAULT":
         report["quality"]["notes"].append(

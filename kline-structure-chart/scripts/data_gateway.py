@@ -130,6 +130,22 @@ def fetch_yahoo_daily_bars(
     return bars
 
 
+def drop_placeholder_bars(bars: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    """剔除"成交量为 0 且开高低收四价相同"的占位K线，返回 (保留的K线, 被剔除的日期)。
+
+    Yahoo 港股日线会用前收盘价补出半日市缺数、停牌或台风停市日，这类K线不是真实成交，
+    会扭曲 ATR/RSI/RVOL 并被识别为十字星。只剔除、只披露，不用其他来源补数。
+    """
+    kept: list[dict[str, Any]] = []
+    removed: list[str] = []
+    for b in bars:
+        if float(b.get("volume") or 0.0) == 0.0 and b["open"] == b["high"] == b["low"] == b["close"]:
+            removed.append(b["day"])
+        else:
+            kept.append(b)
+    return kept, removed
+
+
 def fetch_tencent_index_daily_bars(tencent_code: str, datalen: int = 760) -> list[dict[str, Any]]:
     """腾讯指数日线（行字段顺序：日期, 开, 收, 高, 低, 成交量），用于 Yahoo 无历史的港股指数（如恒生科技指数）。"""
     url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={_url_token(tencent_code)},day,,,{datalen},qfq"
@@ -337,11 +353,12 @@ def _load_single_series(
     datalen: int = 450,
     as_of: str | None = None,
     allow_network: bool = True,
-) -> tuple[list[dict[str, Any]], str, list[str]]:
-    """返回 (bars, source, errors)。真实行情不可用时直接报错，绝不生成或回退合成数据。"""
+) -> tuple[list[dict[str, Any]], str, list[str], list[str]]:
+    """返回 (bars, source, errors, 剔除的占位K线日期)。真实行情不可用时直接报错，绝不生成或回退合成数据。"""
     market = inst["market"]
     symbol = inst["symbol"]
     errors: list[str] = []
+    placeholder_days: list[str] = []
 
     if not allow_network:
         errors.append("网络已禁用(--offline)")
@@ -375,9 +392,11 @@ def _load_single_series(
             validate_bars(bars, f"{src}:{symbol}")  # 厂商数据也要过 OHLC 包络 / 时间单调 / 正价格校验
             if as_of:
                 bars = [b for b in bars if b["day"] <= as_of[:10]]
+            if src.startswith("YAHOO_"):
+                bars, placeholder_days = drop_placeholder_bars(bars)
             if len(bars) < MIN_LIVE_BARS:
                 raise RuntimeError(f"历史长度不足 ({len(bars)} < {MIN_LIVE_BARS})")
-            return bars, src, errors
+            return bars, src, errors, placeholder_days
         except Exception as exc:  # noqa: BLE001 - 失败原因必须记录并向上抛出
             errors.append(f"{type(exc).__name__}: {exc}")
 
@@ -536,7 +555,7 @@ def load_bundle(
     # 760 根再过滤，导致 2021 等较早截面直接变成 0 根。
     datalen = HISTORICAL_FETCH_BARS if as_of else FETCH_BARS
 
-    target_bars, target_src, target_errors = _load_single_series(
+    target_bars, target_src, target_errors, target_placeholders = _load_single_series(
         inst,
         datalen=datalen,
         as_of=as_of,
@@ -566,7 +585,7 @@ def load_bundle(
     benchmark_payload: dict[str, Any] | None = None
     if bench_symbol.upper() != inst["symbol"].upper():
         bench_inst = resolve_instrument(bench_symbol, market=market, asset_type="index" if market != "US" else "etf")
-        bench_bars, bench_src, bench_errors = _load_single_series(
+        bench_bars, bench_src, bench_errors, bench_placeholders = _load_single_series(
             bench_inst,
             datalen=datalen,
             as_of=target_bars[-1]["day"],
@@ -577,6 +596,7 @@ def load_bundle(
             "bars": bench_bars,
             "source": bench_src,
             "errors": bench_errors,
+            "placeholder_bars_removed": bench_placeholders,
         }
 
     vix_value, vix_source = (None, "NOT_APPLICABLE")
@@ -608,6 +628,7 @@ def load_bundle(
             "errors": target_errors,
             "intraday_excluded_day": intraday["day"] if intraday else None,
             "missing_closed_session": missing_session,
+            "placeholder_bars_removed": target_placeholders,
             "instrument_meta": instrument_meta,
         },
     }

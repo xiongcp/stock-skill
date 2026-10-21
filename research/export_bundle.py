@@ -8,7 +8,7 @@ from bisect import bisect_right
 from datetime import datetime, timezone
 from pathlib import Path
 
-from common import BENCHMARKS, VIX_SYMBOL, adjusted_bars, load_bars, load_cache
+from common import BENCHMARKS, VIX_SYMBOL, adjusted_bars, clean_bars, load_bars, load_cache
 
 WINDOW_BARS = 760
 
@@ -32,7 +32,7 @@ def main() -> None:
     lo = max(0, t - WINDOW_BARS + 1)
     pit = rescale_bars_as_of(bars[lo:t + 1], t - lo)
     bench_payload = load_cache(args.market, BENCHMARKS[args.market]["symbol"])
-    bench = bench_payload["bars"]
+    bench = clean_bars(bench_payload)
     b_days = [b["day"] for b in bench]
     b_hi = bisect_right(b_days, args.as_of)
     bench = bench[max(0, b_hi - WINDOW_BARS):b_hi]

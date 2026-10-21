@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### 修复（Yahoo 港股占位K线）
+
+- `scripts/data_gateway.py` 新增 `drop_placeholder_bars`：Yahoo 日线（标的与基准）取数后剔除"成交量为 0 且开高低收四价相同"的K线。这类K线多为港股半日市当天缺数、停牌或停市日按前收盘价补出，不是真实成交；此前未过滤，会压低 ATR、扭曲 RSI 与 RVOL、被识别为十字星，回测也可能在无成交的日子成交。只剔除、只披露，不用其他来源补数：剔除数量与日期写入 `quality.notes`，完整日期写入新字段 `quality.placeholder_bars_removed.{target,benchmark}`（`references/output-fields.md`、`references/hk-market.md` 同步）。录制数据 `0700.HK` 剔除 7 根（2022-01-31、2024-12-24、2024-12-31、2025-01-28、2025-12-24、2025-12-31、2026-02-16），NVDA、SPY、^HSI 不受影响。
+- 研究缓存 `research/common.py` 新增 `clean_bars`，`load_bars`、`adjusted_bars` 以及 `run_backtest.py`、`export_bundle.py` 的基准序列走同一函数，回测与线上口径一致。
+- `_load_single_series` 返回值增加第 4 项（剔除的占位K线日期）。
+
 ### 修复（资金计算与 K 线计算深度审查）
 
 - 仓位计算（`scripts/risk.py`、`scripts/render_report_md.py`、`scripts/render_html.py`）：
