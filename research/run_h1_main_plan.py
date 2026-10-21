@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import sys
@@ -31,10 +32,19 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _content_sha256(path: Path) -> str:
+    """与 history_cache 写清单时同口径：K线与除权事件的规范化 JSON 的 sha256（不信任文件内自带的 sha256 字段）。"""
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    canonical = json.dumps({"bars": payload["bars"], "events": payload.get("events") or []},
+                           sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def verify_cache_files(markets: list[str], universe_path: Path, cache_dir: Path = CACHE) -> list[str]:
     """H1 成分股、基准与 VIX 的缓存文件 sha256 必须与行情缓存清单逐个一致（清单本身的 hash 已在预注册中冻结）。"""
     manifest = json.loads((cache_dir / "MANIFEST.json").read_text(encoding="utf-8"))
-    digests = {e["file"]: e["sha256"] for e in manifest["files"]}
+    digests = {e["file"]: e.get("sha256") for e in manifest["files"]}
     universe = json.loads(Path(universe_path).read_text(encoding="utf-8"))["markets"]
     problems: list[str] = []
     for market in markets:
@@ -46,9 +56,30 @@ def verify_cache_files(markets: list[str], universe_path: Path, cache_dir: Path 
             f = cache_dir / rel
             if rel not in digests:
                 problems.append(f"行情缓存清单缺少：{rel}")
-            elif not f.exists() or _sha256(f) != digests[rel]:
+            elif not digests[rel]:
+                problems.append(f"行情缓存清单条目没有 sha256：{rel}")
+            elif not f.exists() or _content_sha256(f) != digests[rel]:
                 problems.append(f"缓存文件与清单不符：{rel}")
     return problems
+
+
+def check_scan_tolerance(stats_by_market: dict[str, dict], tolerance: dict) -> list[str]:
+    """第一遍扫描的出错数与加载失败标的数必须在预注册容忍度内，否则不在缩水的子样本上做判定。"""
+    problems: list[str] = []
+    for market, st in stats_by_market.items():
+        if st["errors"] > tolerance["max_scan_errors"]:
+            problems.append(f"{market} 第一遍扫描出错 {st['errors']} 个股票-日，超过容忍度 {tolerance['max_scan_errors']}")
+        if st["skipped_symbols"] > tolerance["max_skipped_symbols"]:
+            problems.append(f"{market} 有 {st['skipped_symbols']} 只标的无法加载，超过容忍度 {tolerance['max_skipped_symbols']}")
+    return problems
+
+
+def stale_h1_scan_dirs(scan_dir: Path | None = None) -> list[Path]:
+    """守卫首次运行前已存在的 H1 分片目录，说明 H1 曾在守卫之外被扫描过。"""
+    import main_plan_scan as scan
+
+    base = scan_dir or scan.SCAN_DIR
+    return sorted(p for p in base.glob("h1_*") if p.is_dir()) if base.exists() else []
 
 
 def verify_all(prereg_path: Path = PREREG, check_git: bool = True) -> tuple[dict, list[str]]:
@@ -74,6 +105,10 @@ def main() -> None:
     if LOCK.exists() and not args.restart_after_crash:
         print(f"发现锁文件 {LOCK.name} 但没有结果：上次运行可能中途崩溃。确认未查看任何 H1 结果后，加 --restart-after-crash 重跑")
         sys.exit(4)
+    stale = [] if LOCK.exists() else stale_h1_scan_dirs()
+    if stale:
+        print(f"守卫首次运行前已存在 H1 分片目录 {[p.name for p in stale]}：H1 曾在守卫之外被扫描，拒绝运行，请如实记录后处理")
+        sys.exit(6)
     print("预注册 v3 校验通过" + ("（仅校验，未评估 H1）" if args.check else ""))
     if args.check:
         return
@@ -94,13 +129,22 @@ def main() -> None:
         "note": "主做多计划留出集 H1，一次性评估",
         "markets": {},
     }
+    # 第一遍：只扫描评级与计划价位（不含结局），先检查出错容忍度与缓存，再进入第二遍
+    stats = {m: scan.scan_stats(scan.run_scan(m, "h1", args.workers)) for m in prereg["h1"]["markets"]}
+    problems = check_scan_tolerance(stats, prereg["run_tolerance"]) + verify_all()[1]
+    if problems:
+        print("第一遍扫描后检查未通过，停止运行（未评估任何结局，锁文件保留）：\n- " + "\n- ".join(problems[:20]))
+        sys.exit(5)
     for market in prereg["h1"]["markets"]:
-        res = ev.run_market(market, mode="h1", workers=args.workers)
-        verdict = h1.judge(res["summary"], spec["gates"])
-        result["markets"][market] = {"role": "acceptance", "verdict": verdict, **res}
+        res = ev.run_market(market, mode="h1", workers=args.workers)  # 第一遍分片已完成，这里直接复用
+        result["markets"][market] = {"role": "acceptance", "verdict": h1.judge(res["summary"], spec["gates"]), **res}
         fl = res["summary"]["fill_layer"]
-        print(f"[{market}] episodes={fl.get('n_episodes')} days={fl.get('n_signal_days')} "
-              f"mean={fl.get('mean_net_return_pct')}% verdict={verdict}", flush=True)
+        # 全部市场完成前只打印样本量，不打印判定与收益，避免崩溃续跑前已看到部分结论
+        print(f"[{market}] done episodes={fl.get('n_episodes')} days={fl.get('n_signal_days')}", flush=True)
+    problems = verify_all()[1]
+    if problems:
+        print("运行期间行情缓存或冻结文件被改动，不写结果（锁文件保留）：\n- " + "\n- ".join(problems[:20]))
+        sys.exit(5)
     result["finished_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     RESULT.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     with LEDGER.open("a", encoding="utf-8") as fh:
@@ -109,6 +153,8 @@ def main() -> None:
                              "preregistration_sha256": result["preregistration_sha256"],
                              "verdicts": {m: v["verdict"] for m, v in result["markets"].items()}},
                             ensure_ascii=False) + "\n")
+    for market, v in result["markets"].items():
+        print(f"[{market}] verdict={v['verdict']}", flush=True)
     print(f"wrote {RESULT}")
 
 

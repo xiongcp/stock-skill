@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import inspect
 import json
+import platform
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,6 +56,8 @@ def _trials() -> dict:
 def build() -> dict:
     files = sorted(str(p.relative_to(ROOT)) for p in (ROOT / "kline-structure-chart" / "scripts").glob("*.py"))
     files += [f"research/{f}" for f in RESEARCH_FILES]
+    # bootstrap 依赖 numpy 的随机流，不保证跨版本一致：依赖锁文件一并冻结
+    files += ["kline-structure-chart/pyproject.toml", "kline-structure-chart/uv.lock"]
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
     return {
         "schema_version": "3.0",
@@ -65,6 +68,8 @@ def build() -> dict:
         "spec": ev.SPEC,
         "frozen_files_sha256": {f: _sha(ROOT / f) for f in files},
         "frozen_data_sha256": {f: _sha(ROOT / f) for f in DATA_FILES},
+        "environment": {"python": platform.python_version(), "numpy": __import__("numpy").__version__},
+        "run_tolerance": {"max_scan_errors": 0, "max_skipped_symbols": 0},
         "frozen_specification": {
             "plan": "risk.compute_triple_barrier_plan",
             "plan_source_sha256": hashlib.sha256(inspect.getsource(risk.compute_triple_barrier_plan).encode()).hexdigest(),
