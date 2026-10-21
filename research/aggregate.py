@@ -89,6 +89,52 @@ def _cluster_bootstrap(rows: list[dict], hit_fn, n_boot: int = 400, seed: int = 
     return [round(rates[int(0.025 * len(rates))] * 100, 2), round(rates[int(0.975 * len(rates)) - 1] * 100, 2)]
 
 
+def date_block_bootstrap(
+    rows: list[dict],
+    value_fn,
+    base_rows: list[dict] | None = None,
+    base_value_fn=None,
+    n_boot: int = 2000,
+    seed: int = 20261020,
+) -> list[float] | None:
+    """按日期分块的 bootstrap 95% 区间：均值 mean(value_fn)，或差值 mean(rows) - mean(base_rows)。
+
+    同一天的所有样本作为一个块整体抽取（大盘级事件会让同日样本高度相关）；差值时两组在同一批
+    抽中的日期上配对，只出现在一组里的日期只贡献该组。返回原单位（不乘 100），块数 < 3 时返回 None。
+    用 numpy 一次抽出 n_boot x 块数 的下标矩阵并向量化求和。
+    """
+    import numpy as np
+
+    blocks: dict[str, list[float]] = defaultdict(lambda: [0.0, 0, 0.0, 0])
+    for r in rows:
+        b = blocks[r["day"]]
+        b[0] += float(value_fn(r))
+        b[1] += 1
+    if base_rows is not None:
+        fn = base_value_fn or value_fn
+        for r in base_rows:
+            b = blocks[r["day"]]
+            b[2] += float(fn(r))
+            b[3] += 1
+    days = sorted(blocks)
+    if len(days) < 3:
+        return None
+    arr = np.array([blocks[d] for d in days], dtype=np.float64)
+    idx = np.random.default_rng(seed).integers(0, len(days), size=(n_boot, len(days)))
+    sums = arr[idx].sum(axis=1)  # (n_boot, 4)：信号和、信号数、基准和、基准数
+    ok = sums[:, 1] > 0
+    if base_rows is not None:
+        ok &= sums[:, 3] > 0
+    if int(ok.sum()) < n_boot // 2:
+        return None
+    s = sums[ok]
+    stats = s[:, 0] / s[:, 1]
+    if base_rows is not None:
+        stats = stats - s[:, 2] / s[:, 3]
+    stats.sort()
+    return [float(stats[int(0.025 * len(stats))]), float(stats[int(0.975 * len(stats)) - 1])]
+
+
 def _non_overlapping_episodes(rows: list[dict], min_gap_days: int = 21) -> list[dict]:
     """Greedy per-symbol non-overlapping episodes (at least min_gap_days apart)."""
     by_sym: dict[str, list[dict]] = defaultdict(list)

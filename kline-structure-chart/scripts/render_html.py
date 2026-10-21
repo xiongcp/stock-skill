@@ -452,9 +452,6 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     ? sizing.recommended_shares + '股'
     : (sizing.account_equity ? '不给出（见报告风控）' : '需账户净值');
   addKv(barGrid, '制度 / 建议股数', settleLabel + ' / ' + sharesLabel);
-  if (dec.decision_probability && dec.decision_probability.available) {{
-    addKv(barGrid, '开发集校准先验 (L4)', (dec.decision_probability.p_net_positive * 100).toFixed(1) + '% 净正 / ' + (dec.decision_probability.p_tp_before_sl * 100).toFixed(1) + '% 先到TP1');
-  }}
 
   const scenList = document.getElementById('scenarioList');
   const activeScenarios = (REPORT.rule_scenarios && REPORT.rule_scenarios.scenarios) ? REPORT.rule_scenarios.scenarios : [];

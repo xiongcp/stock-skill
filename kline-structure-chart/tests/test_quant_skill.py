@@ -2360,7 +2360,8 @@ def test_score_judgments_offline_bars_payload_parsing() -> None:
 
 
 def test_high_conviction_rebound_and_decision_probability_contract(replay_recorded) -> None:
-    """高置信超跌/大盘共振反转层：触发时输出校准后的 decision_probability (>=70%) 与 high_conviction_plan。"""
+    """高置信超跌/大盘共振反转层：CN 触发时只记录子类型（留出集 H1 未通过，D10），不给计划与任何统计数字；
+    大盘极弱时先被否决抑制。"""
     from risk import compute_triple_barrier_plan
 
     bundle = load_bundle(
@@ -2400,18 +2401,16 @@ def test_high_conviction_rebound_and_decision_probability_contract(replay_record
         [],
         bench,
     )
-    assert dec["high_conviction_rebound"] is True
-    assert dec["high_conviction_subtype"] == "BENCH_SYNC_REBOUND"
+    assert dec["high_conviction_rebound"] is False and dec["high_conviction_subtype"] is None
+    assert dec["high_conviction_paused_subtype"] == "BENCH_SYNC_REBOUND"
     dp = dec["decision_probability"]
-    assert dp["available"] is True and dp["p_net_positive"] >= 0.70 and dp["p_episode_net_positive"] >= 0.70
-    assert dp["dev_effective_episodes"] >= 100
+    assert dp["available"] is False and dp["method"] == "PAUSED_H1_NOT_PASSED"
+    # 反转层没有通过留出集验收的统计量：不得出现任何概率或命中率数字
+    assert not any(isinstance(v, (int, float)) and not isinstance(v, bool) for v in dp.values())
     hcp = tb["high_conviction_plan"]
-    assert hcp["triggered"] is True
+    assert hcp["triggered"] is False and "留出集 H1 验收未通过" in hcp["rule_cn"]
+    # 价位仍按固定几何给出（研究回测与 H2 前向跟踪使用），但 triggered=false 时不得对外转述
     assert hcp["stop_loss_barrier"] < hcp["entry_zone"][0] <= hcp["entry_zone"][1] < hcp["take_profit_1"]
-    # 区间必须与它所描述的 episode 净正率配套，点估计落在区间内
-    lo, hi = dp["episode_ci95"]
-    assert lo <= dp["p_episode_net_positive"] <= hi
-    assert "ci95" not in dp
 
     # 先大盘、后个股：大盘极弱触发否决时，同一截面不得再输出反转计划与校准概率
     weak_bench = {**bench, "regime_score": 30.0}
@@ -2429,10 +2428,49 @@ def test_high_conviction_rebound_and_decision_probability_contract(replay_record
     assert "BENCHMARK_WEAK" in dec_w["veto_codes"]
     assert dec_w["high_conviction_rebound"] is False
     assert dec_w["high_conviction_suppressed_by_veto"] is True
+    assert dec_w["high_conviction_suppressed_subtype"] == "BENCH_SYNC_REBOUND"
     assert dec_w["decision_probability"]["available"] is False
-    assert dec_w["decision_probability"]["p_net_positive"] is None
     assert dec_w["decision_probability"]["method"] == "SUPPRESSED_BY_BENCHMARK_VETO"
     assert tb_w["high_conviction_plan"]["triggered"] is False
+
+
+
+def test_high_conviction_paused_market_only_hints(replay_recorded) -> None:
+    """港股（HC_PAUSED_MARKETS）触发反转条件时只记录子类型，不给反转计划与统计数字；暂停原因与 CN/US 不同。"""
+    from risk import HC_PAUSED_MARKETS, compute_triple_barrier_plan
+
+    assert HC_PAUSED_MARKETS == {"CN", "HK", "US"}
+    req = {"symbol": "00700.HK", "market": "HK", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    rep = analyze_bundle(bundle, req, include_replay=False)
+    bars = copy.deepcopy(bundle["target"]["bars"])
+    last = bars[-1]
+    o = float(last["close"])
+    atr = o * 0.03  # 港股门槛 ATR/价格 >= 2%
+    last.update(open=o, low=o - 0.1 * atr, high=o + 1.0 * atr, close=o + 0.8 * atr, raw_close=o + 0.8 * atr)
+    ind = copy.deepcopy(rep["mathematical_indicators"])
+    ind["volatility"]["atr14"] = atr
+    ind["trend"]["ema20"] = float(last["close"]) + 1.5 * atr  # ext_atr = -1.5
+    bench = {**rep["market_benchmark"], "regime_score": 60.0, "benchmark_missing": False,
+             "bench_ret5": -0.04, "bench_ret1": 0.012, "bench_bull_bar": True}
+    dec, tb, _ = compute_triple_barrier_plan(
+        bars,
+        rep["meta"],
+        ind,
+        rep["mathematical_indicators"]["structure_levels"]["wedge_structure"],
+        {},
+        rep["rule_scenarios"],
+        rep["multi_timeframe_score"],
+        [],
+        bench,
+    )
+    assert dec["high_conviction_paused_subtype"] == "BENCH_SYNC_REBOUND"
+    assert dec["high_conviction_rebound"] is False and dec["high_conviction_subtype"] is None
+    assert dec["high_conviction_suppressed_by_veto"] is False
+    dp = dec["decision_probability"]
+    assert dp["available"] is False and dp["method"] == "PAUSED_NO_DEV_EDGE"
+    hcp = tb["high_conviction_plan"]
+    assert hcp["triggered"] is False and "暂不给出反转入场计划" in hcp["rule_cn"]
 
 
 def test_overextended_warning_not_masked_by_momentum_crowding(replay_recorded) -> None:
@@ -2480,6 +2518,59 @@ def test_round_number_stop_avoidance_only_on_fine_tick_grids() -> None:
     # 港股 200~500 档 tick 0.2：每个价位都离 0.5 关口不超过 1 tick，不能一律下移
     for px in (400.0, 400.2, 400.4, 400.6, 400.8):
         assert _avoid_round_number_stop(px, 450.0, "HK", "equity", "2026-10-16") == pytest.approx(px)
+
+
+
+def _recorded_rebound_inputs() -> dict:
+    """以录制的 600519 真实最后一根K线为底，只改被测条件，构造反转触发器的入参。"""
+    bars = load_recorded("sina_daily/sh600519.json")
+    b = bars[-1]
+    o = float(b["open"])
+    h = float(b["high"])
+    lo = float(b["low"])
+    rng = max(h - lo, o * 0.02)
+    c = o + 0.6 * rng  # 阳线；区间 [o-0.1rng, o+0.9rng]，实体占比 0.6
+    atr = c * 0.02
+    return {
+        "close": c,
+        "open_": o,
+        "high": o + 0.9 * rng,
+        "low": o - 0.1 * rng,
+        "raw_close": c,
+        "atr14": atr,
+        "ema20": c + 1.2 * atr,  # ext_atr = -1.2
+        "rsi14": 25.0,
+        "rsi14_prev": 24.0,
+        "bench_ret1": 0.0,
+        "bench_ret5": 0.0,
+        "bench_bull_bar": True,
+    }
+
+
+def test_high_conviction_trigger_uses_calibrated_rsi_turn_and_bench_ret1() -> None:
+    """线上与研究共用的触发器：RSI 拐头看 RSI 本身；CN/US 共振反弹看大盘当日涨幅 >= 0.3%，不看大盘是否收阳。"""
+    from risk import detect_high_conviction_rebound
+
+    base = _recorded_rebound_inputs()
+    assert detect_high_conviction_rebound("CN", **base) == "DEEP_OVERSOLD_TURN"
+    # 收盘价上涨但 RSI 未拐头：旧线上口径（收盘价比较）会触发，校准口径不触发
+    assert detect_high_conviction_rebound("CN", **{**base, "rsi14_prev": 26.0}) is None
+    assert detect_high_conviction_rebound("CN", **{**base, "rsi14_prev": None}) is None
+
+    sync = {**base, "rsi14": 40.0, "bench_ret5": -0.03}
+    # 大盘收阳但当日涨幅只有 0.1%：不构成共振反弹
+    assert detect_high_conviction_rebound("CN", **{**sync, "bench_ret1": 0.001, "bench_bull_bar": True}) is None
+    # 大盘涨 0.4% 即使收阴（高开低走）也算共振
+    assert detect_high_conviction_rebound("US", **{**sync, "bench_ret1": 0.004, "bench_bull_bar": False}) == "BENCH_SYNC_REBOUND"
+    # 港股门槛 0.5%
+    assert detect_high_conviction_rebound("HK", **{**sync, "atr14": base["close"] * 0.025, "ema20": base["close"] + 1.2 * base["close"] * 0.025, "bench_ret1": 0.004}) is None
+
+
+def test_snapshot_exposes_previous_rsi(replay_recorded) -> None:
+    bars = load_recorded("sina_daily/sh600519.json")
+    ind = compute_all_indicators(bars)
+    series = ind["series"]["rsi14"]
+    assert ind["snapshot"]["momentum"]["rsi14_prev"] == pytest.approx(round(float(series[-2]), 2))
 
 
 # ---------------------------------------------------------------------------

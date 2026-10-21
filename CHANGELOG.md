@@ -10,6 +10,26 @@
 - 研究缓存 `research/common.py` 新增 `clean_bars`，`load_bars`、`adjusted_bars` 以及 `run_backtest.py`、`export_bundle.py` 的基准序列走同一函数，回测与线上口径一致。
 - `_load_single_series` 返回值增加第 4 项（剔除的占位K线日期）。
 
+### 变更（高置信反转层：线上与回测统一口径，见 `docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md`）
+
+- **反转层三个市场全部暂停输出入场计划与统计数字**（方案 D10=a）：按冻结的预注册 v2，在留出集 H1（2017-10 ~ 2020-11）上一次性验收，CN、US 都未通过（扣费均值及其相对同日随机入场的超额，95% 区间下限都未大于 0），港股（诊断）显著为负。具体改动：
+  1. `risk.HC_PAUSE_REASONS` 记录各市场的暂停原因（CN/US `PAUSED_H1_NOT_PASSED`，港股 `PAUSED_NO_DEV_EDGE`）。
+  2. 删除 v1 的 `_DEV_CALIBRATED_REBOUND_PRIORS`（72% 等数字移入 v1 研究脚本，仅供复现）；`decision_probability` 只保留 `available=false`、`method`、`event_definition` 与 `validation`，不再含任何数字。
+  3. HTML 删除"开发集校准先验 (L4)"一行。
+  4. `BACKTEST_AND_SKILL_AUDIT_REPORT.md` 与 v1 回测报告开头加更正说明。
+- 触发器抽成纯函数 `risk.detect_high_conviction_rebound`，计划价位抽成 `risk.high_conviction_plan_levels`，线上与研究回测共用。线上触发口径改为与开发集校准时一致：
+  1. `DEEP_OVERSOLD_TURN` 的"拐头"改看 RSI14 是否高于前一根（此前看收盘价是否上涨）；指标快照新增 `momentum.rsi14_prev`。
+  2. CN/US 的 `BENCH_SYNC_REBOUND` 改为要求大盘当日涨幅 ≥ 0.3%（此前要求大盘收阳）；港股门槛 0.5% 不变。
+- 新增 `meta_labeling_decision.high_conviction_suppressed_subtype`：反转条件触发但被大盘否决（`BENCHMARK_WEAK`）抑制时记录原本的子类型。`references/output-fields.md` 补齐反转层全部字段（此前未登记）。
+- **港股暂停输出反转计划**（方案 D6）：`risk.HC_PAUSED_MARKETS = {"HK"}`。开发区回测 v2 中港股相对同日随机入场没有超额，触发时只记录 `high_conviction_paused_subtype`，`high_conviction_plan.triggered = false`，`decision_probability.method = PAUSED_NO_DEV_EDGE`。
+- `high_conviction_plan_levels` 新增可选参数 `tp_atr` / `sl_atr`，只供研究网格使用；计划文案改为引用 `HC_TP1_ATR` / `HC_SL_ATR`，不再写死。`references/math-patterns.md` 新增第 8 节：反转层触发、抑制与暂停、计划几何，以及不套用 1.20 盈亏比否决、改用期望口径的理由（方案 D3）。
+- 研究（第 8 步，H2 前向跟踪）：新增 `research/h2_forward.py`（增量刷新行情、延续股票池调仓、只记最近一个已收盘交易日、到期打分、状态只报数量、一次性验收）、`research/H2_RUNBOOK.md`（Hermes agent · Linux 2 核 4GB 的部署与调度）与测试；`run_dev_region_v2.py` 增加 `mode="h2"`，子进程配置显式传入，基准K线同口径剔除占位K线（开发区结果不变）。
+- 研究（第 6 步）：`run_dev_region_v2.py` 新增 `mode="h1"`（仅在 `run_h1_holdout.py` 校验预注册通过后授权）；新增 `run_h1_holdout.py`（校验冻结文件与数据 hash、git 无未提交改动，只能成功运行一次，`--check` 只校验）与 `write_preregistration_v2.py`（生成 `research/preregistration/preregistration_v2.json`）。
+- 研究提速：`aggregate.date_block_bootstrap` 改用 numpy 向量化（单次约 0.38 s → 0.07 s，点估计不变，区间因随机数生成器不同有小数点后的差异）；线上流水线结果按"技能脚本 + 管线函数源码 + 区间参数 + 股票池 + 行情清单"的哈希缓存到 `artifacts/long_backtest/v2_live_cache/`，命中后重跑不再调用线上流水线（`--refresh-live-cache` 强制重算）。
+- 研究：`run_dev_region_v2.py --grid` 评估方案第 8 节写定的 18 个配置（6 种 TP/SL 几何 × 3 种子类型），按预先写定的规则选择，结果写入 `dev_region_v2_grid.json`。
+- 研究：新增开发区回测 v2 `research/run_dev_region_v2.py`。对预筛候选逐个调用线上 `analyze_bundle`（`research/tests/test_dev_region_v2.py` 校验预筛不漏线上信号），按线上固定价位撮合、套用大盘否决；新增同日随机入场等三类基准与按信号日期分块的 bootstrap（`aggregate.date_block_bootstrap`）；只评估 2021-01-04 起的开发区，拒绝触碰留出集（2020-11-30 及以前）。每次运行追加 `artifacts/long_backtest/trial_ledger.jsonl`。v1 脚本保留不改，以便复现已发布的数字，但不再用于新结论。
+
+
 ### 修复（资金计算与 K 线计算深度审查）
 
 - 仓位计算（`scripts/risk.py`、`scripts/render_report_md.py`、`scripts/render_html.py`）：

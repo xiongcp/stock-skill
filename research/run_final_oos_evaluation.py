@@ -27,6 +27,7 @@ from bisect import bisect_right
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from aggregate import (
     SPLITS,
@@ -48,8 +49,37 @@ if str(SKILL_SCRIPTS) not in sys.path:
 from evaluation import label_triple_barrier_event  # noqa: E402
 from indicators import atr_series, ema, rsi  # noqa: E402
 from market_rules import get_market_microstructure_rules, round_trip_cost_rate  # noqa: E402
-from risk import _DEV_CALIBRATED_REBOUND_PRIORS  # noqa: E402
 
+
+# v1 开发集（2021-01-04..2024-12-09）反转层先验，只用于复现 v1 已发布的数字。线上已不再使用（留出集 H1 未通过，
+# 见 docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md 第 11 节）
+_DEV_CALIBRATED_REBOUND_PRIORS: dict[str, dict[str, Any]] = {
+    "CN": {
+        "p_net_positive": 0.7223,
+        "p_episode_net_positive": 0.7035,
+        "p_tp_before_sl": 0.7722,
+        "dev_sample_size": 13215,
+        "dev_effective_episodes": 9488,
+        # Wilson 95% 区间对应 p_episode_net_positive（独立 episode 净正率），不是 p_net_positive
+        "episode_ci95": [0.6942, 0.7126],
+    },
+    "HK": {
+        "p_net_positive": 0.7174,
+        "p_episode_net_positive": 0.7085,
+        "p_tp_before_sl": 0.7727,
+        "dev_sample_size": 2714,
+        "dev_effective_episodes": 2367,
+        "episode_ci95": [0.6899, 0.7265],
+    },
+    "US": {
+        "p_net_positive": 0.7430,
+        "p_episode_net_positive": 0.7469,
+        "p_tp_before_sl": 0.8007,
+        "dev_sample_size": 12966,
+        "dev_effective_episodes": 8875,
+        "episode_ci95": [0.7378, 0.7559],
+    },
+}
 
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
