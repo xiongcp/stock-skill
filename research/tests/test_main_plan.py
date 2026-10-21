@@ -9,12 +9,14 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "research"))
 
+import main_plan_eval as ev  # noqa: E402
 import main_plan_scan as scan  # noqa: E402
 import run_dev_region_v2 as v2  # noqa: E402
 from common import LONG_ACTIONS, PIT_UNIVERSE  # noqa: E402
 from run_backtest import make_pit_slice  # noqa: E402
 
 from analysis import analyze_bundle  # noqa: E402
+from evaluation import label_triple_barrier_event  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not PIT_UNIVERSE.exists(), reason="需要 artifacts/long_backtest 真实行情缓存")
 
@@ -103,3 +105,54 @@ def test_scan_resume_and_error_capture(tmp_path, monkeypatch) -> None:
     assert out_dir2 == out_dir and kept.stat().st_mtime_ns == mtime
     stats2 = scan.scan_stats(out_dir)
     assert stats2["n_shards"] == 2 and stats2["rows"] >= stats1["rows"]
+
+
+def test_execution_matches_online_label(us_rows) -> None:
+    """固定价位撮合：成交价不超过入场区上沿、止损在成交价下方，标签与用同一成交价调用线上函数的结果相同。"""
+    scan.init("US")
+    filled = 0
+    for sym, data, r in us_rows:
+        if r["a"] not in LONG_ACTIONS or not ev.valid_geometry(r):
+            continue
+        pit, cut = make_pit_slice(data["bars"], r["t"], v2.HORIZON)
+        ex = ev.execute_main_plan(sym, data, pit, cut, r["b"], r["z"][0], r["z"][1], r["tp"], r["sl"], r["rt"])
+        if ex["open_status"] == "FILL":
+            assert r["z"][0] <= float(pit[cut + 1]["open"]) <= r["z"][1]
+        if ex["fill_status"] != "FILL":
+            continue
+        assert r["sl"] < ex["fill_price"] <= r["z"][1]
+        k = next(i for i, b in enumerate(pit) if b["day"] == ex["fill_day"])
+        assert cut + 1 <= k <= cut + v2.LIMIT_SESSIONS
+        ref = label_triple_barrier_event(
+            pit, entry_idx=k, tp_price=r["tp"], sl_price=r["sl"], horizon_bars=v2.HORIZON, market="US",
+            asset_type="equity", symbol=sym, is_st=data["is_st"], trailing_stop=r["rt"][0], trigger_r=r["rt"][1],
+            confirm_close_r=r["rt"][2], lock_r=r["rt"][3], name=data["name"], entry_price_override=ex["fill_price"],
+        )
+        assert (ref["net_return"], ref["outcome"]) == (ex["net"], ex["outcome"])
+        filled += 1
+    assert filled >= 1, "抽样里没有成交的信号，检验没有说服力"
+
+
+def test_transplant_levels_roundtrip_and_collapse(us_rows) -> None:
+    """移植到信号自身应还原原价位；取整后挤到同一价位的几何必须剔除。"""
+    sig = next(r for _, _, r in us_rows if r["a"] in LONG_ACTIONS and ev.valid_geometry(r))
+    other = next(r for _, _, r in us_rows if r["a"] not in LONG_ACTIONS and r["c"] > 1.0)
+    mult = ev.plan_atr_multiples(sig)
+    back = ev.transplant_levels(mult, sig["c"], sig["atr"], "US", sig["day"])
+    assert back is not None
+    assert [back["lo"], back["hi"], back["sl"], back["tp"]] == pytest.approx([sig["z"][0], sig["z"][1], sig["sl"], sig["tp"]])
+    moved = ev.transplant_levels(mult, other["c"], other["atr"], "US", other["day"])
+    assert moved is None or moved["sl"] < moved["lo"] <= moved["hi"] < moved["tp"]
+    assert ev.transplant_levels([-1e-4, 1e-4, -2e-4, 2e-4], other["c"], other["atr"], "US", other["day"]) is None
+
+
+def test_baseline_plan_rate_cap_and_reproducible_draw(us_rows) -> None:
+    sigs = [r for _, _, r in us_rows if r["a"] in LONG_ACTIONS][:3]
+    plans = ev.baseline_plan({"2024-01-02": sigs, "2024-01-03": sigs[:1]}, {"2024-01-02": 100, "2024-01-03": 5})
+    assert plans["2024-01-02"]["rate"] == pytest.approx(ev.BASELINE_MULTIPLE * len(sigs) / 100)
+    assert plans["2024-01-03"]["rate"] == 1.0  # 股票池不足 10 倍时全部抽取
+    assert len(plans["2024-01-02"]["mults"]) == len(sigs)
+    row = {"sym": "AAPL.US", "day": "2024-01-03"}
+    j = ev.draw("US", row, plans["2024-01-03"])
+    assert j == 0 and ev.draw("US", row, plans["2024-01-03"]) == j
+    assert ev.draw("US", row, None) is None
