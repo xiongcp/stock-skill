@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """留出集 H1（2017-10 ~ 2020-11）数据覆盖报告（回测与验收口径调整方案第 5 步）。
 
-只统计数据是否存在、是否完整：每期股票池规模、成分股在该期的K线覆盖率、基准与 VIX 覆盖、
+只统计数据是否存在、是否完整（K线先按线上口径剔除 Yahoo 占位K线）：每期股票池规模、成分股在该期的K线覆盖率、基准与 VIX 覆盖、
 除权除息事件、未收盘或非正价格K线、零成交日。不计算任何收益、信号或规则结果，不会读取 H1 的结论。
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from common import ART, BENCHMARKS, CACHE, VIX_SYMBOL, load_bars, load_cache
+from common import ART, BENCHMARKS, CACHE, VIX_SYMBOL, clean_bars, load_bars, load_cache
 
 H1_UNIVERSE = ART / "pit_universe_h1.json"
 OUT = ART / "h1_coverage.json"
@@ -52,7 +52,8 @@ def market_report(market: str, info: dict) -> dict:
         except Exception:  # noqa: BLE001
             sym_stats[sym] = {"missing_cache": True}
             continue
-        bars = payload["bars"]
+        raw_h1 = sum(1 for b in payload["bars"] if lo <= b["day"] <= hi)
+        bars = clean_bars(payload)  # 与线上、回测同口径：Yahoo 占位K线（成交量 0 且四价相同）已剔除
         days = [b["day"] for b in bars]
         h1_bars = [b for b in bars if lo <= b["day"] <= hi]
         events = [e for e in (payload.get("events") or []) if lo <= str(e.get("ex_date") or e.get("day") or "")[:10] <= hi]
@@ -61,6 +62,7 @@ def market_report(market: str, info: dict) -> dict:
             "bad_bars": sum(1 for b in h1_bars if not b.get("complete", True) or min(float(b[k]) for k in ("open", "high", "low", "close")) <= 0),
             "zero_volume_days": sum(1 for b in h1_bars if not float(b.get("volume") or 0.0)),
             "h1_bars": len(h1_bars),
+            "h1_placeholder_removed": raw_h1 - len(h1_bars),
             "h1_events": len(events),
         }
 
@@ -104,6 +106,10 @@ def market_report(market: str, info: dict) -> dict:
         "members_missing_cache": sum(1 for s in sym_stats.values() if s.get("missing_cache")),
         "members_with_events_in_h1": sum(1 for s in ok if s["h1_events"] > 0),
         "incomplete_or_nonpositive_bars": sum(s["bad_bars"] for s in ok),
+        "placeholder_bars_removed_in_h1": sum(s["h1_placeholder_removed"] for s in ok),
+        "placeholder_share_of_raw_h1_bars_pct": round(
+            sum(s["h1_placeholder_removed"] for s in ok)
+            / max(1, sum(s["h1_bars"] + s["h1_placeholder_removed"] for s in ok)) * 100, 3),
         "zero_volume_bar_share_pct": round(
             sum(s["zero_volume_days"] for s in ok) / max(1, sum(s["h1_bars"] for s in ok)) * 100, 3),
         "periods": periods,
@@ -137,7 +143,8 @@ def main() -> None:
         print(f"{m}: H1 {r['h1_first_day']}~{r['h1_last_day']} bench_days={r['benchmark']['h1_days']} "
               f"max_gap={r['benchmark']['max_calendar_gap_days']}d members={r['members_total']} "
               f"missing_cache={r['members_missing_cache']} complete_cov_min={min(cov)}% "
-              f"zero_vol={r['zero_volume_bar_share_pct']}% vix={r['vix_coverage_pct']}")
+              f"placeholder_removed={r['placeholder_share_of_raw_h1_bars_pct']}% zero_vol={r['zero_volume_bar_share_pct']}% "
+              f"vix={r['vix_coverage_pct']}")
     print(f"wrote {args.out}")
 
 
