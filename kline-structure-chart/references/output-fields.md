@@ -147,6 +147,7 @@
 | `quality.status` | `OK` / `PARTIAL`（如缺基准）/ `UNAVAILABLE`（合成或无效数据） | 枚举 | 否 | 不是 `OK` 时先说告警 |
 | `quality.data_source_class` / `benchmark_source_class` | 来源分类 `LIVE` / `LOCAL_FILE` / `SYNTHETIC` / `UNKNOWN` | 枚举 | 否 | — |
 | `quality.warnings[]` / `notes[]` | 告警与备注（盘中K线已排除、数据只到某日、复权未生效、日历估算、元数据未取得等） | 文本 | 否（可为空数组） | `PARTIAL` 时逐条转述 warnings；notes 都要转述 |
+| `quality.placeholder_bars_removed.{target,benchmark}[]` | Yahoo 日线中被剔除的占位K线日期（成交量为 0 且开高低收四价相同，不是真实成交；只剔除、不补数），非空时 `notes` 中有对应备注 | 日期 | 否（可为空数组） | 按 notes 转述，不必逐日列出 |
 | `quality.provenance_errors[]` | 来源判定错误 | 文本 | 否 | 非空时不解读 |
 | `quality.completed_bars_total` / `display_bars` / `structure_bars` | 参与计算的已收盘根数、显示根数、结构窗口根数 | 根 | 否 | — |
 | `reproducibility.engine_version` / `bars_hash` / `report_hash` | 引擎版本与输入、结果哈希 | — | 否 | 复现时使用 |

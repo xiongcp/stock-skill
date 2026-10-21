@@ -51,6 +51,8 @@ def test_tensor_vs_live_equivalence(market: str, limit: int) -> None:
             _, bars = adjusted_bars(payload, mode="total_return")
             cache[sym] = (payload, bars, {b["day"]: i for i, b in enumerate(bars)})
         payload, bars, idx = cache[sym]
+        if r["day"] not in idx:  # 旧分片在占位K线上产生的信号，剔除后该日已不存在
+            continue
         pit, cut = make_pit_slice(bars, idx[r["day"]], 15)
         name = str(payload.get("name") or "")
         pit_bars.append(pit)

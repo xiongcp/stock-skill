@@ -27,6 +27,7 @@ from common import (
     PIT_UNIVERSE,
     VIX_SYMBOL,
     adjusted_bars,
+    clean_bars,
     load_bars,
     load_cache,
 )
@@ -70,7 +71,7 @@ def _init_worker(market: str, horizon: int, pit_path: str, out_dir: str, start: 
         for s in p["symbols"]:
             symbol_periods.setdefault(s, []).append({"start_day": p["start_day"], "end_day": p["end_day"]})
     bench_payload = load_cache(market, BENCHMARKS[market]["symbol"])
-    bench = bench_payload["bars"]
+    bench = clean_bars(bench_payload)
     bench_source = bench_payload.get("source", f"CACHED_{market}_BENCHMARK")
     vix = {}
     if market == "US":

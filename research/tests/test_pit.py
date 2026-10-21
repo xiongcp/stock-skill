@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "research"))
 
-from common import adjusted_bars, build_actions, load_cache  # noqa: E402
+from common import adjusted_bars, build_actions, clean_bars, load_cache  # noqa: E402
 from run_backtest import make_pit_slice  # noqa: E402
 from market_rules import apply_point_in_time_adjustment  # noqa: E402
 
@@ -52,7 +52,7 @@ def test_pit_slice_matches_direct_adjustment(market: str, symbol: str, as_of: st
     pit, cut = make_pit_slice(adj, t, 15)
     # Direct reference: apply only events with ex_date <= as_of to raw bars.
     ref = apply_point_in_time_adjustment(
-        payload["bars"][: t + 1], corporate_actions=actions, mode="total_return", as_of_day=days[t]
+        clean_bars(payload)[: t + 1], corporate_actions=actions, mode="total_return", as_of_day=days[t]
     )
     n = 60
     mine = pit[cut - n + 1: cut + 1]

@@ -2300,7 +2300,7 @@ def test_tencent_index_fetch_is_capped_at_service_limit(monkeypatch) -> None:
 
     monkeypatch.setattr(data_gateway, "fetch_tencent_index_daily_bars", fake_tencent)
     inst = resolve_instrument("HSTECH.HK", market="HK", asset_type="index")
-    got, source, _errors = data_gateway._load_single_series(
+    got, source, _errors, _placeholders = data_gateway._load_single_series(
         inst, datalen=2600, as_of="2024-06-14", allow_network=True
     )
     assert seen["datalen"] == data_gateway.TENCENT_INDEX_MAX_BARS

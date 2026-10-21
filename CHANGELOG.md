@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### 修复（Yahoo 港股占位K线）
+
+- `scripts/data_gateway.py` 新增 `drop_placeholder_bars`：Yahoo 日线（标的与基准）取数后剔除"成交量为 0 且开高低收四价相同"的K线。这类K线多为港股半日市当天缺数、停牌或停市日按前收盘价补出，不是真实成交；此前未过滤，会压低 ATR、扭曲 RSI 与 RVOL、被识别为十字星，回测也可能在无成交的日子成交。只剔除、只披露，不用其他来源补数：剔除数量与日期写入 `quality.notes`，完整日期写入新字段 `quality.placeholder_bars_removed.{target,benchmark}`（`references/output-fields.md`、`references/hk-market.md` 同步）。录制数据 `0700.HK` 剔除 7 根（2022-01-31、2024-12-24、2024-12-31、2025-01-28、2025-12-24、2025-12-31、2026-02-16），NVDA、SPY、^HSI 不受影响。
+- 研究缓存 `research/common.py` 新增 `clean_bars`，`load_bars`、`adjusted_bars` 以及 `run_backtest.py`、`export_bundle.py` 的基准序列走同一函数，回测与线上口径一致。
+- `_load_single_series` 返回值增加第 4 项（剔除的占位K线日期）。
+
 ### 变更（高置信反转层：线上与回测统一口径，见 `docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md`）
 
 - 触发器抽成纯函数 `risk.detect_high_conviction_rebound`，计划价位抽成 `risk.high_conviction_plan_levels`，线上与研究回测共用。线上触发口径改为与开发集校准时一致：
@@ -15,6 +21,7 @@
 - 研究提速：`aggregate.date_block_bootstrap` 改用 numpy 向量化（单次约 0.38 s → 0.07 s，点估计不变，区间因随机数生成器不同有小数点后的差异）；线上流水线结果按"技能脚本 + 管线函数源码 + 区间参数 + 股票池 + 行情清单"的哈希缓存到 `artifacts/long_backtest/v2_live_cache/`，命中后重跑不再调用线上流水线（`--refresh-live-cache` 强制重算）。
 - 研究：`run_dev_region_v2.py --grid` 评估方案第 8 节写定的 18 个配置（6 种 TP/SL 几何 × 3 种子类型），按预先写定的规则选择，结果写入 `dev_region_v2_grid.json`。
 - 研究：新增开发区回测 v2 `research/run_dev_region_v2.py`。对预筛候选逐个调用线上 `analyze_bundle`（`research/tests/test_dev_region_v2.py` 校验预筛不漏线上信号），按线上固定价位撮合、套用大盘否决；新增同日随机入场等三类基准与按信号日期分块的 bootstrap（`aggregate.date_block_bootstrap`）；只评估 2021-01-04 起的开发区，拒绝触碰留出集（2020-11-30 及以前）。每次运行追加 `artifacts/long_backtest/trial_ledger.jsonl`。v1 脚本保留不改，以便复现已发布的数字，但不再用于新结论。
+
 
 ### 修复（资金计算与 K 线计算深度审查）
 

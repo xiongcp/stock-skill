@@ -34,8 +34,17 @@ def load_cache(market: str, symbol: str) -> dict:
         return json.load(fh)
 
 
+def clean_bars(payload: dict) -> list[dict]:
+    """与线上 data_gateway 同口径：Yahoo 日线剔除占位K线（成交量为 0 且四价相同）；VIX 线上不过滤，这里同样保留。"""
+    from data_gateway import drop_placeholder_bars
+
+    if str(payload.get("source") or "").startswith("YAHOO_") and payload.get("symbol") != VIX_SYMBOL:
+        return drop_placeholder_bars(payload["bars"])[0]
+    return payload["bars"]
+
+
 def load_bars(market: str, symbol: str) -> list[dict]:
-    return load_cache(market, symbol)["bars"]
+    return clean_bars(load_cache(market, symbol))
 
 
 def build_actions(payload: dict) -> list[dict]:
@@ -55,12 +64,13 @@ def adjusted_bars(payload: dict, mode: str = "total_return") -> tuple[list[dict]
     """
     from market_rules import apply_point_in_time_adjustment
 
-    actions = build_actions(payload)
+    raw = clean_bars(payload)
+    actions = build_actions({**payload, "bars": raw})
     bars = apply_point_in_time_adjustment(
-        payload["bars"],
+        raw,
         corporate_actions=actions,
         mode=mode,
-        as_of_day=payload["bars"][-1]["day"],
+        as_of_day=raw[-1]["day"],
     )
     return actions, bars
 
