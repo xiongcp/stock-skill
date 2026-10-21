@@ -18,12 +18,18 @@
   },
   "request": {
     "symbol": "600519.SH",
+    "display_bars": 120,
+    "structure_bars": 120,
+    "horizon_bars": 15,
+    "account_equity": 500000.0,
+    "max_risk_pct": 0.01,
+    "color_scheme": "auto",
+    "timeframes": [
+      "1D"
+    ],
     "market": "CN",
     "asset_type": "equity",
-    "account_equity": 500000.0,
-    "as_of": "2026-10-15",
-    "display_bars": 120,
-    "horizon_bars": 15
+    "as_of": "2026-10-15"
   },
   "market_benchmark": {
     "index_symbol": "000300.SH",
@@ -779,6 +785,7 @@
     },
     "momentum": {
       "rsi14": 61.87,
+      "rsi14_prev": 54.58,
       "macd_dif": -0.967,
       "macd_dea": -7.935,
       "macd_hist": 6.967,
@@ -1833,22 +1840,19 @@
       "body_to_range": 0.7542,
       "effort_vs_result": 0.5974,
       "warnings_cn": [
-        "【仅提示·短期涨幅偏大】5日推进 +2.62 ATR，偏离 EMA20 +1.78 ATR，60周分位 42.5%；历史回溯中此类截面表现并不差，不改变评级，仅提示追高回撤风险"
+        "【过热降级】偏离 EMA20 +1.78 ATR、RSI14 61.9 或高位派发结构触发过热条件，已不给出做多确认"
       ]
     },
     "high_conviction_rebound": false,
     "high_conviction_subtype": null,
+    "high_conviction_suppressed_by_veto": false,
+    "high_conviction_suppressed_subtype": null,
+    "high_conviction_paused_subtype": null,
     "decision_probability": {
       "available": false,
-      "event_definition": "未触发高置信超跌/大盘共振反转条件，不输出 >=70% 校准概率",
-      "p_net_positive": null,
-      "p_episode_net_positive": null,
-      "p_tp_before_sl": null,
       "method": "NOT_TRIGGERED",
-      "dev_sample_size": 13215,
-      "dev_effective_episodes": 9488,
-      "ci95": null,
-      "calibration_version": "rebound_v1_dev_2021_2024",
+      "event_definition": "未触发高置信超跌/大盘共振反转条件",
+      "validation": "docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md 第 11 节：留出集 H1 未通过",
       "as_of": "2026-10-15"
     }
   },
@@ -11392,7 +11396,11 @@
     "completed_bars_total": 1023,
     "display_bars": 120,
     "structure_bars": 120,
-    "forecast_promotion_status": "PROMOTED"
+    "forecast_promotion_status": "PROMOTED",
+    "placeholder_bars_removed": {
+      "target": [],
+      "benchmark": []
+    }
   },
   "reproducibility": {
     "engine_version": "5.3.0",
@@ -12538,7 +12546,7 @@
     }
   },
   "legacy_summary": {
-    "file": "/Users/Zhuanz/work/stock-skill/examples/600519.SH/600519.SH_preview.png",
+    "file": "examples/600519.SH/600519.SH_preview.png",
     "data_source": "SINA_LIVE_DAILY",
     "data_warning": null,
     "quality_status": "OK",
