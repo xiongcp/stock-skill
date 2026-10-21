@@ -137,6 +137,7 @@ def test_summary_feeds_registered_judge() -> None:
              "net": 0.01, "gross": 0.013, "outcome": "TP_BARRIER", "action": LONG_ACTIONS[0],
              "setup": "RIGHT_SIDE_BREAKOUT"} for i in range(120)]
     base = [{**r, "symbol": f"B{i:03d}", "net": -0.01, "gross": -0.007, "outcome": "SL_BARRIER"} for i, r in enumerate(rows)]
-    s = ev.summarize(rows, {"transplant": base, "own_plan": base}, note="测试")
+    agg = ev.aggregate_baseline(base)
+    s = ev.summarize(rows, {"transplant": agg, "own_plan": agg}, note="测试")
     v = h1.judge(s, ["P1", "P2b", "P3"])
     assert v["pass"] is True and set(v["checks"]) == {"P1", "P2b", "P3"}

@@ -144,6 +144,9 @@ def test_transplant_levels_roundtrip_and_collapse(us_rows) -> None:
     moved = ev.transplant_levels(mult, other["c"], other["atr"], "US", other["day"])
     assert moved is None or moved["sl"] < moved["lo"] <= moved["hi"] < moved["tp"]
     assert ev.transplant_levels([-1e-4, 1e-4, -2e-4, 2e-4], other["c"], other["atr"], "US", other["day"]) is None
+    # 止损倍数很大、套到高 ATR 股票上时止损会落到 0 以下：价位表取整会把它抬成一个最小价位，必须按原值剔除
+    k_sl = -other["c"] / other["atr"] - 1.0
+    assert ev.transplant_levels([-0.1, 0.1, k_sl, 1.0], other["c"], other["atr"], "US", other["day"]) is None
 
 
 def test_baseline_plan_rate_cap_and_reproducible_draw(us_rows) -> None:
@@ -175,8 +178,8 @@ def test_summarize_counts_criteria_cost_and_groups() -> None:
                     "fill_status": "GAP_BELOW_STOP", "open_status": "OPEN_OUTSIDE_ZONE"})
     signals.append({"symbol": "G2", "day": "2024-06-04", "action": LONG_ACTIONS[1], "setup": "LEFT_SIDE_PULLBACK",
                     "fill_status": "GEOMETRY_INVALID"})
-    base_rows = [_outcome_row(i, 0.0, 0.003) for i in range(120)]
-    s = ev.summarize(signals, {"transplant": base_rows, "own_plan": base_rows}, note="测试")
+    base = ev.aggregate_baseline([_outcome_row(i, 0.0, 0.003) for i in range(120)])
+    s = ev.summarize(signals, {"transplant": base, "own_plan": base}, note="测试")
 
     assert s["n_signals"] == 122 and sum(s["fill_status"].values()) == 122
     assert s["fill_status"]["GAP_BELOW_STOP"] == 1 and s["fill_status"]["GEOMETRY_INVALID"] == 1
@@ -195,7 +198,31 @@ def test_summarize_counts_criteria_cost_and_groups() -> None:
 
 def test_summarize_flags_small_samples() -> None:
     signals = [_outcome_row(i, 0.02, 0.023, action=LONG_ACTIONS[0], setup="RIGHT_SIDE_BREAKOUT") for i in range(20)]
-    s = ev.summarize(signals, {"transplant": [], "own_plan": []}, note="测试")
+    s = ev.summarize(signals, {"transplant": {}, "own_plan": {}}, note="测试")
     assert s["criteria_diagnostic"]["P3_sample"] is False
     assert s["criteria_diagnostic"]["P2b_mean_excess"] is False  # 没有基准时不能判为通过
     assert s["excess_vs_same_day_random"] is None
+
+
+def test_p2b_pairs_each_signal_episode_with_its_own_day() -> None:
+    """P2b 按信号 episode 与其当日基准均值配对：各日信号与基准同涨同跌时超额为 0；
+    若按两组各自汇总再相减，基准多的日子会压过信号多的日子，得出虚假的负超额。"""
+    signals = [_outcome_row(0, 0.02, 0.023, action=LONG_ACTIONS[0], setup="RIGHT_SIDE_BREAKOUT")]
+    signals += [_outcome_row(i, 0.0, 0.003, action=LONG_ACTIONS[0], setup="RIGHT_SIDE_BREAKOUT") for i in range(1, 10)]
+    signals.append({**_outcome_row(200, 0.05, 0.053, action=LONG_ACTIONS[0], setup="RIGHT_SIDE_BREAKOUT"), "day": "2025-03-03"})
+    base_rows = [{**_outcome_row(300 + k, 0.02, 0.023), "day": signals[0]["day"]} for k in range(10)]
+    base_rows += [{**_outcome_row(400 + i, 0.0, 0.003), "day": signals[i]["day"]} for i in range(1, 10)]
+    base = ev.aggregate_baseline(base_rows)
+    ex = ev.summarize(signals, {"transplant": base, "own_plan": base}, note="测试")["excess_vs_same_day_random"]
+    assert ex["mean_pct"] == pytest.approx(0.0, abs=1e-9)
+    assert ex["rate_pp"] == pytest.approx(0.0, abs=1e-9)
+    assert ex["n_paired_episodes"] == 10 and ex["n_unpaired_episodes"] == 1  # 2025-03-03 当天没有基准
+    assert ex["baseline_to_signal_ratio"] == pytest.approx(1.9)
+
+
+def test_aggregate_baseline_sums_by_day_without_dedup() -> None:
+    rows = [{**_outcome_row(i, 0.01, 0.013), "symbol": "SAME", "day": "2024-01-02" if i < 3 else "2024-01-03"} for i in range(5)]
+    rows.append({"symbol": "X", "day": "2024-01-02", "fill_status": "NO_FILL_5D", "net": None, "gross": None, "outcome": None})
+    agg = ev.aggregate_baseline(rows)
+    assert agg["2024-01-02"] == pytest.approx([0.03, 3, 3, 0.03 * 2 - 0.039])  # 同一标的相邻日不去重；未成交不计
+    assert agg["2024-01-03"][1] == 2

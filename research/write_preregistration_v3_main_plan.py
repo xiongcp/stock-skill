@@ -32,7 +32,7 @@ DATA_FILES = ["artifacts/long_backtest/pit_universe_h1.json", "artifacts/long_ba
 DEV_RESULT = ART / "dev_main_plan_v3_metrics.json"
 GATE_DEFS = {
     "P1": "扣费后单笔净收益均值 > 0，且按信号日期分块 bootstrap 95% 下限 > 0（5 日限价成交层，episode 口径）",
-    "P2b": "单笔净收益均值 − 同日随机入场（移植几何）均值的分块 95% 下限 > 0",
+    "P2b": "每个信号 episode 的净收益 − 其当日同日随机基准（移植几何）平均净收益，对全部配对取平均；按信号日分块 bootstrap 95% 下限 > 0",
     "P3": "episode >= 100 且不同信号日 >= 30",
 }
 
@@ -93,14 +93,15 @@ def build() -> dict:
             "gates": ["P1", "P2b", "P3"],
             "gate_definitions": GATE_DEFS,
             "report_only": {
-                "P2a": "episode 净正率 − 同日随机入场（移植几何）净正率的分块 95% 下限 > 0",
+                "P2a": "按同样方式配对的净正率差（是否盈利 − 当日基准盈利比例）的分块 95% 下限 > 0",
                 "T": "episode 净正率点估计 >= 70%",
             },
             "rule": "每个市场单独判定，三项全部满足为通过；P3 不满足同样判为未通过。未通过的市场线上降级为观察位（设计 M4、第 7.1 节）；不得回到 H1 调参",
         },
         "baseline": {
             "kind": "same_day_random_transplanted_geometry",
-            "definition": "信号日按 min(1, 10 × 当日信号数 / 当日股票池规模) 抽股，按哈希对应当日一个信号，把其价位的 ATR 倍数套到被抽股票的收盘价与线上 ATR14 上并取整；同撮合、同出场、同费用、同 21 天 episode 去重",
+            "definition": "信号日按 min(1, 10 × 当日信号数 / 当日进入评估的股票-日数) 抽股，按哈希对应当日一个信号，把其价位的 ATR 倍数套到被抽股票的收盘价与线上 ATR14 上并取整（止损原值 <= 0 或取整后几何自相矛盾的剔除）；同撮合、同出场、同费用；不做 episode 去重，按日汇总",
+            "pairing": "每个信号 episode − 其当日基准平均值；当日无基准的信号 episode 不参与配对并单独计数",
             "sampling_multiple": ev.BASELINE_MULTIPLE,
             "seed": ev.SEED,
             "diagnostic": "own_plan：被抽股票使用自身计划价位，只报告",

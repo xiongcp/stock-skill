@@ -4,6 +4,7 @@
 见 docs/superpowers/specs/2026-10-20-main-long-plan-validation-design.md 第 3.2~5 节。
 第一遍分片由 main_plan_scan.py 生成。主基准"移植几何"：在信号日随机抽股，把当日某个信号的价位形状
 （相对收盘价的 ATR 倍数）套到被抽股票上；诊断基准用被抽股票自己的计划价位。两者同撮合、同出场、同费用。
+基准不做 episode 去重，按日汇总；超额按"每个信号 episode − 其当日基准均值"配对，再按信号日分块 bootstrap（设计第 4.1、5.1 节）。
 开发区结果均为样本内，不构成验收；H1 只能由 run_h1_main_plan.py 运行。
 """
 from __future__ import annotations
@@ -49,7 +50,10 @@ def plan_atr_multiples(sig: dict) -> list[float]:
 
 def transplant_levels(mult: list[float], c: float, atr: float, market: str, day: str) -> dict | None:
     """把 ATR 倍数套到另一只股票的收盘价与 ATR 上并按价位表取整；取整后几何自相矛盾时返回 None。"""
-    lo, hi, sl, tp = (round_to_tick(c + k * atr, market, "equity", day) for k in mult)
+    raw = [c + k * atr for k in mult]
+    if raw[2] <= 0:  # 止损落到 0 以下时价位表取整会把它抬成最小价位，等于没有止损
+        return None
+    lo, hi, sl, tp = (round_to_tick(x, market, "equity", day) for x in raw)
     if not (sl < lo <= hi < tp):
         return None
     return {"lo": lo, "hi": hi, "sl": sl, "tp": tp}
@@ -129,6 +133,30 @@ def _outcome(ex: dict) -> dict:
     return {"fill_status": ex["fill_status"], "net": ex.get("net"), "gross": ex.get("gross"), "outcome": ex.get("outcome")}
 
 
+def aggregate_baseline(rows: list[dict]) -> dict[str, list[float]]:
+    """按日汇总已成交的基准交易（不做 episode 去重）：[净收益和, 笔数, 盈利笔数, 费用翻倍后净收益和]。"""
+    agg: dict[str, list[float]] = {}
+    for r in rows:
+        if r["fill_status"] != "FILL":
+            continue
+        a = agg.setdefault(r["day"], [0.0, 0, 0, 0.0])
+        a[0] += r["net"]
+        a[1] += 1
+        a[2] += 1 if r["net"] > 0 else 0
+        a[3] += 2.0 * r["net"] - r["gross"]
+    return agg
+
+
+def merge_baseline(parts: list[dict[str, list[float]]]) -> dict[str, list[float]]:
+    out: dict[str, list[float]] = {}
+    for part in parts:
+        for day, a in part.items():
+            o = out.setdefault(day, [0.0, 0, 0, 0.0])
+            for i in range(4):
+                o[i] += a[i]
+    return out
+
+
 def _eval_init(h1_authorized: bool, market: str, mode: str, plans: dict) -> None:
     scan.H1_AUTHORIZED = h1_authorized
     scan.init(market, mode)
@@ -136,8 +164,8 @@ def _eval_init(h1_authorized: bool, market: str, mode: str, plans: dict) -> None
     _E.update(market=market, plans=plans)
 
 
-def eval_shard(path_str: str) -> tuple[list[dict], dict[str, list[dict]], dict]:
-    """一个分片：撮合其中的信号，抽取并撮合两类基准；基准按标的做 21 天 episode 去重后再返回，控制内存。"""
+def eval_shard(path_str: str) -> tuple[list[dict], dict[str, dict[str, list[float]]], dict]:
+    """一个分片：撮合其中的信号，抽取并撮合两类基准；基准不去重，按日汇总后再返回，控制内存。"""
     market, plans = _E["market"], _E["plans"]
     by_sym: dict[str, list[dict]] = defaultdict(list)
     with gzip.open(path_str, "rt", encoding="utf-8") as fh:
@@ -146,13 +174,12 @@ def eval_shard(path_str: str) -> tuple[list[dict], dict[str, list[dict]], dict]:
             if not r.get("__error__"):
                 by_sym[r["sym"]].append(r)
     signals: list[dict] = []
-    base: dict[str, list[dict]] = {"transplant": [], "own_plan": []}
+    base_rows: dict[str, list[dict]] = {"transplant": [], "own_plan": []}
     counts: Counter = Counter()
     for sym, rows in by_sym.items():
         data = v2._load_symbol(sym)
         if data is None:
             raise RuntimeError(f"第二遍无法加载 {sym}：行情缓存可能在两遍之间被改动")
-        sym_base: dict[str, list[dict]] = {"transplant": [], "own_plan": []}
         for r in sorted(rows, key=lambda x: x["day"]):
             is_sig = r["a"] in LONG_ACTIONS
             j = draw(market, r, plans.get(r["day"]))
@@ -175,31 +202,54 @@ def eval_shard(path_str: str) -> tuple[list[dict], dict[str, list[dict]], dict]:
                 counts["transplant_geometry_invalid"] += 1
             else:
                 ex = execute_main_plan(sym, data, pit, cut, r["b"], lv["lo"], lv["hi"], lv["tp"], lv["sl"], p["rts"][j])
-                sym_base["transplant"].append({"symbol": sym, "day": r["day"], **_outcome(ex)})
+                base_rows["transplant"].append({"symbol": sym, "day": r["day"], **_outcome(ex)})
             if own is None:
                 counts["own_plan_geometry_invalid"] += 1
             else:
-                sym_base["own_plan"].append({"symbol": sym, "day": r["day"], **_outcome(own)})
-        for kind, rows_k in sym_base.items():
-            for x in rows_k:
-                counts[f"{kind}:{x['fill_status']}"] += 1
-            base[kind].extend(_non_overlapping_episodes([x for x in rows_k if x["fill_status"] == "FILL"]))
-    return signals, base, dict(counts)
+                base_rows["own_plan"].append({"symbol": sym, "day": r["day"], **_outcome(own)})
+    for kind, rows_k in base_rows.items():
+        for x in rows_k:
+            counts[f"{kind}:{x['fill_status']}"] += 1
+    return signals, {k: aggregate_baseline(v) for k, v in base_rows.items()}, dict(counts)
 
 
-def _excess(eps: list[dict], base_eps: list[dict]) -> dict | None:
-    """信号 episode 相对基准 episode 的净正率差与均值差，区间按信号日分块配对 bootstrap。"""
-    if not eps or not base_eps:
+def _excess(eps: list[dict], base: dict[str, list[float]], cost_2x: bool = False) -> dict | None:
+    """每个信号 episode 减去其当日基准均值（净收益、是否盈利），再对所有配对取平均；区间按信号日分块 bootstrap。
+    当日没有基准的信号 episode 不参与配对，单独计数。"""
+    paired = []
+    for r in eps:
+        a = base.get(r["day"])
+        if not a or not a[1]:
+            continue
+        net = 2.0 * r["net"] - r["gross"] if cost_2x else r["net"]
+        paired.append({"day": r["day"], "d_net": net - (a[3] if cost_2x else a[0]) / a[1],
+                       "d_win": (1.0 if net > 0 else 0.0) - a[2] / a[1]})
+    if not paired:
         return None
-    n, nb = len(eps), len(base_eps)
-    rate = sum(r["net"] > 0 for r in eps) / n - sum(r["net"] > 0 for r in base_eps) / nb
-    mean = sum(r["net"] for r in eps) / n - sum(r["net"] for r in base_eps) / nb
+    n = len(paired)
+    days = {p["day"] for p in paired}
     return {
-        "baseline_to_signal_ratio": round(nb / n, 1),
-        "rate_pp": round(rate * 100.0, 2),
-        "rate_pp_date_cluster95": v2._ci_pct(date_block_bootstrap(eps, lambda r: r["net"] > 0, base_eps)),
-        "mean_pct": round(mean * 100.0, 3),
-        "mean_pct_date_cluster95": v2._ci_pct(date_block_bootstrap(eps, lambda r: r["net"], base_eps)),
+        "pairing": "signal_episode_vs_same_day_baseline_mean",
+        "n_paired_episodes": n,
+        "n_unpaired_episodes": len(eps) - n,
+        "baseline_to_signal_ratio": round(sum(base[d][1] for d in days) / n, 1),
+        "rate_pp": round(sum(p["d_win"] for p in paired) / n * 100.0, 2),
+        "rate_pp_date_cluster95": v2._ci_pct(date_block_bootstrap(paired, lambda p: p["d_win"])),
+        "mean_pct": round(sum(p["d_net"] for p in paired) / n * 100.0, 3),
+        "mean_pct_date_cluster95": v2._ci_pct(date_block_bootstrap(paired, lambda p: p["d_net"])),
+    }
+
+
+def _base_stats(base: dict[str, list[float]]) -> dict:
+    n = sum(a[1] for a in base.values())
+    if not n:
+        return {"n_trades": 0}
+    return {
+        "n_trades": int(n),
+        "n_days": len(base),
+        "net_positive_rate_pct": round(sum(a[2] for a in base.values()) / n * 100.0, 2),
+        "mean_net_return_pct": round(sum(a[0] for a in base.values()) / n * 100.0, 3),
+        "mean_net_return_cost_2x_pct": round(sum(a[3] for a in base.values()) / n * 100.0, 3),
     }
 
 
@@ -220,7 +270,7 @@ def _criteria(main: dict, ex: dict | None, note: str) -> dict:
     }
 
 
-def summarize(signals: list[dict], base: dict[str, list[dict]], note: str) -> dict:
+def summarize(signals: list[dict], base: dict[str, dict[str, list[float]]], note: str) -> dict:
     """主口径：5 日限价成交、episode 去重；分组结果取总 episode 的子集，只报告。"""
     eps = v2._fill_eps(signals)
     main = v2._layer_stats(eps)
@@ -240,7 +290,7 @@ def summarize(signals: list[dict], base: dict[str, list[dict]], note: str) -> di
             "outside_zone": sum(1 for r in signals if r.get("open_status") == "OPEN_OUTSIDE_ZONE"),
             "fill_layer": v2._layer_stats(_non_overlapping_episodes(opened)),
         },
-        "baselines": {"transplant": v2._layer_stats(transplant), "own_plan": v2._layer_stats(own)},
+        "baselines": {"transplant": _base_stats(transplant), "own_plan": _base_stats(own)},
         "excess_vs_same_day_random": ex,
         "excess_vs_own_plan_diagnostic": _excess(eps, own),
         "groups": {
@@ -249,15 +299,14 @@ def summarize(signals: list[dict], base: dict[str, list[dict]], note: str) -> di
             "year": {
                 y: {
                     "fill_layer": v2._layer_stats([r for r in eps if r["day"][:4] == y]),
-                    "excess_vs_same_day_random": _excess([r for r in eps if r["day"][:4] == y],
-                                                         [r for r in transplant if r["day"][:4] == y]),
+                    "excess_vs_same_day_random": _excess([r for r in eps if r["day"][:4] == y], transplant),
                 }
                 for y in years
             },
         },
         "cost_2x": {
             "fill_layer": v2._layer_stats(_cost_2x(eps)),
-            "excess_vs_same_day_random": _excess(_cost_2x(eps), _cost_2x(transplant)),
+            "excess_vs_same_day_random": _excess(eps, transplant, cost_2x=True),
         },
     }
     if main.get("n_episodes") and main["max_day_share_pct"] > 10.0:
@@ -266,7 +315,7 @@ def summarize(signals: list[dict], base: dict[str, list[dict]], note: str) -> di
         out["sensitivity_excluding_top_day"] = {
             "excluded_day": top_day,
             "fill_layer": v2._layer_stats(rest),
-            "excess_vs_same_day_random": _excess(rest, [r for r in transplant if r["day"] != top_day]),
+            "excess_vs_same_day_random": _excess(rest, transplant),
         }
     out["criteria_diagnostic"] = _criteria(main, ex, note)
     return out
@@ -276,7 +325,8 @@ def config() -> dict:
     return {
         "signal_actions": list(LONG_ACTIONS), "limit_sessions": v2.LIMIT_SESSIONS, "horizon": v2.HORIZON,
         "episode_gap_days": 21, "baseline": "same_day_random_transplanted_geometry",
-        "baseline_multiple": BASELINE_MULTIPLE, "seed": SEED,
+        "baseline_multiple": BASELINE_MULTIPLE, "seed": SEED, "baseline_dedup": False,
+        "excess_pairing": "signal_episode_vs_same_day_baseline_mean",
         "bootstrap": {"block": "signal_day", "n_boot": 2000, "seed": 20261020},
     }
 
@@ -301,7 +351,7 @@ def run_market(market: str, mode: str = "dev", workers: int = 8, limit_symbols: 
         with ProcessPoolExecutor(max_workers=workers, initializer=_eval_init, initargs=init_args) as ex:
             results = list(ex.map(eval_shard, shards))
     signals = [r for sig, _, _ in results for r in sig]
-    base = {k: [r for _, b, _ in results for r in b[k]] for k in ("transplant", "own_plan")}
+    base = {k: merge_baseline([b[k] for _, b, _ in results]) for k in ("transplant", "own_plan")}
     counts: Counter = Counter()
     for _, _, c in results:
         counts.update(c)
