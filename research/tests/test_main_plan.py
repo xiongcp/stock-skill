@@ -156,3 +156,46 @@ def test_baseline_plan_rate_cap_and_reproducible_draw(us_rows) -> None:
     j = ev.draw("US", row, plans["2024-01-03"])
     assert j == 0 and ev.draw("US", row, plans["2024-01-03"]) == j
     assert ev.draw("US", row, None) is None
+
+
+def _outcome_row(i: int, net: float, gross: float, **extra) -> dict:
+    # 汇总口径测试只需要结局数值（不是行情序列）；每行一个独立标的、独立日期，避免 episode 去重
+    return {"symbol": f"S{i:03d}", "day": f"2024-{1 + i // 28:02d}-{1 + i % 28:02d}", "fill_status": "FILL",
+            "net": net, "gross": gross, "outcome": "TP_BARRIER" if net > 0 else "SL_BARRIER", **extra}
+
+
+def test_summarize_counts_criteria_cost_and_groups() -> None:
+    signals = [
+        _outcome_row(i, 0.01 if i % 3 else -0.01, (0.01 if i % 3 else -0.01) + 0.003,
+                     action=LONG_ACTIONS[i % 2], setup="RIGHT_SIDE_BREAKOUT" if i % 4 else "LEFT_SIDE_PULLBACK",
+                     open_status="OPEN_OUTSIDE_ZONE")
+        for i in range(120)
+    ]
+    signals.append({"symbol": "G1", "day": "2024-06-03", "action": LONG_ACTIONS[0], "setup": "RIGHT_SIDE_BREAKOUT",
+                    "fill_status": "GAP_BELOW_STOP", "open_status": "OPEN_OUTSIDE_ZONE"})
+    signals.append({"symbol": "G2", "day": "2024-06-04", "action": LONG_ACTIONS[1], "setup": "LEFT_SIDE_PULLBACK",
+                    "fill_status": "GEOMETRY_INVALID"})
+    base_rows = [_outcome_row(i, 0.0, 0.003) for i in range(120)]
+    s = ev.summarize(signals, {"transplant": base_rows, "own_plan": base_rows}, note="测试")
+
+    assert s["n_signals"] == 122 and sum(s["fill_status"].values()) == 122
+    assert s["fill_status"]["GAP_BELOW_STOP"] == 1 and s["fill_status"]["GEOMETRY_INVALID"] == 1
+    assert s["fill_layer"]["n_episodes"] == 120
+    mean = s["fill_layer"]["mean_net_return_pct"]
+    assert mean == pytest.approx(0.333, abs=1e-3)
+    assert s["cost_2x"]["fill_layer"]["mean_net_return_pct"] == pytest.approx(mean - 0.3, abs=1e-3)
+    assert s["excess_vs_same_day_random"]["mean_pct"] == pytest.approx(mean, abs=1e-3)
+    crit = s["criteria_diagnostic"]
+    assert set(crit) == {"note", "P1_mean_net_positive", "P2a_rate_excess", "P2b_mean_excess", "P3_sample", "T_rate_ge_70"}
+    assert crit["P3_sample"] is True and crit["note"] == "测试"
+    assert set(s["groups"]["action"]) == set(LONG_ACTIONS)
+    assert set(s["groups"]["setup"]) == {"RIGHT_SIDE_BREAKOUT", "LEFT_SIDE_PULLBACK"}
+    assert set(s["groups"]["year"]) == {"2024"}
+
+
+def test_summarize_flags_small_samples() -> None:
+    signals = [_outcome_row(i, 0.02, 0.023, action=LONG_ACTIONS[0], setup="RIGHT_SIDE_BREAKOUT") for i in range(20)]
+    s = ev.summarize(signals, {"transplant": [], "own_plan": []}, note="测试")
+    assert s["criteria_diagnostic"]["P3_sample"] is False
+    assert s["criteria_diagnostic"]["P2b_mean_excess"] is False  # 没有基准时不能判为通过
+    assert s["excess_vs_same_day_random"] is None

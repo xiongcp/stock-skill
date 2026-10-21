@@ -8,15 +8,20 @@
 """
 from __future__ import annotations
 
+import argparse
 import gzip
 import json
+import sys
 import zlib
 from collections import Counter, defaultdict
+from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime, timezone
+from pathlib import Path
 
 import main_plan_scan as scan
 import run_dev_region_v2 as v2
-from aggregate import _non_overlapping_episodes
-from common import LONG_ACTIONS
+from aggregate import _non_overlapping_episodes, date_block_bootstrap
+from common import ART, LONG_ACTIONS, ROOT
 from run_backtest import make_pit_slice
 
 from evaluation import label_triple_barrier_event  # noqa: E402
@@ -24,6 +29,10 @@ from market_rules import round_to_tick  # noqa: E402
 
 SEED = 20261021
 BASELINE_MULTIPLE = 10
+SPEC = "docs/superpowers/specs/2026-10-20-main-long-plan-validation-design.md"
+OUT = ART / "dev_main_plan_v3_metrics.json"
+LEDGER = ART / "trial_ledger.jsonl"
+HYPOTHESIS = "MAIN_LONG_PLAN"
 
 _E: dict = {}
 
@@ -176,3 +185,177 @@ def eval_shard(path_str: str) -> tuple[list[dict], dict[str, list[dict]], dict]:
                 counts[f"{kind}:{x['fill_status']}"] += 1
             base[kind].extend(_non_overlapping_episodes([x for x in rows_k if x["fill_status"] == "FILL"]))
     return signals, base, dict(counts)
+
+
+def _excess(eps: list[dict], base_eps: list[dict]) -> dict | None:
+    """信号 episode 相对基准 episode 的净正率差与均值差，区间按信号日分块配对 bootstrap。"""
+    if not eps or not base_eps:
+        return None
+    n, nb = len(eps), len(base_eps)
+    rate = sum(r["net"] > 0 for r in eps) / n - sum(r["net"] > 0 for r in base_eps) / nb
+    mean = sum(r["net"] for r in eps) / n - sum(r["net"] for r in base_eps) / nb
+    return {
+        "baseline_to_signal_ratio": round(nb / n, 1),
+        "rate_pp": round(rate * 100.0, 2),
+        "rate_pp_date_cluster95": v2._ci_pct(date_block_bootstrap(eps, lambda r: r["net"] > 0, base_eps)),
+        "mean_pct": round(mean * 100.0, 3),
+        "mean_pct_date_cluster95": v2._ci_pct(date_block_bootstrap(eps, lambda r: r["net"], base_eps)),
+    }
+
+
+def _cost_2x(eps: list[dict]) -> list[dict]:
+    """费用翻倍：单笔费用 = 毛收益 − 净收益，翻倍后净收益 = 2 × 净 − 毛。"""
+    return [{**r, "net": 2.0 * r["net"] - r["gross"]} for r in eps]
+
+
+def _criteria(main: dict, ex: dict | None, note: str) -> dict:
+    mean_ci = main.get("mean_date_cluster95_pct")
+    return {
+        "note": note,
+        "P1_mean_net_positive": bool(mean_ci and main["mean_net_return_pct"] > 0 and mean_ci[0] > 0),
+        "P2a_rate_excess": bool(ex and ex["rate_pp_date_cluster95"] and ex["rate_pp_date_cluster95"][0] > 0),
+        "P2b_mean_excess": bool(ex and ex["mean_pct_date_cluster95"] and ex["mean_pct_date_cluster95"][0] > 0),
+        "P3_sample": bool(main.get("n_episodes", 0) >= 100 and main.get("n_signal_days", 0) >= 30),
+        "T_rate_ge_70": bool(main.get("n_episodes") and main["net_positive_rate_pct"] >= 70.0),
+    }
+
+
+def summarize(signals: list[dict], base: dict[str, list[dict]], note: str) -> dict:
+    """主口径：5 日限价成交、episode 去重；分组结果取总 episode 的子集，只报告。"""
+    eps = v2._fill_eps(signals)
+    main = v2._layer_stats(eps)
+    transplant, own = base["transplant"], base["own_plan"]
+    opened = [{**r, "net": r["open_net"], "outcome": r["open_outcome"]} for r in signals if r.get("open_status") == "FILL"]
+    years = sorted({r["day"][:4] for r in eps})
+    setups = sorted({r["setup"] for r in signals})
+    ex = _excess(eps, transplant)
+    out: dict = {
+        "n_signals": len(signals),
+        "actions": dict(Counter(r["action"] for r in signals)),
+        "setups": dict(Counter(r["setup"] for r in signals)),
+        "fill_status": dict(Counter(r["fill_status"] for r in signals)),
+        "fill_layer": main,
+        "next_open_layer": {
+            "n_fills": len(opened),
+            "outside_zone": sum(1 for r in signals if r.get("open_status") == "OPEN_OUTSIDE_ZONE"),
+            "fill_layer": v2._layer_stats(_non_overlapping_episodes(opened)),
+        },
+        "baselines": {"transplant": v2._layer_stats(transplant), "own_plan": v2._layer_stats(own)},
+        "excess_vs_same_day_random": ex,
+        "excess_vs_own_plan_diagnostic": _excess(eps, own),
+        "groups": {
+            "action": {a: v2._layer_stats([r for r in eps if r["action"] == a]) for a in LONG_ACTIONS},
+            "setup": {s: v2._layer_stats([r for r in eps if r["setup"] == s]) for s in setups},
+            "year": {
+                y: {
+                    "fill_layer": v2._layer_stats([r for r in eps if r["day"][:4] == y]),
+                    "excess_vs_same_day_random": _excess([r for r in eps if r["day"][:4] == y],
+                                                         [r for r in transplant if r["day"][:4] == y]),
+                }
+                for y in years
+            },
+        },
+        "cost_2x": {
+            "fill_layer": v2._layer_stats(_cost_2x(eps)),
+            "excess_vs_same_day_random": _excess(_cost_2x(eps), _cost_2x(transplant)),
+        },
+    }
+    if main.get("n_episodes") and main["max_day_share_pct"] > 10.0:
+        top_day = Counter(r["day"] for r in eps).most_common(1)[0][0]
+        rest = [r for r in eps if r["day"] != top_day]
+        out["sensitivity_excluding_top_day"] = {
+            "excluded_day": top_day,
+            "fill_layer": v2._layer_stats(rest),
+            "excess_vs_same_day_random": _excess(rest, [r for r in transplant if r["day"] != top_day]),
+        }
+    out["criteria_diagnostic"] = _criteria(main, ex, note)
+    return out
+
+
+def config() -> dict:
+    return {
+        "signal_actions": list(LONG_ACTIONS), "limit_sessions": v2.LIMIT_SESSIONS, "horizon": v2.HORIZON,
+        "episode_gap_days": 21, "baseline": "same_day_random_transplanted_geometry",
+        "baseline_multiple": BASELINE_MULTIPLE, "seed": SEED,
+        "bootstrap": {"block": "signal_day", "n_boot": 2000, "seed": 20261020},
+    }
+
+
+def run_market(market: str, mode: str = "dev", workers: int = 8, limit_symbols: int | None = None) -> dict:
+    out_dir = scan.run_scan(market, mode, workers, limit_symbols)
+    pool_by_day: Counter = Counter()
+    signals_by_day: dict[str, list[dict]] = defaultdict(list)
+    for r in scan.iter_rows(out_dir):
+        if r.get("__error__"):
+            continue
+        pool_by_day[r["day"]] += 1
+        if r["a"] in LONG_ACTIONS:
+            signals_by_day[r["day"]].append(r)
+    plans = baseline_plan(signals_by_day, pool_by_day)
+    shards = [str(p) for p in sorted(out_dir.glob("shard_*.jsonl.gz"))]
+    init_args = (scan.H1_AUTHORIZED, market, mode, plans)
+    if workers <= 1:
+        _eval_init(*init_args)
+        results = [eval_shard(s) for s in shards]
+    else:
+        with ProcessPoolExecutor(max_workers=workers, initializer=_eval_init, initargs=init_args) as ex:
+            results = list(ex.map(eval_shard, shards))
+    signals = [r for sig, _, _ in results for r in sig]
+    base = {k: [r for _, b, _ in results for r in b[k]] for k in ("transplant", "own_plan")}
+    counts: Counter = Counter()
+    for _, _, c in results:
+        counts.update(c)
+    region, _ = scan.mode_config(mode, market)
+    note = "开发区·样本内，仅用于诊断，不构成验收" if mode == "dev" else "留出集 H1，一次性评估"
+    return {
+        "scan": scan.scan_stats(out_dir),
+        "scan_dir": str(out_dir.relative_to(ROOT)),
+        "region": list(region),
+        "baseline_sampling": {"n_signal_days": len(plans), "counts": dict(counts)},
+        "summary": summarize(signals, base, note),
+    }
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="主做多计划检验：开发区诊断（样本内）。H1 只能由 run_h1_main_plan.py 运行")
+    ap.add_argument("--markets", default="CN,HK,US")
+    ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--limit-symbols", type=int, default=None, help="冒烟测试：每市场只取等间隔抽样的 N 只")
+    ap.add_argument("--out", type=Path, default=OUT)
+    args = ap.parse_args()
+    started = datetime.now(timezone.utc)
+    result: dict = {
+        "generated_at_utc": started.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "code_commit": v2._git_head(),
+        "spec": SPEC,
+        "hypothesis": HYPOTHESIS,
+        "mode": "dev",
+        "in_sample_note": "开发区结果均为样本内，不构成验收；主计划规则未调参",
+        "config": {**config(), "limit_symbols": args.limit_symbols},
+        "markets": {},
+    }
+    for market in [m.strip() for m in args.markets.split(",") if m.strip()]:
+        res = run_market(market, "dev", args.workers, args.limit_symbols)
+        result["markets"][market] = res
+        s = res["summary"]
+        fl = s["fill_layer"]
+        print(f"[{market}] signals={s['n_signals']} episodes={fl.get('n_episodes')} days={fl.get('n_signal_days')} "
+              f"rate={fl.get('net_positive_rate_pct')}% mean={fl.get('mean_net_return_pct')}% "
+              f"excess={s['excess_vs_same_day_random']} scan_errors={res['scan']['errors']}", flush=True)
+    result["elapsed_seconds"] = round((datetime.now(timezone.utc) - started).total_seconds())
+    args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"wrote {args.out}")
+    with LEDGER.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "ts": result["generated_at_utc"], "script": "research/main_plan_eval.py", "hypothesis": HYPOTHESIS,
+            "code_commit": result["code_commit"], "config": result["config"],
+            "out": str(args.out.relative_to(ROOT)) if args.out.is_relative_to(ROOT) else str(args.out),
+            "n_configs_evaluated": 1,
+            "summary": {m: {k: v["summary"]["fill_layer"].get(k) for k in
+                            ("n_episodes", "net_positive_rate_pct", "mean_net_return_pct")}
+                        for m, v in result["markets"].items()},
+        }, ensure_ascii=False) + "\n")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
