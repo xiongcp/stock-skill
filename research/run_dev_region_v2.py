@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from aggregate import _non_overlapping_episodes, date_block_bootstrap, wilson
-from common import ART, BENCHMARKS, CACHE, PIT_UNIVERSE, ROOT, VIX_SYMBOL, adjusted_bars, load_bars, load_cache
+from common import ART, BENCHMARKS, CACHE, PIT_UNIVERSE, ROOT, VIX_SYMBOL, adjusted_bars, clean_bars, load_bars, load_cache
 from discover_alpha_dev import build_benchmark_features
 from run_backtest import WINDOW_BARS, make_pit_slice
 
@@ -48,6 +48,9 @@ H1_FIRST_DAY = {"CN": "2017-10-24", "HK": "2018-07-09", "US": "2018-06-22"}
 H1_UNIVERSE = ART / "pit_universe_h1.json"
 # 只有 run_h1_holdout.py 在校验预注册通过后才会把它设为 True；其余任何调用 mode="h1" 都会被拒绝
 H1_AUTHORIZED = False
+# 前向跟踪 H2：只处理预注册之后、每个交易日收盘后的最新一天（research/h2_forward.py）
+H2_FIRST_DAY = "2026-10-22"
+H2_UNIVERSE = ART / "h2" / "pit_universe_h2.json"
 # 与 v1 的切分对齐，便于对照；"all" 为整个开发区
 SEGMENTS = {
     "all": DEV_REGION,
@@ -109,6 +112,8 @@ def _mode_config(mode: str, market: str) -> tuple[tuple[str, str], Path]:
         if not H1_AUTHORIZED:
             raise PermissionError("留出集 H1 只能由 run_h1_holdout.py 在校验预注册后评估")
         return (H1_FIRST_DAY[market], H1_LAST_DAY), H1_UNIVERSE
+    if mode == "h2":
+        return (H2_FIRST_DAY, "9999-12-31"), H2_UNIVERSE
     raise ValueError(f"unknown mode: {mode}")
 
 
@@ -130,8 +135,9 @@ def _init(market: str, same_day_rate: dict | None = None, live: dict | None = No
     _C.update(
         market=market,
         periods=dict(periods),
-        bench=bench_payload["bars"],
-        bench_days=[b["day"] for b in bench_payload["bars"]],
+        # 与线上同口径剔除占位K线（当前三个基准缓存中都没有，结果不变；H2 每日刷新后可能出现）
+        bench=clean_bars(bench_payload),
+        bench_days=[b["day"] for b in clean_bars(bench_payload)],
         bench_source=bench_payload.get("source", f"CACHED_{market}_BENCHMARK"),
         bf=build_benchmark_features(market),
         vix=vix,
@@ -190,8 +196,10 @@ def _eligible_days(symbol: str, data: dict):
                 continue
             if _C["mode"] == "dev":
                 assert day > H1_LAST_DAY, "留出集 H1 不得在开发区管线中评估"
-            else:
+            elif _C["mode"] == "h1":
                 assert day <= H1_LAST_DAY, "H1 评估不得读取开发区的结果"
+            else:
+                assert day >= H2_FIRST_DAY, "H2 只处理预注册之后的交易日"
             t = data["idx"].get(day)
             if t is None or t < WARMUP_BARS - 1 or t + LIMIT_SESSIONS + HORIZON >= n:
                 continue
@@ -421,18 +429,21 @@ def _baselines_for(symbol: str, data: dict) -> list[dict]:
     return rows
 
 
-def _worker_init(h1_authorized: bool, *init_args) -> None:
-    """子进程会重新导入本模块，H1 授权需要由父进程显式传入。"""
-    global H1_AUTHORIZED
-    H1_AUTHORIZED = h1_authorized
+def _worker_init(settings: dict, *init_args) -> None:
+    """子进程会重新导入本模块：H1 授权与 H2 的起始日、股票池路径需要由父进程显式传入。"""
+    global H1_AUTHORIZED, H2_FIRST_DAY, H2_UNIVERSE
+    H1_AUTHORIZED = settings["H1_AUTHORIZED"]
+    H2_FIRST_DAY = settings["H2_FIRST_DAY"]
+    H2_UNIVERSE = Path(settings["H2_UNIVERSE"])
     _init(*init_args)
 
 
-def _pool_map(fn, symbols: list[str], workers: int, init_args: tuple) -> list:
+def _pool_map(fn, symbols: list, workers: int, init_args: tuple) -> list:
     if workers <= 1:
         _init(*init_args)
         return [fn(s) for s in symbols]
-    with ProcessPoolExecutor(max_workers=workers, initializer=_worker_init, initargs=(H1_AUTHORIZED, *init_args)) as ex:
+    settings = {"H1_AUTHORIZED": H1_AUTHORIZED, "H2_FIRST_DAY": H2_FIRST_DAY, "H2_UNIVERSE": str(H2_UNIVERSE)}
+    with ProcessPoolExecutor(max_workers=workers, initializer=_worker_init, initargs=(settings, *init_args)) as ex:
         return list(ex.map(fn, symbols, chunksize=8))
 
 
