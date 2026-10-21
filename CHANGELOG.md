@@ -17,6 +17,8 @@
   2. 删除 v1 的 `_DEV_CALIBRATED_REBOUND_PRIORS`（72% 等数字移入 v1 研究脚本，仅供复现）；`decision_probability` 只保留 `available=false`、`method`、`event_definition` 与 `validation`，不再含任何数字。
   3. HTML 删除"开发集校准先验 (L4)"一行。
   4. `BACKTEST_AND_SKILL_AUDIT_REPORT.md` 与 v1 回测报告开头加更正说明。
+- **回复校验拦截反转层数字**（`scripts/lint_response.py`）：此前句子里只要出现"校准先验"，其中的概率数字就被当作合规放行（例如"开发集校准先验显示净正率 72.2%"能通过）。现在去掉这条豁免；提到"校准先验 / 开发集校准"即拦截；提到高置信 / 超跌反转 / 共振反转 / 反转层 / 反转计划的句子，出现任何百分比，或在计划未触发时转述 `high_conviction_plan` 价位，都会拦截。否定说明（如"暂不给出反转计划，也不报统计数字"）照常放行。`SKILL.md` 第五节同步补充。
+- `examples/` 用录制行情 `--as-of 2026-10-15` 重新生成：反转层暂停、`decision_probability` 不含数字；港股剔除 7 根占位K线并在报告中披露；茅台的过热降级提示恢复显示。`600519.SH_judgment.json` 与 `reply.md` 未改，研判对新结果重新校验为 `VALID`。顺带清除旧示例 JSON 中残留的他人本机绝对路径。
 - 触发器抽成纯函数 `risk.detect_high_conviction_rebound`，计划价位抽成 `risk.high_conviction_plan_levels`，线上与研究回测共用。线上触发口径改为与开发集校准时一致：
   1. `DEEP_OVERSOLD_TURN` 的"拐头"改看 RSI14 是否高于前一根（此前看收盘价是否上涨）；指标快照新增 `momentum.rsi14_prev`。
   2. CN/US 的 `BENCH_SYNC_REBOUND` 改为要求大盘当日涨幅 ≥ 0.3%（此前要求大盘收阳）；港股门槛 0.5% 不变。
