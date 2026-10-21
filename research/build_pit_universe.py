@@ -86,12 +86,16 @@ def main() -> None:
     ap.add_argument("--end", default="2026-10-16")
     ap.add_argument("--top-n", type=int, default=1500)
     ap.add_argument("--rebalance", type=int, default=60)
+    ap.add_argument("--starts", default="", help="按市场覆盖起始日，如 CN=2017-10-24,HK=2018-07-09（留出集 H1 各市场预热完成日不同）")
     ap.add_argument("--output", type=Path, default=ART / "pit_universe.json")
     args = ap.parse_args()
+    starts = {m: args.start for m in ("CN", "HK", "US")}
+    starts.update(dict(kv.split("=", 1) for kv in args.starts.split(",") if kv))
     out = {
         "schema_version": "1.0",
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "start": args.start,
+        "starts_by_market": starts,
         "end": args.end,
         "ranking": "trailing_60_session_mean(close*volume), strictly before rebalance_day",
         "survivorship_bias": "PRESENT(current listings only)",
@@ -99,7 +103,7 @@ def main() -> None:
         "markets": {},
     }
     for market in ("CN", "HK", "US"):
-        info = build_market(market, args.start, args.end, args.top_n, args.rebalance)
+        info = build_market(market, starts[market], args.end, args.top_n, args.rebalance)
         out["markets"][market] = info
         sizes = [len(p["symbols"]) for p in info["periods"]]
         print(f"{market}: files={info['eligible_files']} periods={len(sizes)} "
