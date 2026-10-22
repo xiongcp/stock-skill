@@ -293,3 +293,16 @@ D1 与 H2 前向跟踪：`research/preregistration/preregistration_h2.json`（�
 样本内三个市场的主做多计划都没有超额：CN、US 扣费单笔均值在 0 附近，区间跨 0；相对同日随机挑股、挂同形状单子的移植几何基准，P2b 区间也都跨 0（US 下限 −0.01 最接近，但未过）。HK 扣费单笔均值显著为负，而且比同日随机基准更差，按评级、入场类型分的每一组都为负。自身计划诊断基准下 CN、HK 的超额显著为负。分年份看，只有 CN 2025 与 HK 2024、2025 的 P2b 显著为负，US 2022 显著为正，其余年份区间都跨 0，看不出稳定的方向。
 
 开发区结果不改变线上，也不用于调参；按设计照常冻结预注册 v3 并进入 H1，判定只以 H1 为准。
+
+---
+
+## 10. 冻结记录
+
+- 预注册：`research/preregistration/preregistration_v3_main_plan.json`，sha256 `430cd88732e4e14e722e26b5750216feba7bcfbcd32cfd9ba44e2fa7c156be2d`，登记时间 2026-10-22T04:59:33Z，冻结提交 `be431f2`。
+- `base_commit`：`bf77e618ef4587f908248ff8f1beb777991da3b4`。
+- 冻结文件 35 个：技能全部脚本 23 个、`pyproject.toml` 与 `uv.lock`、研究侧 10 个（行情加载、PIT 切片、统计、主计划两遍管线、守卫与预注册脚本）；数据文件 2 个：`pit_universe_h1.json` 与行情缓存清单 `cache/MANIFEST.json`，两者 hash 与 v2 冻结值相同。
+- 登记前主计划运行次数（`trials_before_registration`）：4 次，共评估 4 个配置，均为现行默认规则（3 次冒烟 + 1 次开发区全量）；台账中另有 11 行属于反转层（另一假设）。
+- 开发区证据：`dev_main_plan_v3_metrics.json`（sha256 `a1739e51…`，提交 `509e499`）与 D1 抽样等价核对 `d1_equivalence.json`（sha256 `f138e572…`）。
+- 运行容忍度：扫描出错 0；加载失败按市场 CN 0、HK 10、US 0（第 6.4 节第 8 条）。
+- 守卫自检：`run_h1_main_plan.py --check` 输出"预注册 v3 校验通过（仅校验，未评估 H1）"。冻结时不存在任何 H1 分片目录或结果文件。
+- 冻结前与 main 的关系：PR #7 仍为 OPEN，未合入本分支；开发区运行提交到冻结提交之间，技能脚本只有 `structure.py`（D1）改动。
