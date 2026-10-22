@@ -31,6 +31,15 @@ RESEARCH_FILES = [
 DATA_FILES = ["artifacts/long_backtest/pit_universe_h1.json", "artifacts/long_backtest/cache/MANIFEST.json"]
 DEV_RESULT = ART / "dev_main_plan_v3_metrics.json"
 D1_EQUIVALENCE = ART / "d1_equivalence.json"
+# H1 股票池中按设计会被第一遍跳过的标的（run_dev_region_v2._load_symbol：剔除零成交占位K线后真实K线不足
+# WARMUP_BARS + HORIZON + LIMIT_SESSIONS + 2 = 442 根）。2026-10-21 在冻结的缓存上逐只核对，全部是港股极度冷门标的；
+# 缓存已由清单 hash 固定，这份名单在 H1 运行时不会变。见设计第 6.4 节第 8 条。
+H1_INSUFFICIENT_HISTORY = {
+    "CN": [],
+    "HK": ["00247.HK", "00287.HK", "00458.HK", "00529.HK", "00608.HK",
+           "01005.HK", "01702.HK", "02892.HK", "03869.HK", "04333.HK"],
+    "US": [],
+}
 GATE_DEFS = {
     "P1": "扣费后单笔净收益均值 > 0，且按信号日期分块 bootstrap 95% 下限 > 0（5 日限价成交层，episode 口径）",
     "P2b": "每个信号 episode 的净收益 − 其当日同日随机基准（移植几何）平均净收益，对全部配对取平均；按信号日分块 bootstrap 95% 下限 > 0",
@@ -70,7 +79,12 @@ def build() -> dict:
         "frozen_files_sha256": {f: _sha(ROOT / f) for f in files},
         "frozen_data_sha256": {f: _sha(ROOT / f) for f in DATA_FILES},
         "environment": {"python": platform.python_version(), "numpy": __import__("numpy").__version__},
-        "run_tolerance": {"max_scan_errors": 0, "max_skipped_symbols": 0},
+        "run_tolerance": {
+            "max_scan_errors": 0,
+            "max_skipped_symbols": {m: len(v) for m, v in H1_INSUFFICIENT_HISTORY.items()},
+            "expected_skipped_symbols": H1_INSUFFICIENT_HISTORY,
+            "skipped_reason": "剔除零成交占位K线后真实K线不足 442 根（预热 420 + 持有 15 + 挂单 5 + 2），按设计跳过；不是缓存缺失或损坏",
+        },
         "frozen_specification": {
             "plan": "risk.compute_triple_barrier_plan",
             "plan_source_sha256": hashlib.sha256(inspect.getsource(risk.compute_triple_barrier_plan).encode()).hexdigest(),
@@ -128,6 +142,9 @@ def build() -> dict:
             "交易日历只覆盖 2021 年起，不在本回测路径上",
             "开发区结果在提交 509e499 上运行，早于缺陷修复 D1（cf51a1d，支撑阶梯剔除不为正的价位）；H1 在修复后的代码上运行。"
             "D1 未重跑开发区，改用抽样等价核对（d1_equivalence.json）：每市场随机 2,000 个股票-日与 2,000 个信号，信号无一变化",
+            "H1 港股池有 10 只标的按设计不参与评估：" + "、".join(H1_INSUFFICIENT_HISTORY["HK"])
+            + "。它们是极度冷门的港股，剔除零成交占位K线后真实K线不足 442 根，算不出 420 根预热；CN、US 没有此类标的。"
+            "加载失败容忍度按市场登记为 CN 0、HK 10、US 0",
         ],
     }
 

@@ -31,7 +31,9 @@ def test_prereg_v3_detects_tampering(tmp_path) -> None:
     assert "kline-structure-chart/uv.lock" in prereg["frozen_files_sha256"]
     assert "kline-structure-chart/pyproject.toml" in prereg["frozen_files_sha256"]
     assert prereg["environment"]["numpy"] and prereg["environment"]["python"]
-    assert prereg["run_tolerance"] == {"max_scan_errors": 0, "max_skipped_symbols": 0}
+    assert prereg["run_tolerance"]["max_scan_errors"] == 0
+    assert prereg["run_tolerance"]["max_skipped_symbols"] == {"CN": 0, "HK": 10, "US": 0}
+    assert all(s in prereg["disclosures"][-1] for s in prereg["run_tolerance"]["expected_skipped_symbols"]["HK"])
     path = tmp_path / "prereg.json"
     path.write_text(json.dumps(prereg), encoding="utf-8")
     _, problems = h1.verify_preregistration(path, check_git=False)
@@ -80,11 +82,31 @@ def test_cache_files_checked_against_manifest(tmp_path) -> None:
 
 
 def test_scan_tolerance_blocks_judgment_on_shrunken_sample() -> None:
-    ok = {"CN": {"errors": 0, "skipped_symbols": 0}, "US": {"errors": 0, "skipped_symbols": 0}}
-    assert g3.check_scan_tolerance(ok, {"max_scan_errors": 0, "max_skipped_symbols": 0}) == []
-    bad = {**ok, "HK": {"errors": 3, "skipped_symbols": 1}}
-    problems = g3.check_scan_tolerance(bad, {"max_scan_errors": 0, "max_skipped_symbols": 0})
+    tol = {"max_scan_errors": 0, "max_skipped_symbols": {"CN": 0, "HK": 10, "US": 0}}
+    ok = {"CN": {"errors": 0, "skipped_symbols": 0}, "HK": {"errors": 0, "skipped_symbols": 10},
+          "US": {"errors": 0, "skipped_symbols": 0}}
+    assert g3.check_scan_tolerance(ok, tol) == []
+    bad = {**ok, "HK": {"errors": 3, "skipped_symbols": 11}}
+    problems = g3.check_scan_tolerance(bad, tol)
     assert len(problems) == 2 and all("HK" in p for p in problems)
+    # 容忍度按市场登记：港股的 10 只不能挪给其他市场用，未登记的市场按 0 处理
+    assert any("CN" in p for p in g3.check_scan_tolerance({"CN": {"errors": 0, "skipped_symbols": 1}}, tol))
+    assert g3.check_scan_tolerance({"XX": {"errors": 0, "skipped_symbols": 1}}, tol) != []
+
+
+def test_registered_skips_match_frozen_h1_cache() -> None:
+    """预注册登记的按设计跳过名单，必须与 _load_symbol 的历史不足条件在冻结缓存上的结果逐只相同。
+    只读取缓存、统计剔除占位K线后的根数，不计算任何指标、计划或收益。"""
+    import run_dev_region_v2 as v2
+    import write_preregistration_v3_main_plan as wp3
+    from common import adjusted_bars, load_cache
+
+    need = v2.WARMUP_BARS + v2.HORIZON + v2.LIMIT_SESSIONS + 2
+    universe = json.loads(v2.H1_UNIVERSE.read_text(encoding="utf-8"))["markets"]
+    for market, expected in wp3.H1_INSUFFICIENT_HISTORY.items():
+        symbols = sorted({s for p in universe[market]["periods"] for s in p["symbols"]})
+        short = [s for s in symbols if len(adjusted_bars(load_cache(market, s), mode="total_return")[1]) < need]
+        assert short == expected, market
 
 
 def test_stale_h1_scan_dirs_detected(tmp_path) -> None:

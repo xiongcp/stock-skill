@@ -69,8 +69,10 @@ def check_scan_tolerance(stats_by_market: dict[str, dict], tolerance: dict) -> l
     for market, st in stats_by_market.items():
         if st["errors"] > tolerance["max_scan_errors"]:
             problems.append(f"{market} 第一遍扫描出错 {st['errors']} 个股票-日，超过容忍度 {tolerance['max_scan_errors']}")
-        if st["skipped_symbols"] > tolerance["max_skipped_symbols"]:
-            problems.append(f"{market} 有 {st['skipped_symbols']} 只标的无法加载，超过容忍度 {tolerance['max_skipped_symbols']}")
+        # 加载失败容忍度按市场登记（预注册列出了按设计跳过的标的及原因），未登记的市场为 0
+        limit = tolerance["max_skipped_symbols"].get(market, 0)
+        if st["skipped_symbols"] > limit:
+            problems.append(f"{market} 有 {st['skipped_symbols']} 只标的无法加载，超过容忍度 {limit}")
     return problems
 
 
