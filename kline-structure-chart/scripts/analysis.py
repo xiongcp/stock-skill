@@ -3,13 +3,13 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from contract_v6 import SCHEMA_VERSION
 from contracts import (
     AnalysisReport,
     AnalysisRequest,
     MarketDataBundle,
     assess_data_quality,
     compute_canonical_hash,
-    validate_report,
 )
 from forecast import compute_conformal_forecast
 from indicators import compute_all_indicators
@@ -521,7 +521,7 @@ def analyze_bundle(
     }
 
     report: AnalysisReport = {
-        "schema_version": "5.3.0",
+        "schema_version": SCHEMA_VERSION,
         "meta": meta,
         "request": request,
         "market_benchmark": benchmark_info,
@@ -563,7 +563,7 @@ def analyze_bundle(
             "forecast_promotion_status": future_proj["promotion_status"],
         },
         "reproducibility": {
-            "engine_version": "5.3.0",
+            "engine_version": SCHEMA_VERSION,
             "bars_hash": compute_canonical_hash([(b["day"], b["close"]) for b in completed[-120:]]),
             "report_hash": "",
         },
@@ -618,6 +618,4 @@ def analyze_bundle(
             "q50": report["future_projection_15d"]["base_median_q50"],
         }
     )
-    if include_forecast:
-        validate_report(report)
     return report

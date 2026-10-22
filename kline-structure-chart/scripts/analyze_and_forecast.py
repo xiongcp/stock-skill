@@ -2,11 +2,12 @@
 """多市场 (A股/港股/美股 · 大盘+个股) K线数学结构、三重屏障风控与15日保形预测同源双出入口。
 
 一次运行同时产出：
-1. result.json        — 通过 assets/analysis.schema.json 顶层契约校验的指标、形态公式证据、三重屏障与15步分位区间
-2. preview.png        — 供 AI 聊天窗口直接内嵌展示的 1920x1160 高清结构与预测图
-3. dashboard.html     — 零外部依赖、支持图层开关、悬停查看 OHLC/均线/RSI/分位、相对强弱切换与时间推演回放的单文件交互终端
-4. backtest.json      — (当传入 --backtest 时) 因果回放审计、线上计划逐日回放回测与分位区间覆盖率审计
-5. report.md          — 按 SKILL.md 回复契约组织的中文分析报告，数字全部取自 result.json（与 backtest.json）
+1. result.json        — v6 稳定契约：通过 assets/analysis.schema.json 全量校验的结论、结构、指标、情景、计划与正常波动范围
+2. chart_data.json    — 渲染数据（K线、拐点、背景层、路径点与回放快照），非稳定接口，只供本技能的 PNG/HTML 渲染器读取
+3. preview.png        — 供 AI 聊天窗口直接内嵌展示的 1920x1160 高清结构与预测图
+4. dashboard.html     — 零外部依赖、支持图层开关、悬停查看 OHLC/均线/RSI/分位、相对强弱切换与时间推演回放的单文件交互终端
+5. backtest.json      — (当传入 --backtest 时) 因果回放审计、线上计划逐日回放回测与分位区间覆盖率审计
+6. report.md          — 按 SKILL.md 回复契约组织的中文分析报告，数字全部取自 result.json（与 backtest.json）
 """
 from __future__ import annotations
 
@@ -17,7 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from analysis import analyze_bundle
-from contracts import AnalysisRequest, sanitize_filename, validate_report
+from contract_v6 import SCHEMA_VERSION, artifact_files, build_chart_data, build_result
+from contracts import AnalysisRequest, sanitize_filename, validate_chart_data, validate_report
 from data_gateway import load_bundle
 from evaluation import run_causal_replay_audit, run_plan_backtest
 from market_rules import price_decimals, round_to_tick
@@ -73,9 +75,8 @@ def run_pipeline(
     meta = report["meta"]
     quality = report["quality"]
     safe_sym = sanitize_filename(meta["symbol"])
-    png_path = output_dir / f"{safe_sym}_preview.png"
-    html_path = output_dir / f"{safe_sym}_dashboard.html"
-    json_path = output_dir / f"{safe_sym}_result.json"
+    files = artifact_files(safe_sym, has_backtest=run_backtest)
+    paths = {key: output_dir / name for key, name in files.items()}
 
     title = (
         f"{meta['name']} ({meta['symbol']}) · 近{request.get('display_bars', 120)}日数学结构与未来{request.get('horizon_bars', 15)}日推演"
@@ -84,7 +85,7 @@ def run_pipeline(
         bundle["target"]["bars"],
         bundle["target"].get("intraday"),
         title,
-        png_path,
+        paths["preview_png"],
         show=int(request.get("display_bars") or 120),
         data_source=str(meta["data_source"]),
         data_warning="；".join(quality["warnings"]) if quality["status"] != "OK" else None,
@@ -96,11 +97,7 @@ def run_pipeline(
         volume_profile=report.get("volume_profile"),
     )
     report["legacy_summary"] = legacy_summary
-    report["rendered_paths"] = {
-        "result_json": str(json_path.resolve()),
-        "preview_png": str(png_path.resolve()),
-        "dashboard_html": str(html_path.resolve()),
-    }
+    report["rendered_paths"] = {key: str(p.resolve()) for key, p in paths.items()}
 
     bt_payload: dict[str, Any] | None = None
     if run_backtest:
@@ -111,24 +108,24 @@ def run_pipeline(
             step=backtest_step,
         )
         causal_audit = run_causal_replay_audit(bundle["target"]["bars"])
-        bt_path = output_dir / f"{safe_sym}_backtest.json"
         bt_payload = {
+            "schema_version": SCHEMA_VERSION,
             "symbol": meta["symbol"],
             "market": meta["market"],
             "causal_replay_audit": causal_audit,
             "backtest": bt_res,
         }
-        bt_path.write_text(json.dumps(bt_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        report["rendered_paths"]["backtest_json"] = str(bt_path.resolve())
+        paths["backtest_json"].write_text(json.dumps(bt_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    md_path = output_dir / f"{safe_sym}_report.md"
-    report["rendered_paths"]["report_md"] = str(md_path.resolve())
-
-    validate_report(report)
-    render_html(report, html_path)
-    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 面向回答的中文 Markdown 报告：数字全部取自上面的 JSON，供 agent 直接转述
-    md_path.write_text(render_report_markdown(report, bt_payload), encoding="utf-8")
+    result = build_result(report, files)
+    chart = build_chart_data(report)
+    validate_report(result)
+    validate_chart_data(chart)
+    render_html(report, paths["dashboard_html"])  # Task B8 改为读 v6
+    paths["result_json"].write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    paths["chart_data_json"].write_text(json.dumps(chart, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    # 面向回答的中文 Markdown 报告：数字全部取自 result.json，供 agent 直接转述
+    paths["report_md"].write_text(render_report_markdown(report, bt_payload), encoding="utf-8")  # Task B8 改为读 v6
     return report
 
 

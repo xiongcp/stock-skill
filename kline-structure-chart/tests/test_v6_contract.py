@@ -78,3 +78,84 @@ def test_scenario_fan_removed(replay_recorded, tmp_path: Path) -> None:
     assert 'data-layer="scenario_fan"' not in html_text and "情景混合" not in html_text
     md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
     assert "情景混合" not in md
+
+
+from conftest import load_v6  # noqa: E402
+
+V6_TOP = {
+    "schema_version", "meta", "quality", "verdict", "market_context", "structure", "indicators",
+    "scenarios", "plan", "volatility_range", "quotable_prices", "files", "reproducibility",
+}
+FORBIDDEN_KEY_PARTS = ("probability", "frequency", "freq", "high_conviction", "judgment", "brier", "analogue")
+
+
+def _walk_keys(obj, path="$"):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield f"{path}.{k}", k
+            yield from _walk_keys(v, f"{path}.{k}")
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            yield from _walk_keys(v, f"{path}[{i}]")
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    ("market", "symbol", "asset_type"),
+    [
+        ("CN", "600519.SH", "equity"),
+        ("CN", "000001.SH", "index"),
+        ("HK", "00700.HK", "equity"),
+        ("US", "NVDA.US", "equity"),
+        ("US", "SPY.US", "etf"),
+    ],
+)
+def test_v6_result_validates_and_fits_budget(replay_recorded, tmp_path: Path, market, symbol, asset_type) -> None:
+    from contracts import validate_report
+
+    rep = run_pipeline({"symbol": symbol, "market": market, "asset_type": asset_type, **REQ_BASE}, output_dir=tmp_path)
+    result, chart = load_v6(rep)
+    validate_report(result)
+    assert set(result) == V6_TOP
+    assert result["schema_version"] == "6.0.0"
+    assert result["meta"]["timezone"] in ("Asia/Shanghai", "Asia/Hong_Kong", "America/New_York")
+    assert all(not Path(p).is_absolute() for p in result["files"].values())
+    assert (tmp_path / result["files"]["chart_data_json"]).exists()
+    assert len(chart["bars"]) == REQ_BASE["display_bars"]
+    size = Path(rep["rendered_paths"]["result_json"]).stat().st_size
+    assert size <= 80 * 1024, f"result.json {size} 字节超过 80 KB 预算"
+    bad = [p for p, k in _walk_keys(result) if any(part in k.lower() for part in FORBIDDEN_KEY_PARTS)]
+    assert not bad, f"result.json 含预测性字段: {bad[:5]}"
+
+
+def test_v6_result_validates_without_benchmark(tmp_path: Path) -> None:
+    from conftest import load_recorded
+    from contracts import validate_report
+
+    bars_file = tmp_path / "600519_bars.json"
+    rows = load_recorded("sina_daily/sh600519.json")
+    bars_file.write_text(json.dumps([{k: r[k] for k in ("day", "open", "high", "low", "close", "volume")} for r in rows]))
+    rep = run_pipeline(
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "name": "贵州茅台", **REQ_BASE},
+        output_dir=tmp_path / "out", input_path=bars_file, allow_network=False,
+    )
+    result, _ = load_v6(rep)
+    validate_report(result)
+    assert result["quality"]["status"] == "PARTIAL"
+    assert result["market_context"]["benchmark_missing"] is True
+
+
+def test_v6_schema_marks_stability_and_rejects_unknown_fields() -> None:
+    from contracts import load_report_schema, schema_errors
+
+    schema = load_report_schema()
+    assert schema["additionalProperties"] is False
+    for key, sub in schema["properties"].items():
+        assert sub.get("x-stability") in ("stable", "experimental"), key
+        for child, child_schema in (sub.get("properties") or {}).items():
+            assert child_schema.get("x-stability") in ("stable", "experimental"), f"{key}.{child}"
+    errs = schema_errors({"schema_version": "6.0.0", "surprise": 1}, schema)
+    assert any("未声明的字段 surprise" in e for e in errs)
+    assert any("缺少必填字段 verdict" in e for e in errs)
+    assert schema_errors(1.5, {"type": "integer"}) and not schema_errors(2, {"type": "number"})
+    assert schema_errors(True, {"type": "number"})

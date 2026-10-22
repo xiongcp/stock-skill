@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from contracts import AnalysisReport, validate_report
+from contracts import AnalysisReport
 
 
 def _safe_json_for_script(data: Any) -> str:
@@ -40,7 +40,6 @@ def _render_quality_banner(quality: dict[str, Any]) -> str:
 
 def render_html(report: AnalysisReport, output_path: Path) -> Path:
     """将已通过 Schema 校验的 AnalysisReport 渲染为零外部依赖、断网双击即开的单文件交互式 HTML 终端。"""
-    validate_report(report)
     meta = report["meta"]
     horizon_n = int((report.get("future_projection_15d") or {}).get("horizon_bars") or 15)
     title_str = html.escape(f"{meta['name']} ({meta['symbol']}) · K线数学结构与{horizon_n}日保形预测终端")

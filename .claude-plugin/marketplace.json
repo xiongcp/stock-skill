@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "A股 / 港股 / 美股 K 线结构分析技能（真实行情、JSON + PNG + 离线 HTML）",
-    "version": "5.3.0"
+    "version": "6.0.0"
   },
   "plugins": [
     {

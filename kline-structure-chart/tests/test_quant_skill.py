@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 from PIL import Image
-from conftest import RECORDED_DIR, load_recorded
+from conftest import RECORDED_DIR, load_recorded, load_v6
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
@@ -70,19 +70,22 @@ UTC = timezone.utc
 
 
 def test_contracts_reject_nan_and_quantile_crossing(replay_recorded) -> None:
+    from contract_v6 import artifact_files, build_result
+
     bundle = load_bundle(
         {"symbol": "000001.SH", "market": "CN", "asset_type": "index", "display_bars": 120, "horizon_bars": 15}
     )
     report = analyze_bundle(bundle, {"symbol": "000001.SH", "display_bars": 120, "horizon_bars": 15}, include_replay=False)
-    validate_report(report)
+    result = build_result(report, artifact_files("000001.SH", has_backtest=False))
+    validate_report(result)
 
-    bad_nan = json.loads(json.dumps(report))
-    bad_nan["multi_timeframe_score"]["rule_score"] = float("nan")
+    bad_nan = json.loads(json.dumps(result))
+    bad_nan["verdict"]["rule_score"] = float("nan")
     with pytest.raises(ValueError, match="Non-finite float"):
         validate_report(bad_nan)
 
-    bad_q = json.loads(json.dumps(report))
-    bad_q["future_projection_15d"]["q25"][0] = bad_q["future_projection_15d"]["optimistic_q75"][0] + 10.0
+    bad_q = json.loads(json.dumps(result))
+    bad_q["volatility_range"]["q25"][0] = bad_q["volatility_range"]["q75"][0] + 10.0
     with pytest.raises(ValueError, match="Quantile crossing"):
         validate_report(bad_q)
 
@@ -299,7 +302,7 @@ def test_multi_market_pipeline_and_backtest(
     assert Path(paths["backtest_json"]).exists()
 
     # T-04：强语义与数值断言
-    assert report["schema_version"] == "5.3.0"
+    assert report["schema_version"] == "6.0.0"
     assert report["quality"]["status"] == "OK"
     assert report["quality"]["data_source_class"] == "LIVE"
     assert report["meta"]["color_scheme"] == expected_scheme
@@ -738,7 +741,7 @@ def test_c04_c05_c10_backtest_replays_live_plan_with_bootstrap_ci(replay_recorde
 
 
 @pytest.mark.slow
-def test_c06_v5_pipeline_is_days_invariant(replay_recorded, tmp_path: Path) -> None:
+def test_c06_pipeline_is_days_invariant(replay_recorded, tmp_path: Path) -> None:
     keys = (
         "meta",
         "market_benchmark",
@@ -757,6 +760,7 @@ def test_c06_v5_pipeline_is_days_invariant(replay_recorded, tmp_path: Path) -> N
         "replay_snapshots",
     )
     sigs = {}
+    v6_sigs = {}
     for days in (60, 120, 300, 500):
         rep = run_pipeline(
             {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": days, "structure_bars": 120, "horizon_bars": 15},
@@ -765,7 +769,12 @@ def test_c06_v5_pipeline_is_days_invariant(replay_recorded, tmp_path: Path) -> N
         sigs[days] = {k: rep[k] for k in keys}
         sigs[days]["report_hash"] = rep["reproducibility"]["report_hash"]
         assert len(rep["series_export"]["bars"]) == days
+        result, _ = load_v6(rep)
+        result["meta"]["request"].pop("display_bars", None)
+        result["quality"].pop("display_bars", None)
+        v6_sigs[days] = result
     assert sigs[60] == sigs[120] == sigs[300] == sigs[500]
+    assert v6_sigs[60] == v6_sigs[120] == v6_sigs[300] == v6_sigs[500]
 
 
 def test_c06_fetch_length_does_not_depend_on_days(monkeypatch: pytest.MonkeyPatch, replay_recorded) -> None:
@@ -1058,27 +1067,30 @@ def test_r08_hstech_uses_real_index_not_etf_proxy(replay_recorded) -> None:
 
 
 def test_p2_schema_file_drives_report_validation(monkeypatch: pytest.MonkeyPatch, replay_recorded) -> None:
+    from contract_v6 import artifact_files, build_result
+
     report = analyze_bundle(
         load_bundle({"symbol": "600519.SH", "market": "CN", "asset_type": "equity"}),
         {"symbol": "600519.SH", "display_bars": 120, "horizon_bars": 15},
         include_replay=False,
     )
-    validate_report(report)
+    result = build_result(report, artifact_files("600519.SH", has_backtest=False))
+    validate_report(result)
     schema = contracts.load_report_schema()
     for key in schema["required"]:
-        broken = copy.deepcopy(report)
+        broken = copy.deepcopy(result)
         broken.pop(key)
-        with pytest.raises(ValueError, match=f"Missing required report key: {key}"):
+        with pytest.raises(ValueError, match=f"缺少必填字段 {key}"):
             validate_report(broken)
-    bad_meta = copy.deepcopy(report)
+    bad_meta = copy.deepcopy(result)
     bad_meta["meta"]["color_scheme"] = "rainbow"
-    with pytest.raises(ValueError, match="Invalid meta.color_scheme"):
+    with pytest.raises(ValueError, match="meta.color_scheme"):
         validate_report(bad_meta)
     stricter = copy.deepcopy(schema)
     stricter["required"] = [*schema["required"], "brand_new_section"]
     monkeypatch.setattr(contracts, "load_report_schema", lambda: stricter)
     with pytest.raises(ValueError, match="brand_new_section"):
-        validate_report(report)
+        validate_report(result)
 
 
 # ---------------------------------------------------------------------------

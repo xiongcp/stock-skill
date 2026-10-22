@@ -1,68 +1,225 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AnalysisReport",
+  "title": "AnalysisResult",
+  "description": "kline-structure-chart v6 result.json。6.x 内只新增字段、不删除不改名不改语义；枚举可能新增取值；x-stability=experimental 的字段可在次版本中变动并写入 CHANGELOG。",
   "type": "object",
-  "required": [
-    "schema_version",
-    "meta",
-    "request",
-    "market_benchmark",
-    "mathematical_indicators",
-    "algebraic_patterns_detected",
-    "smc_structures",
-    "volume_profile",
-    "market_regime",
-    "strategy_signals",
-    "multi_timeframe_score",
-    "meta_labeling_decision",
-    "triple_barrier_plan",
-    "rule_scenarios",
-    "future_projection_15d",
-    "debate_and_veto",
-    "quality",
-    "reproducibility"
-  ],
+  "additionalProperties": false,
+  "required": ["schema_version", "meta", "quality", "verdict", "market_context", "structure", "indicators", "scenarios", "plan", "volatility_range", "quotable_prices", "files", "reproducibility"],
   "properties": {
-    "schema_version": { "type": "string", "enum": ["5.3.0"] },
+    "schema_version": { "type": "string", "enum": ["6.0.0"], "x-stability": "stable" },
     "meta": {
-      "type": "object",
-      "required": ["symbol", "name", "market", "asset_type", "currency", "timeframe", "as_of", "color_scheme"],
+      "type": "object", "x-stability": "stable",
+      "required": ["symbol", "name", "market", "asset_type", "currency", "timeframe", "timezone", "as_of", "adjustment", "color_scheme", "price_decimals", "data_source", "engine_version", "request"],
       "properties": {
-        "symbol": { "type": "string", "minLength": 1 },
-        "name": { "type": "string", "minLength": 1 },
-        "market": { "type": "string", "enum": ["CN", "HK", "US"] },
-        "asset_type": { "type": "string", "enum": ["index", "equity", "etf"] },
-        "currency": { "type": "string", "enum": ["CNY", "HKD", "USD"] },
-        "timeframe": { "type": "string", "enum": ["1D", "1W", "60m", "15m"] },
-        "as_of": { "type": "string" },
-        "adjustment": { "type": "string", "enum": ["raw", "split", "total_return"] },
-        "color_scheme": { "type": "string", "enum": ["cn_red_up", "us_green_up"] },
-        "price_decimals": { "type": "integer" }
+        "symbol": { "type": "string", "minLength": 1, "x-stability": "stable" },
+        "name": { "type": "string", "minLength": 1, "x-stability": "stable" },
+        "market": { "type": "string", "enum": ["CN", "HK", "US"], "x-stability": "stable" },
+        "asset_type": { "type": "string", "enum": ["index", "equity", "etf"], "x-stability": "stable" },
+        "currency": { "type": "string", "enum": ["CNY", "HKD", "USD"], "x-stability": "stable" },
+        "timeframe": { "type": "string", "enum": ["1D", "1W", "60m", "15m"], "x-stability": "stable" },
+        "timezone": { "type": "string", "enum": ["Asia/Shanghai", "Asia/Hong_Kong", "America/New_York"], "x-stability": "stable" },
+        "as_of": { "type": "string", "x-stability": "stable" },
+        "adjustment": { "type": "string", "enum": ["raw", "split", "total_return"], "x-stability": "stable" },
+        "color_scheme": { "type": "string", "enum": ["cn_red_up", "us_green_up"], "x-stability": "stable" },
+        "price_decimals": { "type": "integer", "x-stability": "stable" },
+        "data_source": { "type": "string", "x-stability": "stable" },
+        "engine_version": { "type": "string", "x-stability": "stable" },
+        "is_st": { "type": "boolean", "x-stability": "stable" },
+        "is_ipo_no_limit": { "type": "boolean", "x-stability": "stable" },
+        "board_lot": { "type": ["integer", "null"], "x-stability": "stable" },
+        "request": { "type": "object", "x-stability": "stable" }
       }
     },
-    "triple_barrier_plan": {
-      "type": "object",
-      "required": ["entry_zone", "stop_loss_barrier", "take_profit_1", "take_profit_2", "time_barrier_bars", "risk_reward_ratio", "breakeven_ratchet", "market_microstructure", "position_sizing"]
-    },
-    "rule_scenarios": {
-      "type": "object",
-      "required": ["bull", "neutral", "bear", "scenarios"]
-    },
-    "future_projection_15d": {
-      "type": "object",
-      "required": ["horizon_bars", "horizon_dates", "q10", "q25", "base_median_q50", "optimistic_q75", "q90", "conformal_80pct_band", "promotion_status"]
-    },
-    "debate_and_veto": {
-      "type": "object",
-      "required": ["risk_officer_veto", "final_verdict_cn"]
-    },
     "quality": {
-      "type": "object",
-      "required": ["status", "data_source_class", "warnings", "notes"]
+      "type": "object", "x-stability": "stable",
+      "required": ["status", "data_source_class", "warnings", "notes"],
+      "properties": {
+        "status": { "type": "string", "enum": ["OK", "PARTIAL", "UNAVAILABLE"], "x-stability": "stable" },
+        "data_source": { "type": "string", "x-stability": "stable" },
+        "data_source_class": { "type": "string", "enum": ["LIVE", "LOCAL_FILE", "SYNTHETIC", "UNKNOWN"], "x-stability": "stable" },
+        "benchmark_source": { "type": ["string", "null"], "x-stability": "stable" },
+        "benchmark_source_class": { "type": ["string", "null"], "x-stability": "stable" },
+        "warnings": { "type": "array", "items": { "type": "string" }, "x-stability": "stable" },
+        "notes": { "type": "array", "items": { "type": "string" }, "x-stability": "stable" },
+        "provenance_errors": { "type": "array", "x-stability": "experimental" },
+        "completed_bars_total": { "type": "integer", "x-stability": "stable" },
+        "display_bars": { "type": "integer", "x-stability": "stable" },
+        "structure_bars": { "type": "integer", "x-stability": "stable" },
+        "forecast_promotion_status": { "type": "string", "x-stability": "stable" },
+        "placeholder_bars_removed": { "type": "object", "x-stability": "stable" }
+      }
+    },
+    "verdict": {
+      "type": "object", "x-stability": "stable",
+      "required": ["action", "action_cn", "setup_type", "setup_label_cn", "risk_veto", "veto_reasons", "veto_codes", "rule_score", "rating", "rating_cn", "headline_cn"],
+      "properties": {
+        "action": { "type": "string", "x-stability": "stable" },
+        "action_cn": { "type": "string", "x-stability": "stable" },
+        "setup_type": { "type": "string", "x-stability": "stable" },
+        "setup_label_cn": { "type": "string", "x-stability": "stable" },
+        "risk_veto": { "type": "boolean", "x-stability": "stable" },
+        "veto_reasons": { "type": "array", "items": { "type": "string" }, "x-stability": "stable" },
+        "veto_codes": { "type": "array", "items": { "type": "string" }, "x-stability": "stable" },
+        "rule_score": { "type": "number", "x-stability": "stable" },
+        "rating": { "type": "string", "x-stability": "stable" },
+        "rating_cn": { "type": "string", "x-stability": "stable" },
+        "headline_cn": { "type": "string", "x-stability": "stable" },
+        "overextended": { "type": "boolean", "x-stability": "experimental" },
+        "rule_detail": { "type": "object", "x-stability": "experimental" },
+        "strategy_signals": { "type": "array", "x-stability": "experimental" },
+        "anti_quant_traps": { "type": ["object", "null"], "x-stability": "experimental" },
+        "bull_case": { "type": "array", "items": { "type": "string" }, "x-stability": "experimental" },
+        "bear_case": { "type": "array", "items": { "type": "string" }, "x-stability": "experimental" }
+      }
+    },
+    "market_context": {
+      "type": "object", "x-stability": "stable",
+      "required": ["index_symbol", "regime", "regime_score", "relative_strength_vs_index", "benchmark_missing"],
+      "properties": {
+        "index_symbol": { "type": ["string", "null"], "x-stability": "stable" },
+        "index_name": { "type": ["string", "null"], "x-stability": "stable" },
+        "regime": { "type": ["string", "null"], "x-stability": "stable" },
+        "regime_label_cn": { "type": ["string", "null"], "x-stability": "stable" },
+        "regime_score": { "type": ["number", "null"], "x-stability": "stable" },
+        "relative_strength_vs_index": { "type": ["number", "null"], "x-stability": "stable" },
+        "benchmark_missing": { "type": "boolean", "x-stability": "stable" },
+        "source": { "type": ["string", "null"], "x-stability": "stable" },
+        "bench_ret1": { "type": ["number", "null"], "x-stability": "experimental" },
+        "bench_ret5": { "type": ["number", "null"], "x-stability": "experimental" }
+      }
+    },
+    "structure": {
+      "type": "object", "x-stability": "stable",
+      "required": ["last_close", "regime", "key_levels", "support_zone", "resistance_zone", "channel", "fib_levels", "recent_gaps", "abc_scenario", "wave_counts", "patterns", "smc", "volume_profile"],
+      "properties": {
+        "last_close": { "type": "number", "x-stability": "stable" },
+        "regime": { "type": "object", "x-stability": "stable" },
+        "key_levels": { "type": "object", "x-stability": "stable" },
+        "support_zone": { "type": "array", "items": { "type": "number" }, "x-stability": "stable" },
+        "resistance_zone": { "type": "array", "items": { "type": "number" }, "x-stability": "stable" },
+        "channel": { "type": "object", "x-stability": "experimental" },
+        "fib_levels": { "type": "object", "x-stability": "experimental" },
+        "recent_gaps": { "type": "array", "x-stability": "stable" },
+        "abc_scenario": { "type": ["object", "null"], "x-stability": "experimental" },
+        "wave_counts": { "type": "array", "x-stability": "experimental" },
+        "patterns": { "type": "array", "x-stability": "stable" },
+        "smc": { "type": "object", "x-stability": "experimental" },
+        "volume_profile": {
+          "type": "object", "x-stability": "stable",
+          "required": ["poc_price", "vah_price", "val_price"],
+          "properties": {
+            "poc_price": { "type": ["number", "null"], "x-stability": "stable" },
+            "vah_price": { "type": ["number", "null"], "x-stability": "stable" },
+            "val_price": { "type": ["number", "null"], "x-stability": "stable" }
+          }
+        }
+      }
+    },
+    "indicators": {
+      "type": "object", "x-stability": "stable",
+      "required": ["trend", "momentum", "volatility"],
+      "properties": {
+        "trend": { "type": "object", "x-stability": "stable" },
+        "momentum": { "type": "object", "x-stability": "stable" },
+        "volatility": { "type": "object", "x-stability": "stable" },
+        "qlib_factors": { "type": "object", "x-stability": "experimental" }
+      }
+    },
+    "scenarios": {
+      "type": "object", "x-stability": "stable",
+      "required": ["horizon_bars", "breakout_level", "breakdown_level", "paths", "active"],
+      "properties": {
+        "horizon_bars": { "type": "integer", "x-stability": "stable" },
+        "atr_pct": { "type": ["number", "null"], "x-stability": "experimental" },
+        "sigma_1d_pct": { "type": ["number", "null"], "x-stability": "experimental" },
+        "min_trigger_distance_atr": { "type": ["number", "null"], "x-stability": "experimental" },
+        "breakout_level": { "type": "object", "x-stability": "stable" },
+        "breakdown_level": { "type": "object", "x-stability": "stable" },
+        "contested_levels": { "type": "array", "x-stability": "experimental" },
+        "paths": {
+          "type": "object", "x-stability": "stable",
+          "required": ["bull", "neutral", "bear"],
+          "properties": {
+            "bull": { "type": "object", "x-stability": "stable" },
+            "neutral": { "type": "object", "x-stability": "stable" },
+            "bear": { "type": "object", "x-stability": "stable" }
+          }
+        },
+        "active": {
+          "type": "array", "x-stability": "stable",
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "direction", "status", "status_cn", "precondition_met", "trigger", "target_price", "invalidation"]
+          }
+        },
+        "precondition_met_count": { "type": ["integer", "null"], "x-stability": "experimental" },
+        "impulse_wave": { "type": ["object", "null"], "x-stability": "experimental" }
+      }
+    },
+    "plan": {
+      "type": "object", "x-stability": "stable",
+      "required": ["long", "holder_defense", "short"],
+      "properties": {
+        "long": {
+          "type": "object", "x-stability": "stable",
+          "required": ["entry_zone", "stop_loss_barrier", "take_profit_1", "take_profit_2", "time_barrier_bars", "risk_reward_ratio", "breakeven_ratchet", "market_microstructure", "position_sizing"]
+        },
+        "holder_defense": { "type": "object", "x-stability": "stable" },
+        "short": { "type": "object", "x-stability": "stable" }
+      }
+    },
+    "volatility_range": {
+      "type": "object", "x-stability": "stable",
+      "required": ["promotion_status", "horizon_bars", "horizon_dates", "q10", "q25", "q50", "q75", "q90", "band_80"],
+      "properties": {
+        "method": { "type": ["string", "null"], "x-stability": "stable" },
+        "promotion_status": { "type": "string", "x-stability": "stable" },
+        "horizon_bars": { "type": "integer", "x-stability": "stable" },
+        "horizon_dates": { "type": "array", "items": { "type": "string" }, "x-stability": "stable" },
+        "calendar_coverage": { "type": ["object", "null"], "x-stability": "stable" },
+        "q10": { "type": "array", "items": { "type": "number" }, "x-stability": "stable" },
+        "q25": { "type": "array", "items": { "type": "number" }, "x-stability": "stable" },
+        "q50": { "type": "array", "items": { "type": "number" }, "x-stability": "stable" },
+        "q75": { "type": "array", "items": { "type": "number" }, "x-stability": "stable" },
+        "q90": { "type": "array", "items": { "type": "number" }, "x-stability": "stable" },
+        "q50_method": { "type": ["string", "null"], "x-stability": "stable" },
+        "q50_note": { "type": ["string", "null"], "x-stability": "experimental" },
+        "band_50": { "type": ["array", "null"], "x-stability": "stable" },
+        "band_80": { "type": "array", "x-stability": "stable" },
+        "daily_price_limit_pct": { "type": ["number", "null"], "x-stability": "stable" },
+        "volatility_scaling": { "type": ["object", "null"], "x-stability": "experimental" },
+        "calibration_audit": { "type": ["object", "null"], "x-stability": "stable" }
+      }
+    },
+    "quotable_prices": {
+      "type": "object", "x-stability": "stable",
+      "required": ["price_decimals", "tolerance", "prices"],
+      "properties": {
+        "price_decimals": { "type": "integer", "x-stability": "stable" },
+        "tolerance": { "type": "number", "x-stability": "stable" },
+        "prices": { "type": "array", "items": { "type": "number" }, "x-stability": "stable" }
+      }
+    },
+    "files": {
+      "type": "object", "x-stability": "stable",
+      "required": ["result_json", "chart_data_json", "preview_png", "dashboard_html", "report_md"],
+      "properties": {
+        "result_json": { "type": "string", "x-stability": "stable" },
+        "chart_data_json": { "type": "string", "x-stability": "stable" },
+        "preview_png": { "type": "string", "x-stability": "stable" },
+        "dashboard_html": { "type": "string", "x-stability": "stable" },
+        "report_md": { "type": "string", "x-stability": "stable" },
+        "backtest_json": { "type": "string", "x-stability": "stable" }
+      }
     },
     "reproducibility": {
-      "type": "object",
-      "required": ["engine_version", "bars_hash", "report_hash"]
+      "type": "object", "x-stability": "stable",
+      "required": ["engine_version", "bars_hash", "report_hash"],
+      "properties": {
+        "engine_version": { "type": "string", "x-stability": "stable" },
+        "bars_hash": { "type": "string", "x-stability": "stable" },
+        "report_hash": { "type": "string", "x-stability": "stable" }
+      }
     }
   }
 }

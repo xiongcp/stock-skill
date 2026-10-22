@@ -5,7 +5,7 @@ license: MIT
 compatibility: "Requires Python 3.12+ with Pillow (uv recommended but optional: without uv, create .venv from requirements.txt and run .venv/bin/python), plus network access to Sina / Yahoo / Tencent market-data endpoints. Without live data the scripts exit with [DATA_UNAVAILABLE] instead of fabricating prices."
 metadata:
   author: "承鹏 (chengpeng), Qoder Quant Engine"
-  version: "5.3.0"
+  version: "6.0.0"
 ---
 
 # K 线数学结构分析（A股 / 港股 / 美股）

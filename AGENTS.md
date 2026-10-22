@@ -71,6 +71,7 @@ kline-structure-chart/
 │   └── analysis.schema.json          # AnalysisReport 顶层契约（contracts.validate_report 以它为唯一来源）
 ├── scripts/
 │   ├── analyze_and_forecast.py       # 主 CLI：取数 -> 结构层 -> 分析 -> JSON+PNG+HTML (+回测)
+│   ├── contract_v6.py                # 内部报告 → v6 result.json / chart_data.json 投影、产物文件名、SCHEMA_VERSION
 │   ├── contracts.py                  # TypedDict 契约、数据来源枚举与质量判定、NaN/分位单调校验、安全文件名
 │   ├── market_rules.py               # CN/HK/US 日历、涨跌停、价位表、印花税、收盘判定、代码映射与点位复权
 │   ├── data_gateway.py               # 新浪/Yahoo/腾讯取数、厂商数据校验、除权除息事件、腾讯快照补全简称/ST/港股每手股数、未收盘K线拆分、基准配对

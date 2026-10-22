@@ -339,6 +339,7 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 | --- | --- |
 | `*_report.md` | 中文分析报告，依次为：数据说明、风控否决、结论、大盘、结构与条件推演、风控计划、形态证据、未来区间、回测、文件路径、免责声明。数字全部取自 `*_result.json` |
 | `*_result.json` | 全部计算结果（通过 `assets/analysis.schema.json` 契约校验） |
+| `*_chart_data.json` | K 线序列、回放快照等渲染数据；不是稳定接口 |
 | `*_preview.png` | 1920×1160 结构推演图；数据有问题时带红色告警和水印 |
 | `*_dashboard.html` | 离线交互看板：9 个图层开关、悬停查看数值、相对强弱视图、历史回放滑块、导出 PNG |
 | `*_backtest.json` | 历史计划回放回测与无前视审计（传 `--backtest` 时生成） |

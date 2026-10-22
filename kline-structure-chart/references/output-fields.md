@@ -7,6 +7,26 @@
 - "可空"一栏为"是"的字段可能为 `null`，表示该项没有数据，**不得自行补数**。
 - `assets/analysis.schema.json` 是顶层结构的契约，`contracts.validate_report` 以它为准并拦截 `NaN` / `Infinity`。顶层必有字段：`schema_version`、`meta`、`request`、`market_benchmark`、`mathematical_indicators`、`algebraic_patterns_detected`、`smc_structures`、`volume_profile`、`market_regime`、`strategy_signals`、`multi_timeframe_score`、`meta_labeling_decision`、`triple_barrier_plan`、`rule_scenarios`、`future_projection_15d`、`debate_and_veto`、`quality`、`reproducibility`。
 
+## v6 顶层字段
+
+`*_result.json` 自 6.0.0 起为稳定契约，顶层固定为下表 13 个字段；6.x 内只新增字段，不删除、不改名、不改语义。
+
+| 字段 | 内容 |
+| --- | --- |
+| `schema_version` | `"6.0.0"` |
+| `meta` | 标的、市场、币种、`timezone`、`as_of`、复权、价格精度、数据源、`engine_version`、`request` |
+| `quality` | `status`、`warnings`、`notes`、数据源分类、占位K线剔除等 |
+| `verdict` | 一眼结论：`action`、`action_cn`、`setup_type`、`risk_veto`、`veto_reasons`、`veto_codes`、`rule_score`、`rating_cn`、`headline_cn`；明细标为 experimental |
+| `market_context` | 基准代码与名称、`regime`、`regime_score`、`relative_strength_vs_index` |
+| `structure` | 本标的体制、关键价位与支撑阻力阶梯、通道/楔形、斐波那契、浪型计数、形态、SMC、Volume Profile 的 POC/VAH/VAL、近期缺口 |
+| `indicators` | 趋势、动量、波动率指标快照；量价因子标为 experimental |
+| `scenarios` | 2~5 个活跃情景：类型、状态、触发条件、目标位、失效条件、前提是否成立；不含任何频率或用时统计 |
+| `plan` | `long`（入场区、止损、TP1/TP2、时间屏障、移动保本、仓位）、`holder_defense`、`short` |
+| `volatility_range` | 以最新收盘价为中心的分期限分位区间与样本外覆盖率审计，表述为"正常波动范围" |
+| `quotable_prices` | 回复中允许引用的全部价位与容差，供 `lint_response.py` 与 agent 使用 |
+| `files` | 各产物相对于 `--output-dir` 的路径 |
+| `reproducibility` | `engine_version`、`bars_hash`、`report_hash` |
+
 ## 1. 版本、标的与请求
 
 | 字段 | 含义 | 单位 / 取值 | 可空 | 对外怎么说 |

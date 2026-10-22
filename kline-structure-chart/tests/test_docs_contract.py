@@ -99,7 +99,8 @@ def test_readme_cli_parameters_and_outputs_match_code() -> None:
         assert f"[{label}]" in cli, f"README 提到的错误前缀 [{label}] 在 CLI 中不存在"
     outputs = text.split("## 6.", 1)[1].split("## 7.", 1)[0]
     documented_files = set(re.findall(r"`\*(_\w+\.\w+)`", outputs))
-    actual_files = set(re.findall(r'f"\{safe_sym\}(_\w+\.\w+)"', cli))
+    contract_py = (SKILL_DIR / "scripts" / "contract_v6.py").read_text(encoding="utf-8")
+    actual_files = set(re.findall(r'f"\{safe_sym\}(_\w+\.\w+)"', contract_py))
     assert documented_files == actual_files, f"README 产物表与 CLI 不同步：{documented_files ^ actual_files}"
 
 
@@ -183,9 +184,22 @@ def test_versions_are_in_sync() -> None:
     assert fields["metadata"]["version"] == version  # type: ignore[index]
     schema = json.loads((SKILL_DIR / "assets" / "analysis.schema.json").read_text(encoding="utf-8"))
     assert schema["properties"]["schema_version"]["enum"] == [version]
-    analysis_py = (SKILL_DIR / "scripts" / "analysis.py").read_text(encoding="utf-8")
-    assert f'"schema_version": "{version}"' in analysis_py
-    assert f'"engine_version": "{version}"' in analysis_py
+    contract_py = (SKILL_DIR / "scripts" / "contract_v6.py").read_text(encoding="utf-8")
+    assert f'SCHEMA_VERSION = "{version}"' in contract_py
+    marketplace = json.loads((REPO_DIR / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+
+    def _versions(obj):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if k == "version":
+                    yield v
+                yield from _versions(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                yield from _versions(v)
+
+    found = list(_versions(marketplace))
+    assert found and all(v == version for v in found), found
 
 
 # 已核实未实现或已移除的能力，任何文档、注释与界面文案都不得再宣称
