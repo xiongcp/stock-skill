@@ -482,15 +482,6 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     li.textContent = '[空头证伪/风险] ' + item;
     debList.appendChild(li);
   }});
-  const conflictSignals = (REPORT.judgment_pack && REPORT.judgment_pack.conflicting_signals) ? REPORT.judgment_pack.conflicting_signals : [];
-  conflictSignals.forEach(function(c) {{
-    const li = document.createElement('li');
-    const bullIds = (c.bullish_evidence_ids || []).join(', ') || '—';
-    const bearIds = (c.bearish_evidence_ids || []).join(', ') || '—';
-    li.textContent = '[冲突信号 ' + (c.id || 'C?') + '] ' + (c.summary_cn || '') +
-      '（偏多证据：' + bullIds + '；偏空/风控证据：' + bearIds + '）';
-    debList.appendChild(li);
-  }});
   const aqWarnings = (dec.anti_quant_traps && dec.anti_quant_traps.warnings_cn) ? dec.anti_quant_traps.warnings_cn : [];
   aqWarnings.forEach(function(w) {{
     const li = document.createElement('li');

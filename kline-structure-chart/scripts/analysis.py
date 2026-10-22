@@ -13,7 +13,6 @@ from contracts import (
 )
 from forecast import compute_conformal_forecast
 from indicators import compute_all_indicators
-from judgment import build_judgment_pack
 from market_rules import (
     DEFAULT_BENCHMARKS,
     get_market_microstructure_rules,
@@ -622,8 +621,5 @@ def analyze_bundle(
         }
     )
     if include_forecast:
-        report["judgment_pack"] = build_judgment_pack(report)
         validate_report(report)
-    else:
-        report["judgment_pack"] = {}
     return report

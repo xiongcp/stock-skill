@@ -78,7 +78,6 @@ def run_pipeline(
     png_path = output_dir / f"{safe_sym}_preview.png"
     html_path = output_dir / f"{safe_sym}_dashboard.html"
     json_path = output_dir / f"{safe_sym}_result.json"
-    jpack_path = output_dir / f"{safe_sym}_judgment_pack.json"
 
     title = (
         f"{meta['name']} ({meta['symbol']}) · 近{request.get('display_bars', 120)}日数学结构与未来{request.get('horizon_bars', 15)}日推演"
@@ -101,7 +100,6 @@ def run_pipeline(
     report["legacy_summary"] = legacy_summary
     report["rendered_paths"] = {
         "result_json": str(json_path.resolve()),
-        "judgment_pack_json": str(jpack_path.resolve()),
         "preview_png": str(png_path.resolve()),
         "dashboard_html": str(html_path.resolve()),
     }
@@ -130,7 +128,6 @@ def run_pipeline(
 
     validate_report(report)
     render_html(report, html_path)
-    jpack_path.write_text(json.dumps(report["judgment_pack"], ensure_ascii=False, indent=2), encoding="utf-8")
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     # 面向回答的中文 Markdown 报告：数字全部取自上面的 JSON，供 agent 直接转述
     md_path.write_text(render_report_markdown(report, bt_payload), encoding="utf-8")

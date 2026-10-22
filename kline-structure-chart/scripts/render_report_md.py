@@ -40,8 +40,6 @@ def _num(value: Any, digits: int = 2) -> str:
 def render_report_markdown(
     report: dict[str, Any],
     backtest: dict[str, Any] | None = None,
-    judgment: dict[str, Any] | None = None,
-    judgment_score_summary: dict[str, Any] | None = None,
 ) -> str:
     meta = report["meta"]
     quality = report["quality"]
@@ -193,7 +191,7 @@ def render_report_markdown(
             "- 口径说明：历史条件频率是在本标的自身历史上逐日无前视统计的实际观测频率（只消费当时已成熟的样本，与括号内 Wilson 95% 区间同口径）。"
             "它统计的是以触发日 ATR 为单位的**标准化屏障事件**（如「15 根K线内先触及 +1.55×ATR 而非 −1.05×ATR」，各情景定义见 `historical_frequency.event_definition_cn`），"
             "**不是表中目标价的到达频率**；同一情景相邻触发日只间隔 2 根K线，结果期互相重叠，n 高估了独立样本数。"
-            "括号内的「收缩后估计」是低样本（n < 30）时向市场基准做 Beta-Binomial 修正后的模型估计（风控守门与研判锚点使用该值），不是观测频率。"
+            "括号内的「收缩后估计」是低样本（n < 30）时向市场基准做 Beta-Binomial 修正后的模型估计（风控守门使用该值），不是观测频率。"
             "该数字不是交易胜率，也不是未来上涨概率。",
             "",
         ]
@@ -486,101 +484,18 @@ def render_report_markdown(
             ]
         lines += [""]
 
-    # 8. LLM 情景研判（主观判断，已记录待检验）— 与上方确定性计算部分明确分开
-    active_judgment = judgment or report.get("llm_judgment")
-    jpack = report.get("judgment_pack") or {}
-    if active_judgment:
-        from judgment import AUTO_INIT_GENERATOR, judgment_origin
-
-        if judgment_origin(active_judgment, report) == AUTO_INIT_GENERATOR:
-            lines += [
-                "## 8. 情景研判模板（脚本预填，未经 Agent 主观研判）",
-                "",
-                "> **模板声明**：本节由 `validate_judgment.py --auto-init` 按偏多/偏空证据条数机械预填（每情景调整不超过 ±4 个百分点），"
-                "不是 Agent 的主观研判；对外转述时只能称「脚本预填模板」，不得称为主观研判概率。日志中单独标注来源，不计入 LLM 技能分。",
-                "",
-            ]
-        else:
-            lines += [
-                "## 8. LLM 情景研判（主观判断，已记录待检验）",
-                "",
-                "> **主观研判声明**：本节为锚定 L2 历史条件频率的受约束主观研判（非确定性公式计算），调整幅度受样本量上限约束，且已记入日志待到期按 Brier 分数与技能分 BSS 检验。",
-                "",
-            ]
-        lines += [
-            f"- 研判综述：{active_judgment.get('summary_cn', '')}",
-            "",
-            "| 情景 | L2 历史条件频率 | 基准概率（调整前） | 主观研判概率（调整后） | 调整幅度（上限） | 支持证据 | 反对/约束证据 | 调整理由 |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- |",
-        ]
-        for sj in active_judgment.get("scenario_judgments") or []:
-            sup_txt = ", ".join(sj.get("supporting_evidence_ids") or []) or "—"
-            opp_txt = ", ".join(sj.get("opposing_evidence_ids") or []) or "—"
-            l2_disp = sj.get("l2_display_cn") or (
-                f"{sj['l2_historical_frequency_pct']:.1f}%" if sj.get("l2_historical_frequency_pct") is not None else "—"
-            )
-            max_adj = sj.get("max_adjustment_pct", 10.0 if sj.get("low_sample") else 15.0)
-            lines += [
-                f"| {_cell(sj['scenario_name'])} | {_cell(l2_disp)} | {sj['baseline_probability_pct']:.2f}% "
-                f"| **{sj['subjective_probability_pct']:.2f}%** | {sj['adjustment_pct']:+.2f}%（±{max_adj:.0f}%） "
-                f"| {_cell(sup_txt)} | {_cell(opp_txt)} | {_cell(sj.get('rationale_cn', ''))} |"
-            ]
-        lines += [""]
-        kls = active_judgment.get("key_levels_to_watch") or []
-        if kls:
-            kl_bits = [f"{_cell(k['label'])} {price(k['price'])}" for k in kls]
-            lines += [f"- 关键观察价位（均取自 JSON 白名单）：{'；'.join(kl_bits)}。"]
-        if active_judgment.get("falsification_condition"):
-            lines += [f"- 证伪条件（什么情况说明判断错了）：{active_judgment['falsification_condition']}"]
-        for c in jpack.get("conflicting_signals") or []:
-            bull_ids = ", ".join(str(x) for x in (c.get("bullish_evidence_ids") or []))
-            bear_ids = ", ".join(str(x) for x in (c.get("bearish_evidence_ids") or []))
-            lines += [
-                f"- 冲突信号 **{c.get('id', 'C?')}**：{c.get('summary_cn', '')}"
-                f"（偏多证据：{bull_ids or '—'}；偏空/风控证据：{bear_ids or '—'}）"
-            ]
-        score_sum = judgment_score_summary or active_judgment.get("historical_score_summary")
-        if isinstance(score_sum, dict) and score_sum.get("matured_judgments", 0) >= 30:
-            bss_val = float(score_sum.get("brier_skill_score") or 0.0)
-            n_mat = int(score_sum["matured_judgments"])
-            if bss_val > 0.0:
-                lines += [f"- 历史研判评估：LLM 调整相对历史频率的技能分为 {bss_val:+.4f}（n = {n_mat}）。"]
-            else:
-                lines += [f"- 历史研判评估：LLM 调整尚未显示增益（技能分 BSS = {bss_val:+.4f} ≤ 0，n = {n_mat}）。"]
-        lines += [""]
-    elif jpack.get("evidence_items"):
-        evs = jpack["evidence_items"]
-        confs = jpack.get("conflicting_signals") or []
-        lines += [
-            "## 8. LLM 情景研判证据包（供受约束主观研判使用）",
-            "",
-            f"- 已生成结构化证据包（共 {len(evs)} 条可溯源证据 `E1..E{len(evs)}`、{len(confs)} 组冲突信号），"
-            "Agent 按 `references/llm-judgment-protocol.md` 完成 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验后，将在此展示调整前后的主观研判概率。",
-            "",
-        ]
-        for c in confs:
-            bull_ids = ", ".join(str(x) for x in (c.get("bullish_evidence_ids") or []))
-            bear_ids = ", ".join(str(x) for x in (c.get("bearish_evidence_ids") or []))
-            lines += [
-                f"- 冲突信号 **{c.get('id', 'C?')}**：{c.get('summary_cn', '')}"
-                f"（偏多证据：{bull_ids or '—'}；偏空/风控证据：{bear_ids or '—'}）"
-            ]
-        lines += [""]
-
-    # 9. 文件
+    # 8. 文件
     paths = report.get("rendered_paths") or {}
     file_labels = (
         ("report_md", "本报告"),
         ("result_json", "完整计算结果 JSON"),
-        ("judgment_pack_json", "L3 研判证据包 JSON"),
-        ("judgment_json", "L3 主观研判 JSON"),
         ("dashboard_html", "离线交互看板 HTML"),
         ("preview_png", "结构推演图 PNG"),
         ("backtest_json", "回测明细 JSON"),
     )
     listed = [(label, paths[key]) for key, label in file_labels if paths.get(key)]
     if listed:
-        sec_hdr = "## 9. 产物文件" if (active_judgment or jpack.get("evidence_items")) else "## 8. 产物文件"
+        sec_hdr = "## 8. 产物文件"
         lines += [sec_hdr, ""] + [f"- {label}：`{path}`" for label, path in listed] + [""]
 
     lines += ["---", f"*{DISCLAIMER}*", ""]

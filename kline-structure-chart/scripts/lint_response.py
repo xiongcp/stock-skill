@@ -17,8 +17,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from judgment import build_judgment_pack
-from validate_judgment import _CONTEXT_PRICE_RE, _NON_PRICE_PATTERNS, _price_in_whitelist
+from price_text import CONTEXT_PRICE_RE, NON_PRICE_PATTERNS, collect_price_whitelist, price_in_whitelist
 
 _FORBIDDEN_PROB_PHRASES = (
     re.compile(r"(?:多周期)?(?:规则(?:综合)?(?:评分|分)|过滤分|状态分)[^\n。；]{0,16}(?:胜率|上涨概率|置信度|确定性)"),
@@ -51,7 +50,7 @@ _SMALL_SAMPLE_CLAIM_RE = re.compile(
 )
 _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?；;\n]")
 
-# 价格语境（比 validate_judgment 更宽）：交易动作或价位词之后 4 个字符内的数字，以及紧跟交易动作的数字
+# 价格语境（比 CONTEXT_PRICE_RE 更宽）：交易动作或价位词之后 4 个字符内的数字，以及紧跟交易动作的数字
 _LINT_PRICE_AFTER_RE = re.compile(
     r"(?:目标位?|失效位?|止损位?|止盈位?|触发位?|破位价|支撑位?|压力位?|阻力位?|现价|收盘价?|POC|VAH|VAL|TP1|TP2|入场区?|买入|卖出|"
     r"建仓|加仓|减仓|挂单|低吸|抄底|回踩|突破|跌破|站上|站稳|站回|收回|上破|下破|看至|看到|上看|下看|关注|观察位?|参考位?|价位)"
@@ -111,7 +110,7 @@ def lint_agent_response(
 
     # 1. UNAVAILABLE 检查
     if q_status == "UNAVAILABLE":
-        if any(pat.search(text) for pat in (_CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_PRICE_BEFORE_RE)):
+        if any(pat.search(text) for pat in (CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_PRICE_BEFORE_RE)):
             errors.append("quality.status == UNAVAILABLE 时，严禁在回复中输出任何具体价格点位或交易计划")
         return errors
 
@@ -201,8 +200,13 @@ def lint_agent_response(
                     errors.append("小样本回测（n<30）不得被表述为达到/证明 70% 目标或作为充分证据")
 
     # 5. 价格白名单检查（针对带价格语境的数值）
-    pack = report.get("judgment_pack") or build_judgment_pack(report)
-    whitelist = pack["price_whitelist"]
+    meta = report.get("meta") or {}
+    whitelist = collect_price_whitelist(
+        {k: report[k] for k in ("mathematical_indicators", "smc_structures", "volume_profile",
+                                "triple_barrier_plan", "rule_scenarios", "future_projection_15d") if k in report},
+        int(meta.get("price_decimals") or 2),
+        (report.get("series_export") or {}).get("bars") or [],
+    )
     wl_prices: list[float] = [float(p) for p in whitelist.get("prices") or []]
     wl_tol = float(whitelist.get("tolerance") or 0.01)
     wave_only_prices: list[float] = []
@@ -227,7 +231,7 @@ def lint_agent_response(
         valid_target_prices.append(float(rs_obj["impulse_wave"]["wave3_1618_target"]))
 
     cleaned = text
-    for pat in _NON_PRICE_PATTERNS:
+    for pat in NON_PRICE_PATTERNS:
         cleaned = pat.sub(" ", cleaned)
     for m_tp in _TARGET_ROLE_PRICE_RE.finditer(cleaned):
         sent = _sentence_around(cleaned, m_tp.start(), m_tp.end())
@@ -235,12 +239,12 @@ def lint_agent_response(
             continue
         cand_tp = float(m_tp.group(1))
         if (
-            _price_in_whitelist(cand_tp, wave_only_prices, wl_tol)
-            and not _price_in_whitelist(cand_tp, valid_target_prices, wl_tol)
+            price_in_whitelist(cand_tp, wave_only_prices, wl_tol)
+            and not price_in_whitelist(cand_tp, valid_target_prices, wl_tol)
         ):
             errors.append(f"不得把浪型测算位 {cand_tp} 当作目标位/目标价: {m_tp.group(0)!r}")
     seen_spans: set[tuple[int, int]] = set()
-    for pat in (_CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_PRICE_BEFORE_RE):
+    for pat in (CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_PRICE_BEFORE_RE):
         for m in pat.finditer(cleaned):
             span = m.span(1)
             if span in seen_spans:
@@ -248,7 +252,7 @@ def lint_agent_response(
             seen_spans.add(span)
             cand = float(m.group(1))
             msg = f"回复中出现了不在 result.json 白名单中的价格: {m.group(0)!r} ({cand})"
-            if not _price_in_whitelist(cand, wl_prices, wl_tol) and msg not in errors:
+            if not price_in_whitelist(cand, wl_prices, wl_tol) and msg not in errors:
                 errors.append(msg)
 
     # 6. 免责声明检查

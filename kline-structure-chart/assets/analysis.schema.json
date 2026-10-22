@@ -19,7 +19,6 @@
     "rule_scenarios",
     "future_projection_15d",
     "debate_and_veto",
-    "judgment_pack",
     "quality",
     "reproducibility"
   ],
@@ -56,10 +55,6 @@
     "debate_and_veto": {
       "type": "object",
       "required": ["risk_officer_veto", "final_verdict_cn"]
-    },
-    "judgment_pack": {
-      "type": "object",
-      "required": ["symbol", "as_of", "evidence_items", "conflicting_signals", "scenario_anchors", "constraints", "price_whitelist"]
     },
     "quality": {
       "type": "object",

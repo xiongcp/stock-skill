@@ -339,7 +339,6 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 | --- | --- |
 | `*_report.md` | 中文分析报告，依次为：数据说明、风控否决、结论、大盘、结构与条件推演、风控计划、形态证据、未来区间、回测、文件路径、免责声明。数字全部取自 `*_result.json` |
 | `*_result.json` | 全部计算结果（通过 `assets/analysis.schema.json` 契约校验） |
-| `*_judgment_pack.json` | L3 受约束研判证据包（含可溯源证据编号 `E1…En`、冲突信号 `C1…Cm`、L2 情景基准频率与价格白名单） |
 | `*_preview.png` | 1920×1160 结构推演图；数据有问题时带红色告警和水印 |
 | `*_dashboard.html` | 离线交互看板：9 个图层开关、悬停查看数值、相对强弱视图、历史回放滑块、导出 PNG |
 | `*_backtest.json` | 历史计划回放回测与无前视审计（传 `--backtest` 时生成） |
@@ -352,13 +351,12 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 
 ## 7. 怎么读结果
 
-### 7.1 三层量化输出体系（L1 结构 → L2 历史条件频率 → L3 受约束研判）
+### 7.1 两层量化输出体系（L1 结构 → L2 历史条件频率）
 
 | 层级 | 核心产出 | 统计口径与对外表述规范 |
 | --- | --- | --- |
 | **L1 确定性数学结构层** | 轨道拟合形态、主+备选 ABC 浪型、推动 5 浪、8 类标准情景（选 2~5 个活跃情景）、蜡烛/双底双顶/RSI 背离、SMC（FVG/订单块/BOS）、24 桶成交分布（POC/VAH/VAL）、多周期规则分（0~100） | 规则分是确定性条件加权分（均值回归体制下按反转规则调整），**严禁称为胜率或上涨概率**；Volume Profile 是 OHLCV 成交分布近似，不等于真实持仓筹码 |
 | **L2 逐点无前视历史条件频率层** | 在标的自身历史上逐日无前视统计各情景触发后 `horizon_bars` 日内先触及标准化目标屏障（如 `+1.55×ATR`）而非失效屏障（如 `-1.05×ATR`）的实际观测频率 `k/n`、95% Wilson 置信区间与到达用时分位数 | 必须称**"历史条件频率"**并附样本数 `n` 与 95% 区间；当 `n < 30` 时标注"低样本"并通过 Beta-Binomial 向市场基准同情景频率收缩；统计的是 ATR 标准化事件而非图中目标价的到达概率 |
-| **L3 受约束主观研判层** | 基于 `*_judgment_pack.json`（含 `E1…En` 证据溯源、`C1…Cm` 冲突信号与价格白名单），以 L2 归一化频率为锚点做有界调整（`n>=30` 最多 ±15%，`n<30` 最多 ±10%，互斥情景概率和 = 100%） | 必须通过 `validate_judgment.py` 校验并标注**"主观研判，已记录待检验"**；未改写的 `--auto-init` 预填模板标记为 `AUTO_INIT_TEMPLATE`，不计入 LLM 技能分 |
 
 ### 7.2 8 类标准情景库速查（见 [references/scenario-playbook.md](kline-structure-chart/references/scenario-playbook.md)）
 
@@ -373,19 +371,10 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 7. `OVERSOLD_BOUNCE`（超跌反弹）：`RSI14 < 30` 或收盘偏离 `MA20` 超过 `2.0×ATR`；
 8. `APEX_BREAKOUT`（收敛末端变盘）：收敛三角形/楔形距顶点剩余 `0~10` 根 K 线以内且未过期。
 
-### 7.3 L3 受约束主观研判、到期打分与回复校验命令
+### 7.3 回复校验命令
 
 ```bash
-# 1. 生成预填研判模板（供 Agent 在此基础上结合 E1..En 证据改写概率与理由）
-uv run --directory kline-structure-chart python scripts/validate_judgment.py --result artifacts/smoke/600519.SH_result.json --judgment artifacts/smoke/600519.SH_judgment.json --auto-init
-
-# 2. 校验 Agent 改写后的主观研判 JSON，通过后自动合入 result.json / report.md 并追加至 judgment_log.jsonl
-uv run --directory kline-structure-chart python scripts/validate_judgment.py --result artifacts/smoke/600519.SH_result.json --judgment artifacts/smoke/600519.SH_judgment.json
-
-# 3. 对历史已到期（满 horizon_bars 根 K 线）的主观研判进行真实行情回放打分（输出 Brier 分数与技能分 BSS）
-uv run --directory kline-structure-chart python scripts/score_judgments.py --log artifacts/judgment_log.jsonl --bars-dir tests/fixtures/recorded/sina_daily
-
-# 4. 对 Agent 最终输出的自然语言回复执行契约守门校验（拦截捏造价格、违规概率术语、漏报否决/免责声明）
+# 对 Agent 最终输出的自然语言回复执行契约守门校验（拦截捏造价格、违规概率术语、漏报否决/免责声明）
 uv run --directory kline-structure-chart python scripts/lint_response.py --result examples/600519.SH/600519.SH_result.json --response examples/600519.SH/reply.md
 ```
 

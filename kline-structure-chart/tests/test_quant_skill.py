@@ -1501,150 +1501,6 @@ def test_o3_23_and_o3_24_renderers_and_scenario_conditional_fan(replay_recorded,
         assert f"n = {sc_item['historical_frequency']['sample_size']}" in md_text
 
 
-def _shift_two_scenarios(judgment: dict, delta: float) -> dict:
-    """模拟 Agent 在预填模板上改写概率：前两个情景零和互调 delta 个百分点。"""
-    out = copy.deepcopy(judgment)
-    sjs = out["scenario_judgments"]
-    for sj, d in ((sjs[0], delta), (sjs[1], -delta)):
-        sj["subjective_probability_pct"] = round(sj["subjective_probability_pct"] + d, 2)
-        sj["adjustment_pct"] = round(sj["subjective_probability_pct"] - sj["baseline_probability_pct"], 2)
-    out["judgment_type"] = "主观研判"
-    out["summary_cn"] = "主观研判：" + out["summary_cn"]
-    return out
-
-
-def test_o3_30_to_o3_34_judgment_layer_and_scoring(replay_recorded, tmp_path: Path) -> None:
-    from judgment import build_judgment_pack, generate_constrained_judgment, resolve_json_path
-    from render_report_md import render_report_markdown
-    from score_judgments import score_judgment_entries
-    from validate_judgment import append_judgment_log, validate_judgment_data
-
-    rep = run_pipeline(
-        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
-        output_dir=tmp_path,
-        run_backtest=False,
-    )
-    # O3-30: 证据包已生成并落盘，且所有 E1..En 的 json_path 均可在 result.json 中精确定位
-    jp_path = Path(rep["rendered_paths"]["judgment_pack_json"])
-    assert jp_path.exists()
-    pack = json.loads(jp_path.read_text(encoding="utf-8"))
-    assert pack == rep["judgment_pack"]
-    assert len(pack["evidence_items"]) >= 8
-    for ev in pack["evidence_items"]:
-        ok, val = resolve_json_path(rep, ev["json_path"])
-        assert ok is True, f"Unresolved json_path: {ev['json_path']}"
-        assert val == ev["value"]
-        assert "UNDEFINED" not in ev["summary_cn"] and "None" not in ev["summary_cn"]
-    assert len(pack["conflicting_signals"]) >= 1
-    anchors = pack["scenario_anchors"]
-    assert len(anchors) == len(rep["rule_scenarios"]["scenarios"])
-    assert abs(sum(a["baseline_probability_pct"] for a in anchors) - 100.0) <= 0.1
-    assert pack["price_whitelist"]["count"] > 10
-
-    # O3-32: 默认受约束研判通过校验；各项越界/捏造价格/缺失标注均被拦截
-    valid_judgment = generate_constrained_judgment(rep)
-    errs_ok = validate_judgment_data(valid_judgment, rep, pack)
-    assert errs_ok == [], errs_ok
-
-    # 1) 互斥概率之和 != 100% 必须拦截
-    bad_sum = copy.deepcopy(valid_judgment)
-    bad_sum["scenario_judgments"][0]["subjective_probability_pct"] += 5.0
-    errs_bad_sum = validate_judgment_data(bad_sum, rep, pack)
-    assert any("100.0%" in e for e in errs_bad_sum)
-
-    # 2) 单情景调整幅度超过上限（±15% 或低样本 ±10%）必须拦截
-    bad_adj = copy.deepcopy(valid_judgment)
-    if len(bad_adj["scenario_judgments"]) >= 2:
-        bad_adj["scenario_judgments"][0]["subjective_probability_pct"] = round(
-            bad_adj["scenario_judgments"][0]["baseline_probability_pct"] + 18.0, 2
-        )
-        bad_adj["scenario_judgments"][0]["adjustment_pct"] = 18.0
-        bad_adj["scenario_judgments"][1]["subjective_probability_pct"] = round(
-            bad_adj["scenario_judgments"][1]["baseline_probability_pct"] - 18.0, 2
-        )
-        bad_adj["scenario_judgments"][1]["adjustment_pct"] = -18.0
-        errs_bad_adj = validate_judgment_data(bad_adj, rep, pack)
-        assert any("超出上限" in e or "上限" in e for e in errs_bad_adj)
-
-    # 3) 引用不存在的证据编号 E999 必须拦截
-    bad_ev = copy.deepcopy(valid_judgment)
-    bad_ev["scenario_judgments"][0]["supporting_evidence_ids"].append("E999")
-    errs_bad_ev = validate_judgment_data(bad_ev, rep, pack)
-    assert any("E999" in e for e in errs_bad_ev)
-
-    # 4) 在研判理由中捏造不在白名单中的价格数字（如 9876.54）必须拦截
-    bad_price = copy.deepcopy(valid_judgment)
-    bad_price["summary_cn"] += "，预计明天冲高至 9876.54 元。"
-    errs_bad_price = validate_judgment_data(bad_price, rep, pack)
-    assert any("9876.54" in e for e in errs_bad_price)
-
-    # 5) 缺少「主观研判」显式标注必须拦截
-    bad_label = copy.deepcopy(valid_judgment)
-    bad_label["judgment_type"] = "客观概率"
-    errs_bad_label = validate_judgment_data(bad_label, rep, pack)
-    assert any("主观研判" in e for e in errs_bad_label)
-
-    # O3-33: 未改写的 --auto-init 预填模板只能以「脚本预填模板」章节合入报告；Agent 改写概率后才是主观研判章节
-    md_with_j = render_report_markdown(rep, None, valid_judgment)
-    assert "情景研判模板（脚本预填，未经 Agent 主观研判）" in md_with_j
-    assert "LLM 情景研判（主观判断，已记录待检验）" not in md_with_j
-    assert "证伪条件" in md_with_j
-    for sj in valid_judgment["scenario_judgments"]:
-        assert sj["scenario_name"] in md_with_j
-    agent_judgment = _shift_two_scenarios(valid_judgment, 0.5)
-    assert validate_judgment_data(agent_judgment, rep, pack) == []
-    md_agent = render_report_markdown(rep, None, agent_judgment)
-    assert "LLM 情景研判（主观判断，已记录待检验）" in md_agent
-
-    # O3-34: 将历史截面研判写入日志并用真实录制行情回放打分（Brier + 对数损失 + 可靠性分桶 + BSS）
-    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
-    bundle_full = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
-    hist_bundle = copy.deepcopy(bundle_full)
-    hist_bundle["target"]["bars"] = bundle_full["target"]["bars"][:-25]
-    if hist_bundle.get("benchmark") and hist_bundle["benchmark"].get("bars"):
-        hist_bundle["benchmark"]["bars"] = bundle_full["benchmark"]["bars"][:-25]
-    from analysis import analyze_bundle
-
-    hist_rep = analyze_bundle(hist_bundle, req, include_replay=False)
-    hist_judg = generate_constrained_judgment(hist_rep)
-    log_file = tmp_path / "judgment_log.jsonl"
-    tmpl_entry = append_judgment_log(hist_judg, hist_rep, log_file)
-    agent_entry = append_judgment_log(_shift_two_scenarios(hist_judg, 0.5), hist_rep, log_file)
-    assert tmpl_entry["origin"] == "AUTO_INIT_TEMPLATE" and agent_entry["origin"] == "AGENT"
-    entries = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
-    score_res = score_judgment_entries(
-        entries,
-        bars_by_symbol={"600519.SH": bundle_full["target"]["bars"]},
-    )
-    # 未改写的预填模板不计入 LLM 技能分
-    assert score_res["template_judgments_excluded"] == 1
-    assert score_res["matured_judgments"] == 1
-    assert score_res["pending_judgments"] == 0
-    assert score_res["evaluated_scenario_pairs"] >= 2
-    assert 0.0 <= score_res["llm_brier_score"] <= 1.0
-    assert 0.0 <= score_res["baseline_brier_score"] <= 1.0
-    assert score_res["llm_log_loss"] > 0.0
-    assert len(score_res["reliability_buckets"]) == 5
-
-    # 验证未命中任何情景且实际方向相反时不会错误把 scenarios[0] 判为获胜 (winner_id == "NONE")
-    from score_judgments import _determine_realized_outcomes
-
-    bars_all = bundle_full["target"]["bars"]
-    bear_cut = next(
-        i
-        for i in range(200, len(bars_all) - 20)
-        if float(bars_all[i + 15]["close"]) < float(bars_all[i]["close"]) * 0.96
-    )
-    win_none, hits_none = _determine_realized_outcomes(
-        bars_all,
-        bear_cut,
-        15,
-        [{"scenario_id": "TREND_CONTINUATION", "direction": "BULLISH"}],
-    )
-    if hits_none.get("TREND_CONTINUATION", 0) == 0:
-        assert win_none == "NONE"
-
-
 def test_hk_etp_auto_detection_and_stamp_duty_exemption() -> None:
     from market_rules import get_market_microstructure_rules, is_cn_t0_etf, is_daily_bar_complete, is_hk_etp_code
     from resolve_symbol import parse_search_response, to_candidate
@@ -1755,54 +1611,6 @@ def test_regime_adaptive_scoring_and_breakeven_ratchet_boost_moutai_ic_and_winra
     assert bt["long_confirmed"]["cumulative_return_pct"] > 0.0
 
 
-def test_flash_model_digest_and_validate_judgment_auto_init_cli(replay_recorded, tmp_path: Path) -> None:
-    from lint_response import lint_agent_response
-
-    rep = run_pipeline(
-        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
-        output_dir=tmp_path,
-        run_backtest=False,
-    )
-    md_path = Path(rep["rendered_paths"]["report_md"])
-    md_text = md_path.read_text(encoding="utf-8")
-    assert "直出摘要（供 Agent / Flash 模型首段原样引用）" in md_text
-
-    # 即使 Flash 模型仅复制首段「直出摘要」+ 免责声明作为简短回复，也完全符合 lint_response 契约
-    digest_line = next(line for line in md_text.splitlines() if "直出摘要（供 Agent / Flash 模型首段原样引用）" in line)
-    short_reply = f"{digest_line}\n\n*以上为规则化技术分析，仅供研究参考，不构成投资建议。*"
-    assert lint_agent_response(short_reply, rep) == []
-
-    # 验证 validate_judgment.py --auto-init 在目标 *_judgment.json 不存在时一键生成合规研判并更新报告
-    jud_path = tmp_path / "600519_SH_judgment.json"
-    assert not jud_path.exists()
-    cli = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPTS_DIR / "validate_judgment.py"),
-            "--result",
-            rep["rendered_paths"]["result_json"],
-            "--judgment",
-            str(jud_path),
-            "--auto-init",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    assert cli.returncode == 0, cli.stderr
-    out = json.loads(cli.stdout)
-    assert out["status"] == "VALID"
-    assert out["origin"] == "AUTO_INIT_TEMPLATE"
-    assert jud_path.exists()
-    assert json.loads(jud_path.read_text(encoding="utf-8"))["generator"] == "AUTO_INIT_TEMPLATE"
-    updated_md = md_path.read_text(encoding="utf-8")
-    assert "情景研判模板（脚本预填，未经 Agent 主观研判）" in updated_md
-    log_line = json.loads((tmp_path / "judgment_log.jsonl").read_text(encoding="utf-8").splitlines()[-1])
-    assert log_line["origin"] == "AUTO_INIT_TEMPLATE"
-    # 合入预填模板章节后的报告仍须通过回复契约校验
-    assert lint_agent_response(updated_md, rep) == []
-
-
 def test_p0_mean_reversion_rule_score_adjustment_is_disclosed(replay_recorded, tmp_path: Path) -> None:
     """均值回归体制下 rule_score 被旋转：必须保留四组分项合计、改用体制标签并在直出摘要中披露调整前后数值。"""
     rep = run_pipeline(
@@ -1821,57 +1629,6 @@ def test_p0_mean_reversion_rule_score_adjustment_is_disclosed(replay_recorded, t
     md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
     digest = next(line for line in md.splitlines() if "直出摘要" in line)
     assert f"四组规则分项合计 {mtf['components_total']:.1f} 经反转调整为 {mtf['rule_score']:.1f}" in digest
-    e5 = next(e for e in rep["judgment_pack"]["evidence_items"] if e["json_path"] == "multi_timeframe_score.rule_score")
-    assert "均值回归体制" in e5["summary_cn"]
-
-
-def test_p0_falsification_condition_follows_primary_direction() -> None:
-    """证伪条件按主情景方向书写：做空情景不得以「跌破做多止损」为证伪（那是确认）。"""
-    from judgment import build_falsification_text
-
-    alt = {"scenario_name": "假突破回落", "target_price": 1314.37}
-    bull = {"scenario_name": "突破回踩", "direction": "BULLISH", "invalidation_price": 1347.47,
-            "invalidation": "收盘跌回轨道内超过 0.5 个 ATR（跌破 1347.47）", "target_price": 1418.46}
-    bear = {"scenario_name": "破位下行", "direction": "BEARISH", "invalidation_price": 1322.94,
-            "invalidation": "收盘收回破位位 1322.94 上方", "target_price": 1291.44}
-    neut = {"scenario_name": "区间震荡", "direction": "NEUTRAL", "invalidation_price": 1314.37,
-            "invalidation": "收盘越出任一侧（站上 1358.18 或跌破 1314.37）", "target_price": 1329.87}
-    apex = {"scenario_name": "收敛末端变盘", "direction": "BIDIRECTIONAL", "invalidation_price": 1329.87,
-            "invalidation": "—", "target_price": 1400.0}
-
-    t_bull = build_falsification_text(bull, alt, 1308.80, 2)
-    assert "跌破主情景「突破回踩」失效位 1347.47" in t_bull and "跌破三重屏障止损位 1308.80" in t_bull
-    t_bear = build_falsification_text(bear, alt, 1308.80, 2)
-    assert "收盘收回破位位 1322.94 上方" in t_bear
-    assert "止损" not in t_bear and "跌破" not in t_bear
-    t_neut = build_falsification_text(neut, alt, 1308.80, 2)
-    assert "收盘越出任一侧" in t_neut and "止损" not in t_neut
-    t_apex = build_falsification_text(apex, alt, 1308.80, 2, breakout=1358.18, breakdown=1314.37)
-    assert "既未站上 1358.18 也未跌破 1314.37" in t_apex
-    # 待触发情景：失效条件只在触发之后才适用
-    pending = {**bear, "status": "PENDING_TRIGGER", "trigger": "日线收盘跌破 1314.37"}
-    t_pending = build_falsification_text(pending, alt, 1308.80, 2)
-    assert "始终未出现主情景「破位下行」的触发条件（日线收盘跌破 1314.37）" in t_pending
-    assert t_pending.index("触发后") < t_pending.index("收盘收回破位位 1322.94 上方")
-
-
-def test_p0_auto_init_template_is_labeled_and_bearish_primary_falsification_is_consistent(replay_recorded) -> None:
-    from judgment import AUTO_INIT_GENERATOR, generate_constrained_judgment, judgment_origin
-    from validate_judgment import validate_judgment_data
-
-    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
-    rep = analyze_bundle(load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC)), req, include_replay=False)
-    tmpl = generate_constrained_judgment(rep)
-    assert tmpl["generator"] == AUTO_INIT_GENERATOR
-    assert "脚本预填" in tmpl["judgment_type"] and "脚本预填模板" in tmpl["summary_cn"]
-    assert all("脚本预填" in sj["rationale_cn"] for sj in tmpl["scenario_judgments"])
-    assert judgment_origin(tmpl, rep) == AUTO_INIT_GENERATOR
-    assert validate_judgment_data(tmpl, rep) == []
-    primary = next(sj for sj in tmpl["scenario_judgments"] if sj["scenario_id"] == tmpl["primary_scenario_id"])
-    if primary["direction"] != "BULLISH":
-        assert "止损" not in tmpl["falsification_condition"]
-    edited = _shift_two_scenarios(tmpl, 1.0)
-    assert judgment_origin(edited, rep) == "AGENT"
 
 
 def test_p0_l2_display_leads_with_observed_frequency_inside_its_wilson_interval(replay_recorded) -> None:
@@ -1907,8 +1664,8 @@ def test_p0_l2_display_leads_with_observed_frequency_inside_its_wilson_interval(
 
 def test_p0_lint_rejects_skill_md_counterexample_and_unvalidated_probabilities(replay_recorded, tmp_path: Path) -> None:
     """SKILL.md 自己列出的错误回复必须被 lint 拦截；合规的报告、否定式说明与带 95% 区间的回测胜率不得误报。"""
-    from judgment import collect_price_whitelist
     from lint_response import lint_agent_response
+    from price_text import collect_price_whitelist
 
     rep = run_pipeline(
         {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
@@ -1935,7 +1692,12 @@ def test_p0_lint_rejects_skill_md_counterexample_and_unvalidated_probabilities(r
     assert any("置顶" in e for e in lint_agent_response(late_veto, rep))
 
     # 价格白名单只收价格字段：频率、根数、比值、百分比不能让捏造的"价格"蒙混过关
-    wl = collect_price_whitelist(rep)["prices"]
+    wl = collect_price_whitelist(
+        {k: rep[k] for k in ("mathematical_indicators", "smc_structures", "volume_profile",
+                             "triple_barrier_plan", "rule_scenarios", "future_projection_15d") if k in rep},
+        int(rep["meta"].get("price_decimals") or 2),
+        (rep.get("series_export") or {}).get("bars") or [],
+    )["prices"]
     sc0 = rep["rule_scenarios"]["scenarios"][0]
     assert all(abs(p - sc0["historical_frequency"]["target_freq"]) > 1e-9 for p in wl if p < 1.0)
     assert any(abs(p - rep["rule_scenarios"]["bear"]["rebound_cap"]) <= 0.01 for p in wl)
@@ -2352,22 +2114,6 @@ def test_stamp_duty_uses_historical_effective_rates() -> None:
     assert round_trip_cost_rate(cn_2021) > round_trip_cost_rate(cn_2024)
 
 
-def test_score_judgments_offline_bars_payload_parsing() -> None:
-    """单标的缓存字典不得丢失 symbol；bundle 与 symbol->bars 映射都要可离线评分。"""
-    from score_judgments import _bars_map_from_payload
-
-    bars = load_recorded("sina_daily/sh600519.json")
-    entries = [{"symbol": "600519.SH", "as_of": "2026-10-15"}]
-    single = _bars_map_from_payload({"symbol": "600519.SH", "bars": bars, "events": []}, entries)
-    assert list(single) == ["600519.SH"] and len(single["600519.SH"]) == len(bars)
-    bundle = _bars_map_from_payload(
-        {"target": {"instrument": {"symbol": "600519.SH"}, "bars": bars}}, entries
-    )
-    assert list(bundle) == ["600519.SH"]
-    mapping = _bars_map_from_payload({"600519.SH": bars}, entries)
-    assert list(mapping) == ["600519.SH"]
-
-
 def test_overextended_warning_not_masked_by_momentum_crowding(replay_recorded) -> None:
     """过热（会阻止做多确认）与动量拥挤（仅提示）同时成立时，必须披露过热降级，而不是"不改变评级"。"""
     from risk import compute_triple_barrier_plan
@@ -2546,13 +2292,6 @@ def test_lint_catches_every_buy_shares_mention_under_veto(replay_recorded) -> No
     assert any("买入股数" in e for e in lint_agent_response(text, rep))
     clean = "【风控否决】观察。仓位按 100 股/手假设计算。不构成投资建议。"
     assert not any("买入股数" in e for e in lint_agent_response(clean, rep))
-
-
-def test_validate_judgment_ignores_wave_numbers_and_ratios() -> None:
-    from validate_judgment import _extract_candidate_prices_from_text
-
-    txt = "收盘跌破浪 1 起点；看至第 3 主升浪，浪 3/5 延伸，1.618 × 浪 1，0.382 反弹位，净盈亏比 1.15，规则综合分为 36.7/100。"
-    assert _extract_candidate_prices_from_text(txt) == []
 
 
 def test_png_draws_volume_profile_poc_and_low_sample_tag(replay_recorded, tmp_path: Path) -> None:

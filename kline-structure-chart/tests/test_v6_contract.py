@@ -34,3 +34,26 @@ def test_reversal_layer_removed(replay_recorded, tmp_path: Path) -> None:
     assert "decision_probability" not in dec
     for name in ("detect_high_conviction_rebound", "high_conviction_plan_levels", "HC_PAUSE_REASONS"):
         assert not hasattr(risk, name)
+
+
+def test_judgment_layer_removed(replay_recorded, tmp_path: Path) -> None:
+    rep = _cn_moutai(tmp_path)
+    assert "judgment_pack" not in rep
+    assert not list(tmp_path.glob("*_judgment_pack.json"))
+    for name in ("judgment.py", "validate_judgment.py", "score_judgments.py"):
+        assert not (SCRIPTS / name).exists()
+    md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    assert "研判" not in md
+
+
+def test_price_whitelist_moved_to_price_text() -> None:
+    from price_text import collect_price_whitelist, price_in_whitelist
+
+    wl = collect_price_whitelist(
+        {"plan": {"stop_loss_barrier": 12.346, "risk_reward_ratio": 1.4, "entry_zone": [12.5, 12.8]}},
+        price_decimals=2,
+        recent_bars=[{"close": 13.0, "volume": 1000.0}],
+    )
+    assert wl["prices"] == [12.35, 12.5, 12.8, 13.0]  # 盈亏比（ratio）与成交量不是价格
+    assert price_in_whitelist(12.34, wl["prices"], wl["tolerance"])
+    assert not price_in_whitelist(1.4, wl["prices"], wl["tolerance"])

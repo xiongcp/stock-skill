@@ -111,7 +111,6 @@ class AnalysisReport(TypedDict, total=False):
     rule_scenarios: dict[str, Any]
     future_projection_15d: dict[str, Any]
     debate_and_veto: dict[str, Any]
-    judgment_pack: dict[str, Any]
     replay_snapshots: list[dict[str, Any]]
     series_export: dict[str, Any]
     legacy_summary: dict[str, Any]

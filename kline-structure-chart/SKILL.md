@@ -27,21 +27,16 @@ metadata:
 
 若当前 shell 工作目录不在本 `SKILL.md` 所在目录（例如在 Hermes Agent、Claude Code 或 Codex 的用户工作区中调用），请在 `uv run` 中显式传入 `--directory <本SKILL.md所在目录>`（如 `uv run --directory ~/.hermes/skills/kline-structure-chart`、`~/.claude/skills/kline-structure-chart` 或 `~/.agents/skills/kline-structure-chart`；不用 uv 时写成 `<本SKILL.md所在目录>/.venv/bin/python <本SKILL.md所在目录>/scripts/...`），并将 `--output-dir` 设为绝对路径。
 
-## 零、Flash / 轻量模型零失误执行 SOP（5 步闭环，严禁跳步）
+## 零、Flash / 轻量模型零失误执行 SOP（4 步闭环，严禁跳步）
 
-使用 Flash 模型（如 Gemini Flash、Claude Haiku、Qwen-Flash、DeepSeek-Chat、GPT-4o-mini 等）执行本技能时，必须严格按以下 5 步流水线操作，**零心算、零改写、零自由发挥**：
+使用 Flash 模型（如 Gemini Flash、Claude Haiku、Qwen-Flash、DeepSeek-Chat、GPT-4o-mini 等）执行本技能时，必须严格按以下 4 步流水线操作，**零心算、零改写、零自由发挥**：
 
 1. **先查代码，不凭记忆猜后缀**：只要用户未提供带 `.SH` / `.SZ` / `.BJ` / `.HK` / `.US` 的完整代码，必须先运行 `scripts/resolve_symbol.py`；多候选时原样列出请用户选择。
-2. **运行主脚本生成同源产物**：运行 `scripts/analyze_and_forecast.py`，生成 `*_report.md`、`*_result.json`、`*_judgment_pack.json`、`*_preview.png` 与 `*_dashboard.html`（需要回测时加 `--backtest`）。
-3. **需要 L3 情景研判时先预填模板再研判**：切勿从零手写复杂的 `*_judgment.json`（极易因概率和不为 100.0% 或价格不在白名单报错）。先运行带 `--auto-init` 的校验命令生成满足全部硬约束的**预填模板**（脚本按偏多/偏空证据条数机械调整，不是主观研判）：
-   ```bash
-   uv run python scripts/validate_judgment.py --result artifacts/cn_stock/600519.SH_result.json --judgment artifacts/cn_stock/600519.SH_judgment.json --auto-init
-   ```
-   要给出主观研判，必须复核证据后在该 JSON 上改写各情景概率与理由（保持总和 `100.0%`、调整幅度不超 `±15%` / 低样本 `±10%`），并把 `judgment_type` 改为 `主观研判` 后再次运行上述命令校验。概率与模板完全相同时，校验输出 `origin = AUTO_INIT_TEMPLATE`，报告第 8 节标题为「情景研判模板（脚本预填，未经 Agent 主观研判）」，回复中只能称「脚本预填模板」，不得称主观研判概率；该记录也不计入 LLM 技能分。
-4. **原样采用 `*_report.md` 骨架与「直出摘要」**：
+2. **运行主脚本生成同源产物**：运行 `scripts/analyze_and_forecast.py`，生成 `*_report.md`、`*_result.json`、`*_preview.png` 与 `*_dashboard.html`（需要回测时加 `--backtest`）。
+3. **原样采用 `*_report.md` 骨架与「直出摘要」**：
    - 回复第一段直接使用 `*_report.md` 第 1 节中的 `- 直出摘要（供 Agent / Flash 模型首段原样引用）`（当 `risk_officer_veto == true` 时已自动将 `【风控否决】` 置顶）。
    - 正文各节直接复制 `*_report.md` 的表格与点位，**严禁四舍五入或改写任何价格数字**（例如把 `1349.43` 改成 `1349.4` 或 `1350` 会触发价格白名单拦截），**严禁删减 `historical_frequency.display_cn` 中的样本数 `(n = ...)` 与 `95% 区间`**。
-5. **发出回复前必跑 `lint_response.py` 自检**：将拟发送的中文回复保存到临时文件，执行：
+4. **发出回复前必跑 `lint_response.py` 自检**：将拟发送的中文回复保存到临时文件，执行：
    ```bash
    uv run python scripts/lint_response.py --result artifacts/cn_stock/600519.SH_result.json --response artifacts/cn_stock/reply_draft.md
    ```
@@ -102,7 +97,6 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 产物（文件名以标的代码开头）：
 - `*_report.md`：按下文"回复契约"组织好的中文分析报告，数字全部取自 `*_result.json`，**回答用户时以它为骨架**。
 - `*_result.json`：全部计算结果，已通过 `assets/analysis.schema.json` 顶层契约校验。字段含义见 `references/output-fields.md`。
-- `*_judgment_pack.json`：L3 受约束研判证据包（含可溯源证据编号 `E1…En`、冲突信号 `C1…Cm`、情景基准频率与价格白名单）。
 - `*_preview.png`：结构推演图，配色随市场（A股/港股红涨绿跌，美股绿涨红跌）。
 - `*_dashboard.html`：离线交互看板，提供 7 个图层开关、悬停查看 OHLC/均线/RSI/预测分位、相对强弱切换、历史回放滑块和导出 PNG。
 - `*_backtest.json`（传 `--backtest` 时生成）：线上计划逐日回放的成交统计，以及区间样本外覆盖率。
@@ -147,16 +141,14 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
    - 必须同时给出 `calibration_audit` 的实测覆盖率与 `effective_independent_samples`。
    - `promotion_status` 为 `RESEARCH_CALIBRATION_WARMUP` 时称"校准观察期"，不得把覆盖率说成区间已验证可靠；有效独立样本低于 `min_effective_independent_samples`（20）时不会晋级（判定见 `references/math-patterns.md` 第 5 节）。
 6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率（带 95% 区间）、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。规则分 IC 的结论（`rule_score_ic.verdict`）原文转述，`informative = false` 时说明规则分在该标的上只作描述。同时转述 `scenario_frequency_brier` 的样本外 Brier 分数、各情景自身基准率加权 Brier 分数与技能分 `brier_skill_score`（仅当相对各情景自身基准率的 `brier_skill_score > 0` 时才说"历史频率具有区分度"）。
-7. **L3 受约束情景研判（可选，按 `references/llm-judgment-protocol.md` 执行）**：读取 `*_judgment_pack.json`，以 L2 基准概率为起点、引用 `E1…En` 证据编号做有界调整（`n>=30` 最多 ±15%，`n<30` 最多 ±10%，互斥情景概率和 = 100%），写出 `*_judgment.json`（可先用 `--auto-init` 生成预填模板再改写）并运行 `uv run python scripts/validate_judgment.py --result <..._result.json> --judgment <..._judgment.json>` 校验通过后，在「LLM 情景研判（主观判断，已记录待检验）」章节同时展示调整前后数值、证据编号与证伪条件；校验输出 `origin = AUTO_INIT_TEMPLATE`（未改写模板）时只能按「脚本预填模板」转述。可用 `scripts/lint_response.py` 校验最终回复文本，用 `scripts/score_judgments.py` 对到期研判打分。
-8. **文件**：给出 `result.json` 与 `dashboard.html` 的路径；客户端能显示图片时再内嵌 `preview.png`，否则只给路径。
-9. **免责声明**：结尾注明"以上为规则化技术分析，仅供研究参考，不构成投资建议"。
+7. **文件**：给出 `result.json` 与 `dashboard.html` 的路径；客户端能显示图片时再内嵌 `preview.png`，否则只给路径。
+8. **免责声明**：结尾注明"以上为规则化技术分析，仅供研究参考，不构成投资建议"。
 
 ## 五、对外表述与概率规则
 
 - `rule_score`、`regime_score`、过滤分都是确定性规则打分，**不是**胜率、概率或置信度；Volume Profile 是成交分布近似，不是真实持仓筹码。
 - 只允许两类概率，而且**只有 JSON 中存在对应字段时才能说出数字**：
   1. **历史条件频率**：脚本在该标的自身历史上无前视统计的"情景触发后先到目标 / 先到失效 / 到期"频率（字段 `rule_scenarios.scenarios[*].historical_frequency` 及 `rule_scenarios.{bull,neutral,bear}.historical_frequency`，已提供）。必须直接引用 `display_cn` 或写成"历史条件频率 X%（n = …，95% 区间 a%~b%）"，样本数 n < 30 时带"低样本，已向市场基准收缩"说明，不叫胜率、不叫上涨概率。它统计的是以 ATR 为单位的标准化屏障事件（`historical_frequency.event_definition_cn`），不是本情景目标价的到达概率；低样本时括号内的「收缩后估计」是 Beta-Binomial 模型估计，引用时必须带上这个名称。
-  2. **主观研判概率**：由你（运行技能的 agent）按 `references/llm-judgment-protocol.md` 以 `*_judgment_pack.json` 中的基准概率为锚点做有界调整，引用证据编号 `E1…En`、不超过调整上限、写入 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验后才能给出，必须标注"主观研判，已记录待检验"。
 - **严禁无依据概率**：除上述 `historical_frequency`、回测成交胜率（附 95% 区间与样本量提示）和区间覆盖率外，回答中不得出现"上涨概率 60%""胜算七成""大概率突破"等未经校验的概率数字或等价说法。
 - 推演路径只写"触发条件 → 目标位 → 失效条件"；15 个交易日的方向本身接近随机，不得承诺涨跌。
 
@@ -195,7 +187,6 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 
 - `references/output-fields.md`：`result.json` / `backtest.json` 每个字段的含义、单位、取值范围、能否为空和对外怎么说。用户追问某个字段时阅读。
 - `references/scenario-playbook.md`：8 类标准情景库的前提、触发、目标、失效、历史到达用时分位数与无前视历史条件频率计算口径。
-- `references/llm-judgment-protocol.md`：L3 受约束的 LLM 情景研判协议、调整幅度上限、证据引用格式、`validate_judgment.py` 校验规则与 `score_judgments.py` 到期打分说明。
 - `references/interpretation-guide.md`：形态、浪型、市场状态、风控计划、未来区间和回测的解读要点与常见误读。
 - `references/math-patterns.md`：用户追问某个指标、形态或预测区间如何计算时阅读。
 - `references/cn-market.md`：A股交易时段与集合竞价、涨跌停（主板 ±10%、双创 ±20%、北交所 ±30%，ST 按板块与日期区分）、科创板与北交所申报细则、T+1、融券限制、代码识别、复权与交易日历。
