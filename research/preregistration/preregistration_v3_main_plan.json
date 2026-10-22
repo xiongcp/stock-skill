@@ -1,0 +1,167 @@
+{
+  "schema_version": "3.0",
+  "kind": "PREREGISTRATION",
+  "hypothesis": "MAIN_LONG_PLAN",
+  "registered_at_utc": "2026-10-22T04:59:33Z",
+  "base_commit": "bf77e618ef4587f908248ff8f1beb777991da3b4",
+  "spec": "docs/superpowers/specs/2026-10-20-main-long-plan-validation-design.md",
+  "frozen_files_sha256": {
+    "kline-structure-chart/scripts/analysis.py": "4633ed69e58adf02aa975d200f85e562f5399dfbf9e0319897cf9ae3401e5945",
+    "kline-structure-chart/scripts/analyze_and_forecast.py": "fd2a11ac816e237a3761151bdc94348dd00a1ec3f41e67238be63056bc2fb9fb",
+    "kline-structure-chart/scripts/base_rates.py": "f18c81658167a8205ba577a47007aa33f06f31811e3021788c5f5c4a78655ee1",
+    "kline-structure-chart/scripts/contracts.py": "60dc406c10e535c9e97ec957579079e52bb487f0b858cd48b072fa4682a10fd2",
+    "kline-structure-chart/scripts/data_gateway.py": "cd300cdc0c80fcdc14a1680a728be681d17d0fceff01383434ce0a6918d8d345",
+    "kline-structure-chart/scripts/doctor.py": "df76b8366ab3307c8691d9121947f426ff6f2434a06970365ef77fd9309527c0",
+    "kline-structure-chart/scripts/evaluation.py": "be025a47025f3afc7a7bad656dcb2f99033fb9a0fa18eb0a302a578ce47823c9",
+    "kline-structure-chart/scripts/forecast.py": "69e769956147b9f60ba625248a31d026b914487c4024e660dafcccf7cbf73508",
+    "kline-structure-chart/scripts/indicators.py": "cf2e232628c3495a1c6a33abdc57dc100742c2b9722550b20e98858c0d5c6864",
+    "kline-structure-chart/scripts/judgment.py": "1d85fc5a5f21880cd6f586bcc815303acfcc7eacb1ffed1cf477a692c50a512b",
+    "kline-structure-chart/scripts/lint_response.py": "9322ea329ea1b36b7d027123427b478c872af43815ec919b3e8a9aa47bf777de",
+    "kline-structure-chart/scripts/market_rules.py": "76f37ea646920d23d1505126b64ce031bcd5653c5e98c1a7b67b9cda8a22392e",
+    "kline-structure-chart/scripts/patterns.py": "7598b77e2409c7f6affa9a5d244e12f647bb2002290ef39ba944c91e8504365c",
+    "kline-structure-chart/scripts/render_html.py": "e27e6243d1d4425a643b24dc16bdd364e1e012f89c889fd3d466a92ca83e626b",
+    "kline-structure-chart/scripts/render_report_md.py": "4696dd19eed4aafdc5d0aa641f7c20260398283e8c837a995bd38593ca0db4a1",
+    "kline-structure-chart/scripts/render_structure_chart.py": "c6f11be99490e79e88a3ade9975fa3f776212494089ed70087b52b0047cca597",
+    "kline-structure-chart/scripts/resolve_symbol.py": "50bc53610bd57212d748bd1815a3e14c7bfbbe399a06902f402c125bd1b6fef2",
+    "kline-structure-chart/scripts/risk.py": "c970c7ac49f6708e38e034c4db8d6a8e3fde4af1add086286ae0fbcaddf3c43d",
+    "kline-structure-chart/scripts/scenarios.py": "ded0d89cadea1f61a3979fd0dc21acdd52fb50999ece830a37b683f22aecbb94",
+    "kline-structure-chart/scripts/score_judgments.py": "3b38cdbc265ed7d25fe9ccbe2b93296bb3efe17684bf99243c631fa5eb67d666",
+    "kline-structure-chart/scripts/strategies.py": "894249ddd66708ab1a374f2b88472327b83cff07353cce5d9705dd427b86fdcb",
+    "kline-structure-chart/scripts/structure.py": "fbd0254979d87292ff165807cf0064f5b59750b01499d99652f9f011513cfd48",
+    "kline-structure-chart/scripts/validate_judgment.py": "72cbc8713f069a0ac7e5031e9bc5bde9ecc76ae42f74fdbeaa8a5a396ea2c736",
+    "research/common.py": "c16368f9202f50f1adbed9c65a3bfffc670481e1ee517dcb1fddc61541777be2",
+    "research/run_backtest.py": "6adcf354f20ef7dc449741ad97ef1ba82b07ee8b43a9f6fe56aeb27ad808e768",
+    "research/aggregate.py": "f546111eac2c6d723f192745b95362f35107606f94afbc6790da03ed1d254563",
+    "research/discover_alpha_dev.py": "893671522e602f8a763eebf160cb07b7b38ba54028c4af46a8372a1419a0be75",
+    "research/run_dev_region_v2.py": "b97651df800192307985d619e5aab539c0fede36aaff58e379da6888b5d3f23f",
+    "research/run_h1_holdout.py": "f181e626f0eea6f217654b69017094c8cefd108e124b46275a593f8afddc4472",
+    "research/main_plan_scan.py": "f41e9f98177c7904b09a1ac93a2f62d11aaa72c8d1a501d1df97bc369c155b4f",
+    "research/main_plan_eval.py": "1b5528a4a8170fb7d3256154251880876b581663c8552fd5ae17868109d1262d",
+    "research/run_h1_main_plan.py": "6ebf7653a32f32108bf816b9800f6bbd28b67cf411d85ce30890af028e022c7b",
+    "research/write_preregistration_v3_main_plan.py": "67f461432b30567c3f2e4de5220e4e8bc6ce1a6415990a4881d47adeb811eaca",
+    "kline-structure-chart/pyproject.toml": "8c20c42f2ce3998dbd0937d8cedccf5b6552820caef5a36af1a7255cf4f6b559",
+    "kline-structure-chart/uv.lock": "18c893bc81a174d871ac2d627d9522d17639ee4267945bf268f8be74258e9db9"
+  },
+  "frozen_data_sha256": {
+    "artifacts/long_backtest/pit_universe_h1.json": "7eaf37a98fb9a24ec2788f5b0c5d037efd4cff1f298a37c52997fa47cf79c2ca",
+    "artifacts/long_backtest/cache/MANIFEST.json": "e2a026f0b05bdad43d6ca3e7cf3fb3cf19ff520fda48227f800b0764f3030111"
+  },
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.5.4"
+  },
+  "run_tolerance": {
+    "max_scan_errors": 0,
+    "max_skipped_symbols": {
+      "CN": 0,
+      "HK": 10,
+      "US": 0
+    },
+    "expected_skipped_symbols": {
+      "CN": [],
+      "HK": [
+        "00247.HK",
+        "00287.HK",
+        "00458.HK",
+        "00529.HK",
+        "00608.HK",
+        "01005.HK",
+        "01702.HK",
+        "02892.HK",
+        "03869.HK",
+        "04333.HK"
+      ],
+      "US": []
+    },
+    "skipped_reason": "剔除零成交占位K线后真实K线不足 442 根（预热 420 + 持有 15 + 挂单 5 + 2），按设计跳过；不是缓存缺失或损坏"
+  },
+  "frozen_specification": {
+    "plan": "risk.compute_triple_barrier_plan",
+    "plan_source_sha256": "824bea44f3f3980f4356192e2d81748fe8eb28598da20a78ce487a43bd83a154",
+    "signal_actions": [
+      "LONG_CONFIRMED",
+      "WATCH_LONG_SETUP"
+    ],
+    "fill": "5 日限价（5 个交易日内以入场区上沿成交，低开按开盘价）；成交价不高于止损记 GAP_BELOW_STOP",
+    "exit": "evaluation.label_triple_barrier_event：止损/TP1、同根先判止损、保本上移参数取自计划 breakeven_ratchet、T+1 与一字跌停顺延",
+    "horizon_bars": 15,
+    "episode_gap_days": 21,
+    "next_open_layer": "次日开盘落在入场区内才成交（LIVE_PLAN_REPLAY_V6 规则），只报告"
+  },
+  "h1": {
+    "markets": [
+      "CN",
+      "US",
+      "HK"
+    ],
+    "first_day": {
+      "CN": "2017-10-24",
+      "HK": "2018-07-09",
+      "US": "2018-06-22"
+    },
+    "last_day": "2020-11-30",
+    "universe": "artifacts/long_backtest/pit_universe_h1.json",
+    "warmup_bars": 420
+  },
+  "acceptance": {
+    "acceptance_markets": [
+      "CN",
+      "US",
+      "HK"
+    ],
+    "diagnostic_markets": [],
+    "gates": [
+      "P1",
+      "P2b",
+      "P3"
+    ],
+    "gate_definitions": {
+      "P1": "扣费后单笔净收益均值 > 0，且按信号日期分块 bootstrap 95% 下限 > 0（5 日限价成交层，episode 口径）",
+      "P2b": "每个信号 episode 的净收益 − 其当日同日随机基准（移植几何）平均净收益，对全部配对取平均；按信号日分块 bootstrap 95% 下限 > 0",
+      "P3": "episode >= 100 且不同信号日 >= 30"
+    },
+    "report_only": {
+      "P2a": "按同样方式配对的净正率差（是否盈利 − 当日基准盈利比例）的分块 95% 下限 > 0",
+      "T": "episode 净正率点估计 >= 70%"
+    },
+    "rule": "每个市场单独判定，三项全部满足为通过；P3 不满足同样判为未通过。未通过的市场线上降级为观察位（设计 M4、第 7.1 节）；不得回到 H1 调参"
+  },
+  "baseline": {
+    "kind": "same_day_random_transplanted_geometry",
+    "definition": "信号日按 min(1, 10 × 当日信号数 / 当日进入评估的股票-日数) 抽股，按哈希对应当日一个信号，把其价位的 ATR 倍数套到被抽股票的收盘价与线上 ATR14 上并取整（止损原值 <= 0 或取整后几何自相矛盾的剔除）；同撮合、同出场、同费用；不做 episode 去重，按日汇总",
+    "pairing": "每个信号 episode − 其当日基准平均值；当日无基准的信号 episode 不参与配对并单独计数",
+    "sampling_multiple": 10,
+    "seed": 20261021,
+    "diagnostic": "own_plan：被抽股票使用自身计划价位，只报告",
+    "bootstrap": {
+      "block": "signal_day",
+      "n_boot": 2000,
+      "seed": 20261020
+    }
+  },
+  "dev_region_evidence": {
+    "file": "artifacts/long_backtest/dev_main_plan_v3_metrics.json",
+    "sha256": "a1739e517454ad09b613be35bc32b7c8b461313b37808ee3af486910fa064ff9",
+    "code_commit": "509e4998e078ab9ad1c9146f076ea9f7edc0a9a4",
+    "defect_fix_equivalence": {
+      "file": "artifacts/long_backtest/d1_equivalence.json",
+      "sha256": "f138e572e69c1c49aa887a3a442a9d23e2095ed5f34ace896d97ab1b99249119"
+    }
+  },
+  "trials_before_registration": {
+    "main_plan_runs": 4,
+    "main_plan_configs_evaluated": 4,
+    "other_hypothesis_ledger_rows": 11,
+    "note": "主计划开发区运行（含冒烟）只评估现行默认规则；其余台账行属于反转层（另一假设）"
+  },
+  "disclosures": [
+    "H1 区间已被反转层验收使用过一次（h1_result.json 不含任何主计划统计）",
+    "开发区主计划结果 v1 已看过，开发区结果属样本内",
+    "幸存者偏差：股票池只含当前上市标的，2017–2020 年退市股不在池中",
+    "ST 历史不可得，按当前名称判断",
+    "港股成交稀疏：H1 港股池每期只有 51.6%~57.9% 的成分股期内 ≥95% 交易日有真实成交",
+    "交易日历只覆盖 2021 年起，不在本回测路径上",
+    "开发区结果在提交 509e499 上运行，早于缺陷修复 D1（cf51a1d，支撑阶梯剔除不为正的价位）；H1 在修复后的代码上运行。D1 未重跑开发区，改用抽样等价核对（d1_equivalence.json）：每市场随机 2,000 个股票-日与 2,000 个信号，信号无一变化",
+    "H1 港股池有 10 只标的按设计不参与评估：00247.HK、00287.HK、00458.HK、00529.HK、00608.HK、01005.HK、01702.HK、02892.HK、03869.HK、04333.HK。它们是极度冷门的港股，剔除零成交占位K线后真实K线不足 442 根，算不出 420 根预热；CN、US 没有此类标的。加载失败容忍度按市场登记为 CN 0、HK 10、US 0"
+  ]
+}
