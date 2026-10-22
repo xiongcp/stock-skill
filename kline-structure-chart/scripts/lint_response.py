@@ -70,11 +70,6 @@ _VETO_POSITIVE_BUY_RE = re.compile(
     r"[^。；\n]{0,30}?(?:买入|买进|建仓|加仓|做多|抄底|低吸|进场|入场|布局|吸纳|吸筹)"
 )
 _TARGET_ROLE_PRICE_RE = re.compile(r"(?:目标位|目标价|目标看至|上看目标)\s*[为=:：约至]?\s*(\d+(?:\.\d+)?)")
-# 高置信反转层：没有任何通过留出集验收的统计量（docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md 第 11 节）
-_HC_TERM_RE = re.compile(r"高置信|超跌反转|共振反转|反转层|反转计划|反转信号")
-_HC_PRIOR_RE = re.compile(r"校准先验|开发集校准")
-_PCT_RE = re.compile(r"\d+(?:\.\d+)?\s*%")
-_NUM_RE = re.compile(r"(?<![\d.])\d+(?:\.\d+)?")
 
 
 def _sentence_around(text: str, start: int, end: int) -> str:
@@ -96,29 +91,6 @@ def _unvalidated_probability_hits(text: str) -> list[str]:
                 continue
             hits.append(m.group(0))
     return hits
-
-
-def _reversal_layer_hits(text: str, report: dict[str, Any]) -> list[str]:
-    """反转层：不得给出任何百分比或"校准先验"；计划未触发（已暂停或未满足条件）时不得转述其价位。否定说明放行。"""
-    errors: list[str] = []
-    for m in _HC_PRIOR_RE.finditer(text):
-        sent = _sentence_around(text, m.start(), m.end())
-        if not _NEGATION_RE.search(sent):
-            errors.append(f"反转层已删除\"校准先验\"数字（留出集验收未通过），回复不得引用: {sent.strip()!r}")
-    hcp = (report.get("triple_barrier_plan") or {}).get("high_conviction_plan") or {}
-    plan_prices = [float(x) for x in (hcp.get("entry_zone") or [])]
-    plan_prices += [float(hcp[k]) for k in ("take_profit_1", "stop_loss_barrier") if hcp.get(k) is not None]
-    for m in _HC_TERM_RE.finditer(text):
-        sent = _sentence_around(text, m.start(), m.end())
-        if _NEGATION_RE.search(sent):
-            continue
-        if _PCT_RE.search(sent):
-            errors.append(f"反转层没有通过留出集验收的统计量，回复不得给出任何百分比: {sent.strip()!r}")
-        elif not hcp.get("triggered") and any(
-            abs(float(n) - p) <= max(1e-6, 1e-4 * p) for n in _NUM_RE.findall(sent) for p in plan_prices
-        ):
-            errors.append(f"反转层计划未触发或已暂停，回复不得转述其价位: {sent.strip()!r}")
-    return list(dict.fromkeys(errors))
 
 
 def lint_agent_response(
@@ -191,7 +163,6 @@ def lint_agent_response(
         errors.append(
             f"检测到未经校验的概率/确定性表述: {hit!r}（只允许引用历史条件频率、通过校验的主观研判、带 95% 区间的回测胜率与区间覆盖率）"
         )
-    errors.extend(_reversal_layer_hits(text, report))
     allowed_hf_pcts: list[float] = []
     rs_obj = report.get("rule_scenarios") or {}
     for sc_item in list(rs_obj.get("scenarios") or []) + [rs_obj.get(k) for k in ("bull", "neutral", "bear") if isinstance(rs_obj.get(k), dict)]:

@@ -158,7 +158,6 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
   1. **历史条件频率**：脚本在该标的自身历史上无前视统计的"情景触发后先到目标 / 先到失效 / 到期"频率（字段 `rule_scenarios.scenarios[*].historical_frequency` 及 `rule_scenarios.{bull,neutral,bear}.historical_frequency`，已提供）。必须直接引用 `display_cn` 或写成"历史条件频率 X%（n = …，95% 区间 a%~b%）"，样本数 n < 30 时带"低样本，已向市场基准收缩"说明，不叫胜率、不叫上涨概率。它统计的是以 ATR 为单位的标准化屏障事件（`historical_frequency.event_definition_cn`），不是本情景目标价的到达概率；低样本时括号内的「收缩后估计」是 Beta-Binomial 模型估计，引用时必须带上这个名称。
   2. **主观研判概率**：由你（运行技能的 agent）按 `references/llm-judgment-protocol.md` 以 `*_judgment_pack.json` 中的基准概率为锚点做有界调整，引用证据编号 `E1…En`、不超过调整上限、写入 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验后才能给出，必须标注"主观研判，已记录待检验"。
 - **严禁无依据概率**：除上述 `historical_frequency`、回测成交胜率（附 95% 区间与样本量提示）和区间覆盖率外，回答中不得出现"上涨概率 60%""胜算七成""大概率突破"等未经校验的概率数字或等价说法。
-- **高置信反转层**（`high_conviction_*`、`decision_probability`）：留出集验收未通过，三个市场都已暂停。触发时只能说"触发了反转条件，暂不给出反转计划"，不得给出任何反转层百分比、"校准先验"数字，也不得转述 `high_conviction_plan` 的价位（`triggered = false`）。`scripts/lint_response.py` 会拦截。
 - 推演路径只写"触发条件 → 目标位 → 失效条件"；15 个交易日的方向本身接近随机，不得承诺涨跌。
 
 ## 六、失败处理

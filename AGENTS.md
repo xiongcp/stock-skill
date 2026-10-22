@@ -110,6 +110,7 @@ kline-structure-chart/
     ├── test_docs_contract.py         # 文档契约：无绝对路径、引用文件存在、目录树与代码同步
     ├── test_report_and_metadata.py   # 代码校验、行情快照元数据（简称/ST/每手股数）与 Markdown 报告
     ├── test_tools.py                 # 名称转代码（录制回放）、doctor 离线自检、插件市场清单与 install.sh 语法
+    ├── test_v6_contract.py           # v6 输出契约：去预测化、schema、体积预算与命令行信封
     ├── check_days_invariance.py      # 跨展示窗口 (60~500日) 结构层不变性回归校验
     ├── record_fixtures.py            # 联网录制真实行情 fixture（手动执行）
     └── fixtures/
