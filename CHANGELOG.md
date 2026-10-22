@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 变更（研究代码移出 main）
+
+- `research/`（长周期回测、预注册、H1 验收与 H2 前向跟踪脚本）移到长期分支 `research/archive`，main 只保留技能。冻结提交打了标签：`h2-frozen`（H2 服务器运行的提交）、`main-plan-h1-v3-frozen`（主做多计划 H1 预注册 v3）、`v5.3.0-final`（移出之前 main 的最后一个提交）。H2 服务器按 `H2_RUNBOOK.md` 检出冻结提交运行，不受影响。研究设计文档仍在 `docs/superpowers/specs/`。
+
 ### 修复（Yahoo 港股占位K线）
 
 - `scripts/data_gateway.py` 新增 `drop_placeholder_bars`：Yahoo 日线（标的与基准）取数后剔除"成交量为 0 且开高低收四价相同"的K线。这类K线多为港股半日市当天缺数、停牌或停市日按前收盘价补出，不是真实成交；此前未过滤，会压低 ATR、扭曲 RSI 与 RVOL、被识别为十字星，回测也可能在无成交的日子成交。只剔除、只披露，不用其他来源补数：剔除数量与日期写入 `quality.notes`，完整日期写入新字段 `quality.placeholder_bars_removed.{target,benchmark}`（`references/output-fields.md`、`references/hk-market.md` 同步）。录制数据 `0700.HK` 剔除 7 根（2022-01-31、2024-12-24、2024-12-31、2025-01-28、2025-12-24、2025-12-31、2026-02-16），NVDA、SPY、^HSI 不受影响。

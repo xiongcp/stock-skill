@@ -44,7 +44,7 @@ def _avoid_round_number_stop(
     return st
 
 
-# 反量化规则的门禁范围（Dev 2021–2024 + Val 2025H1 的拦截归因结果，见 research/anti_quant_filter_study.py）：
+# 反量化规则的门禁范围（Dev 2021–2024 + Val 2025H1 的拦截归因结果，见 research/anti_quant_filter_study.py（research/archive 分支）：
 # 证据支持的规则才改变 setup/评级；证据相反或样本不足的规则只输出提示，不降级、不否决。
 _ANTI_QUANT_GATES: dict[str, frozenset[str]] = {
     "ignition_trap_downgrade": frozenset({"US"}),  # CN/HK 的"被拦截组"反而更好
