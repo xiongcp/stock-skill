@@ -257,9 +257,9 @@ function Invoke-Install {
     if ($NoTest) {
         Say '跳过自检（-NoTest）'
     } else {
-        Say '检查核心脚本完整性（L1 结构 / L2 历史频率 / L3 研判校验 / 回复校验）'
+        Say '检查核心脚本完整性（L1 结构 / L2 历史频率 / 回复校验）'
         if (-not $DryRun) {
-            foreach ($s in @('analyze_and_forecast.py', 'resolve_symbol.py', 'scenarios.py', 'base_rates.py', 'judgment.py', 'validate_judgment.py', 'score_judgments.py', 'lint_response.py', 'doctor.py')) {
+            foreach ($s in @('analyze_and_forecast.py', 'resolve_symbol.py', 'scenarios.py', 'base_rates.py', 'price_text.py', 'lint_response.py', 'doctor.py')) {
                 $sp = Join-Path (Join-Path $SkillSrc 'scripts') $s
                 if (-not (Test-Path -LiteralPath $sp)) { Die "缺少核心脚本: $sp" }
             }
