@@ -2686,6 +2686,32 @@ def test_lint_blocks_probability_bragging_variants_but_allows_negations(replay_r
     assert any("小样本" in e for e in lint_agent_response(small, report, bt))
 
 
+def test_lint_blocks_reversal_layer_numbers_and_plan_prices(replay_recorded) -> None:
+    """反转层没有通过留出集验收的统计量（D10=a）：回复不得给出任何反转层百分比、"校准先验"，
+    也不得在计划未触发时转述反转计划价位；否定说明照常放行。"""
+    from lint_response import lint_agent_response
+
+    report = copy.deepcopy(_real_report_for_lint(replay_recorded))
+    report["debate_and_veto"]["risk_officer_veto"] = False
+    hcp = report["triple_barrier_plan"]["high_conviction_plan"]
+    assert hcp["triggered"] is False
+    lo, hi = hcp["entry_zone"]
+    base = "不构成投资建议。"
+    for bad in (
+        "开发集校准先验显示净正率 72.2%。",
+        "高置信超跌反转在回测里有 74% 的净正率。",
+        "共振反转信号的 TP1 先于止损比例为 80%。",
+        f"反转计划：{lo:.2f}~{hi:.2f} 限价入场，止损 {hcp['stop_loss_barrier']:.2f}。",
+        "参考开发集校准的先验数字。",
+    ):
+        assert any("反转层" in e or "校准先验" in e for e in lint_agent_response(bad + base, report)), bad
+    for ok in (
+        "触发了反转条件，但留出集验收未通过，暂不给出反转计划，也不报任何统计数字。",
+        "反转层没有通过验收的命中率数字。",
+    ):
+        assert not [e for e in lint_agent_response(ok + base, report) if "反转层" in e or "校准先验" in e], ok
+
+
 def test_lint_catches_every_buy_shares_mention_under_veto(replay_recorded) -> None:
     from lint_response import lint_agent_response
 

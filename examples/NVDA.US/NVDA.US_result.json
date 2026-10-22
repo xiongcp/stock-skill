@@ -18,12 +18,18 @@
   },
   "request": {
     "symbol": "NVDA.US",
+    "display_bars": 120,
+    "structure_bars": 120,
+    "horizon_bars": 15,
+    "account_equity": 100000.0,
+    "max_risk_pct": 0.01,
+    "color_scheme": "auto",
+    "timeframes": [
+      "1D"
+    ],
     "market": "US",
     "asset_type": "equity",
-    "account_equity": 100000.0,
-    "as_of": "2026-10-15",
-    "display_bars": 120,
-    "horizon_bars": 15
+    "as_of": "2026-10-15"
   },
   "market_benchmark": {
     "index_symbol": "SPY.US",
@@ -779,6 +785,7 @@
     },
     "momentum": {
       "rsi14": 40.2,
+      "rsi14_prev": 43.98,
       "macd_dif": 0.944,
       "macd_dea": 2.809,
       "macd_hist": -1.865,
@@ -1924,17 +1931,14 @@
     },
     "high_conviction_rebound": false,
     "high_conviction_subtype": null,
+    "high_conviction_suppressed_by_veto": false,
+    "high_conviction_suppressed_subtype": null,
+    "high_conviction_paused_subtype": null,
     "decision_probability": {
       "available": false,
-      "event_definition": "未触发高置信超跌/大盘共振反转条件，不输出 >=70% 校准概率",
-      "p_net_positive": null,
-      "p_episode_net_positive": null,
-      "p_tp_before_sl": null,
       "method": "NOT_TRIGGERED",
-      "dev_sample_size": 12966,
-      "dev_effective_episodes": 8875,
-      "ci95": null,
-      "calibration_version": "rebound_v1_dev_2021_2024",
+      "event_definition": "未触发高置信超跌/大盘共振反转条件",
+      "validation": "docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md 第 11 节：留出集 H1 未通过",
       "as_of": "2026-10-15"
     }
   },
@@ -11346,7 +11350,11 @@
     "completed_bars_total": 1254,
     "display_bars": 120,
     "structure_bars": 120,
-    "forecast_promotion_status": "PROMOTED"
+    "forecast_promotion_status": "PROMOTED",
+    "placeholder_bars_removed": {
+      "target": [],
+      "benchmark": []
+    }
   },
   "reproducibility": {
     "engine_version": "5.3.0",
@@ -12499,7 +12507,7 @@
     }
   },
   "legacy_summary": {
-    "file": "/Users/Zhuanz/work/stock-skill/examples/NVDA.US/NVDA.US_preview.png",
+    "file": "examples/NVDA.US/NVDA.US_preview.png",
     "data_source": "YAHOO_DAILY(NVDA)",
     "data_warning": null,
     "quality_status": "OK",
