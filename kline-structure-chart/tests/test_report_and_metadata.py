@@ -129,6 +129,7 @@ def cn_pipeline(replay_recorded, tmp_path: Path) -> tuple[dict, str, dict]:
     return report, md, backtest
 
 
+@pytest.mark.slow
 def test_report_md_numbers_match_json(cn_pipeline) -> None:
     report, md, backtest = cn_pipeline
     meta, fp = report["meta"], report["future_projection_15d"]
@@ -153,6 +154,7 @@ def test_report_md_numbers_match_json(cn_pipeline) -> None:
     assert md.rstrip().endswith("*以上为规则化技术分析，仅供研究参考，不构成投资建议。*")
 
 
+@pytest.mark.slow
 def test_report_md_puts_veto_before_conclusions(cn_pipeline) -> None:
     report, md, _ = cn_pipeline
     if report["debate_and_veto"]["risk_officer_veto"]:
@@ -163,6 +165,7 @@ def test_report_md_puts_veto_before_conclusions(cn_pipeline) -> None:
         assert "**风控否决**" not in md
 
 
+@pytest.mark.slow
 def test_report_md_hides_all_prices_when_data_unavailable(cn_pipeline, tmp_path: Path) -> None:
     from render_html import render_html
 
@@ -181,6 +184,7 @@ def test_report_md_hides_all_prices_when_data_unavailable(cn_pipeline, tmp_path:
     assert 'data-quality-status="UNAVAILABLE"' in html_text
 
 
+@pytest.mark.slow
 def test_report_md_zero_trade_rows_show_dash(cn_pipeline) -> None:
     report, _, backtest = cn_pipeline
     bt = copy.deepcopy(backtest)

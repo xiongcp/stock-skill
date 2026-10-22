@@ -14,3 +14,8 @@ dev = [
     "pytest-xdist>=3.8.0",
     "ta-lib>=0.6",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: 单个用例约 5 秒以上的端到端流水线与回测测试；日常用 -m \"not slow\" 跳过，提 PR 前与 CI 跑全量",
+]

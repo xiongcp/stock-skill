@@ -262,6 +262,7 @@ def test_triple_barrier_t_plus_1_and_same_bar_conservative_sl() -> None:
     assert res_lock["exit_idx"] == 4
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     ("market", "symbol", "asset_type", "expected_scheme"),
     [
@@ -698,6 +699,7 @@ def test_c12_audit_period_decoupled_from_display_calibration_window(rel: str, me
     assert la["effective_independent_samples"] >= 20 > sa["effective_independent_samples"]
 
 
+@pytest.mark.slow
 def test_c04_c05_c10_backtest_replays_live_plan_with_bootstrap_ci(replay_recorded) -> None:
     req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
     bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
@@ -736,6 +738,7 @@ def test_c04_c05_c10_backtest_replays_live_plan_with_bootstrap_ci(replay_recorde
         assert bt["sample_size_warning"]
 
 
+@pytest.mark.slow
 def test_c06_v5_pipeline_is_days_invariant(replay_recorded, tmp_path: Path) -> None:
     keys = (
         "meta",
@@ -1110,6 +1113,7 @@ def _ols_r2_slope(values: list[float]) -> tuple[float, float]:
     return (sxy * sxy / (sxx * syy) if sxx and syy else 0.0), sxy / sxx
 
 
+@pytest.mark.slow
 def test_o3_01_rail_fit_has_no_convergence_bias() -> None:
     # 旧算法取凸包最后一条边，1034 个截面中收敛类占 85.5%、对称三角形 42.5%，强趋势截面被判成对称三角形/反向形态 35%
     patterns: list[str] = []
@@ -1133,6 +1137,7 @@ def test_o3_01_rail_fit_has_no_convergence_bias() -> None:
     assert misread / strong <= 0.20, f"强趋势截面误判 {misread}/{strong}"
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("horizon_bars", [15, 5])
 def test_o3_02_projection_timeline_within_horizon_and_triggers_off_noise(horizon_bars: int) -> None:
     signatures = set()
@@ -1160,6 +1165,7 @@ def test_o3_02_projection_timeline_within_horizon_and_triggers_off_noise(horizon
     assert len(signatures) >= (20 if horizon_bars == 15 else 5)
 
 
+@pytest.mark.slow
 def test_o3_03_wave_counts_primary_plus_distinct_alternates() -> None:
     with_alt = 0
     for _, _, _, layer in _o3_layers(step=40):
@@ -1210,6 +1216,7 @@ def test_o3_04_defense_and_short_plans_by_market(replay_recorded) -> None:
             assert "融券" in short["reason"]
 
 
+@pytest.mark.slow
 def test_o3_05_backtest_reports_rule_score_ic_and_action_forward_returns(replay_recorded) -> None:
     req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
     bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
@@ -1706,6 +1713,7 @@ def test_lint_response_catches_contract_violations_and_passes_clean_report(repla
     assert any("免责声明" in e for e in errs_bad)
 
 
+@pytest.mark.slow
 def test_triple_barrier_entry_zone_anchored_and_rr_insufficient_veto(replay_recorded) -> None:
     from analysis import analyze_bundle
 
@@ -1727,6 +1735,7 @@ def test_triple_barrier_entry_zone_anchored_and_rr_insufficient_veto(replay_reco
     assert bt["rule_score_ic"]["effective_independent_samples"] >= 20
 
 
+@pytest.mark.slow
 def test_regime_adaptive_scoring_and_breakeven_ratchet_boost_moutai_ic_and_winrate(replay_recorded) -> None:
     from analysis import analyze_bundle
 

@@ -154,12 +154,21 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
   --market US --symbol NVDA.US --asset-type equity --account-equity 100000 --output-dir artifacts/us --backtest
 ```
 
-### 3.3 测试与回归门禁（修改任何代码后必跑）
+### 3.3 测试与回归门禁
+
+| 层级 | 何时跑 | 目标耗时 |
+| --- | --- | --- |
+| 日常 | 每次改动后 | < 20 秒 |
+| 合并前 | 提 PR 前与 CI | 约 1.5 分钟 |
+
 ```bash
-# 1. 全量 pytest（单元、P0~P3 回归、TA-Lib 金标准、真实录制数据回放、网络异常、文档契约），pytest-xdist 按 CPU 核数并行
+# 日常：跳过约 5 秒以上的端到端流水线与回测用例（标记 slow），pytest-xdist 按 CPU 核数并行
+uv run --directory kline-structure-chart pytest -n auto -m "not slow"
+
+# 合并前 1：全量 pytest（单元、P0~P3 回归、TA-Lib 金标准、真实录制数据回放、网络异常、文档契约）
 uv run --directory kline-structure-chart pytest -v -n auto
 
-# 2. v4.1 结构层跨窗口不变性（真实录制行情，必跑）
+# 合并前 2：v4.1 结构层跨窗口不变性（真实录制行情）
 uv run --directory kline-structure-chart python tests/check_days_invariance.py --data tests/fixtures/recorded/sina_daily --step 40
 ```
 
