@@ -69,3 +69,12 @@ def test_historical_frequency_removed(replay_recorded, tmp_path: Path) -> None:
     assert "scenario_frequency_brier" not in bt["backtest"]
     assert "multi_scenarios_base_rates" not in bt["causal_replay_audit"]["modules_audited"]
     assert not (SCRIPTS / "base_rates.py").exists()
+
+
+def test_scenario_fan_removed(replay_recorded, tmp_path: Path) -> None:
+    rep = _cn_moutai(tmp_path)
+    assert "scenario_conditional_fan" not in rep["future_projection_15d"]
+    html_text = Path(rep["rendered_paths"]["dashboard_html"]).read_text(encoding="utf-8")
+    assert 'data-layer="scenario_fan"' not in html_text and "情景混合" not in html_text
+    md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    assert "情景混合" not in md

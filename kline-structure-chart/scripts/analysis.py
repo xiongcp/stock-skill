@@ -425,7 +425,6 @@ def analyze_bundle(
             meta=meta,
             horizon_bars=horizon_bars,
             extra_context=extra_ctx,
-            scenarios=projections.get("scenarios"),
         )
     else:
         base_p = round(float(last_c), p_dec)

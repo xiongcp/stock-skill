@@ -1357,36 +1357,23 @@ def test_o3_20_multi_scenario_engine_diversity_active_trigger_and_impulse_rules(
         assert detect_impulse_wave(layer_cn["sview"], bad_pivs, 0.015) is None
 
 
-def test_o3_23_and_o3_24_renderers_and_scenario_conditional_fan(replay_recorded, tmp_path: Path) -> None:
+def test_o3_23_renderers_draw_scenarios(replay_recorded, tmp_path: Path) -> None:
     rep = run_pipeline(
         {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
         output_dir=tmp_path,
         run_backtest=False,
     )
-    # O3-24：情景条件扇形必须显式标注非校准区间，且不篡改默认保形区间（q50 恒等于最新收盘价）
+    # 默认保形区间的中位数恒等于最新收盘价，不被情景路径篡改
     fp = rep["future_projection_15d"]
     last_close = rep["series_export"]["bars"][-1]["close"]
     assert all(abs(v - last_close) < 1e-6 for v in fp["base_median_q50"])
-    scf = fp["scenario_conditional_fan"]
-    assert scf["display_only"] is True
-    assert scf["calibrated"] is False
-    assert scf["legend_label_cn"] == "情景混合（非校准区间）"
-    assert len(scf["center_q50"]) == 15
-    for i in range(15):
-        assert scf["q10"][i] <= scf["q25"][i] <= scf["center_q50"][i] <= scf["q75"][i] <= scf["q90"][i]
-    # 情景条件扇形必须按价格量纲 base_c * sigma * sqrt(h) 展开，避免漏乘 base_c 导致首日 q10 高于现价
-    assert scf["q90"][0] - scf["center_q50"][0] >= last_close * 0.005
-    assert scf["q10"][0] < last_close
-
-    # O3-23：HTML 与 Markdown 包含多情景推演与情景混合（非校准区间）图层与说明
+    # O3-23：HTML 与 Markdown 包含多情景推演图层与说明
     html_text = Path(rep["rendered_paths"]["dashboard_html"]).read_text(encoding="utf-8")
     md_text = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
     png_path = Path(rep["rendered_paths"]["preview_png"])
     assert png_path.exists() and png_path.stat().st_size > 20_000
-    assert "情景混合（非校准区间）" in html_text
     assert "多情景推演" in html_text
     assert "多情景推演" in md_text
-    assert "情景混合（非校准区间）" in md_text
     for sc_item in rep["rule_scenarios"]["scenarios"]:
         assert sc_item["name"] in md_text
 

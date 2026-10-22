@@ -279,7 +279,6 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     <label class="layer-pill"><input type="checkbox" data-layer="conformal" checked /> 未来{horizon_n}日保形预测扇形(50%/80%)</label>
     <label class="layer-pill"><input type="checkbox" data-layer="quantiles" checked /> 分位数边界路径(q75/q50/q25)</label>
     <label class="layer-pill"><input type="checkbox" data-layer="scenarios" checked /> 多情景路径(虚线=待触发)</label>
-    <label class="layer-pill"><input type="checkbox" data-layer="scenario_fan" /> 情景混合（非校准区间）</label>
     <label class="layer-pill"><input type="checkbox" data-layer="barriers" checked /> Triple-Barrier 止盈止损框</label>
     <label class="layer-pill"><input type="checkbox" data-layer="structure" checked /> 核平滑与楔形/波段轨道</label>
     <label class="layer-pill"><input type="checkbox" data-layer="poc" checked /> 成交分布近似 POC</label>
@@ -528,7 +527,6 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     conformal: true,
     quantiles: true,
     scenarios: true,
-    scenario_fan: false,
     barriers: true,
     structure: true,
     poc: true,
@@ -555,7 +553,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     const isLive = activeReplayIdx === replays.length;
     document.querySelectorAll('#layerControls input[type=checkbox]').forEach(function(cb) {{
       const lk = cb.getAttribute('data-layer');
-      const liveOnly = (lk === 'scenarios' || lk === 'scenario_fan' || lk === 'barriers' || lk === 'poc' || lk === 'smc');
+      const liveOnly = (lk === 'scenarios' || lk === 'barriers' || lk === 'poc' || lk === 'smc');
       if (liveOnly) {{
         cb.disabled = !isLive;
         cb.parentElement.style.opacity = isLive ? '1' : '0.45';
@@ -654,10 +652,6 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     if (layers.conformal) {{
       activeFp.q10.forEach(function(p) {{ prices.push(p); }});
       activeFp.q90.forEach(function(p) {{ prices.push(p); }});
-    }}
-    if (layers.scenario_fan && fp.scenario_conditional_fan && activeReplayIdx === replays.length) {{
-      (fp.scenario_conditional_fan.q10 || []).forEach(function(p) {{ prices.push(p); }});
-      (fp.scenario_conditional_fan.q90 || []).forEach(function(p) {{ prices.push(p); }});
     }}
     if (layers.scenarios && activeScenarios.length > 0 && activeReplayIdx === replays.length) {{
       activeScenarios.forEach(function(sc) {{
@@ -896,38 +890,6 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       for (let i = hBars - 1; i >= 0; i--) ctx.lineTo(xOfFut(i), yOfPrice(activeFp.q25[i]));
       ctx.closePath();
       ctx.fill();
-    }}
-
-    // Layer: Scenario Conditional Fan (display-only, uncalibrated)
-    if (layers.scenario_fan && fp.scenario_conditional_fan && activeReplayIdx === replays.length) {{
-      const scf = fp.scenario_conditional_fan;
-      ctx.fillStyle = 'rgba(192, 132, 252, 0.14)';
-      ctx.beginPath();
-      ctx.moveTo(startX, startY);
-      for (let i = 0; i < hBars; i++) ctx.lineTo(xOfFut(i), yOfPrice(scf.q90[i]));
-      for (let i = hBars - 1; i >= 0; i--) ctx.lineTo(xOfFut(i), yOfPrice(scf.q10[i]));
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = 'rgba(192, 132, 252, 0.24)';
-      ctx.beginPath();
-      ctx.moveTo(startX, startY);
-      for (let i = 0; i < hBars; i++) ctx.lineTo(xOfFut(i), yOfPrice(scf.q75[i]));
-      for (let i = hBars - 1; i >= 0; i--) ctx.lineTo(xOfFut(i), yOfPrice(scf.q25[i]));
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.strokeStyle = 'rgba(192, 132, 252, 0.9)';
-      ctx.lineWidth = 1.8;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(startX, startY);
-      for (let i = 0; i < hBars; i++) ctx.lineTo(xOfFut(i), yOfPrice(scf.center_q50[i]));
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = '#c084fc';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.fillText(scf.legend_label_cn || '情景混合（非校准区间）', divX + 10, padT + 34);
     }}
 
     // Layer: 3 Quantile Scenario Paths (q75, q50, q25)

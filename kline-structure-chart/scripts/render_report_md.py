@@ -359,13 +359,6 @@ def render_report_markdown(
     cal = fp.get("calendar_coverage") or {}
     if cal and not cal.get("covered", True):
         lines += [f"- {len(cal['estimated_dates'])} 个未来日期超出休市表覆盖范围（至 {cal['coverage_end']}），按工作日估算。"]
-    scf = fp.get("scenario_conditional_fan") or {}
-    if scf and scf.get("center_q50"):
-        lines += [
-            f"- 附：{scf.get('legend_label_cn', '情景混合（非校准区间）')}（仅供展示，不替代上方默认保形区间）："
-            f"按各情景等权混合，第 {horizon} 日混合中枢 {price(scf['center_q50'][-1])}，"
-            f"80% 混合带 {price(scf['q10'][-1])} ~ {price(scf['q90'][-1])}。"
-        ]
     lines += ["- 这是逐日的边际区间，不代表整条价格路径的联合概率。", ""]
 
     # 7. 回测
