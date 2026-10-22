@@ -75,8 +75,7 @@ kline-structure-chart/
 │   ├── market_rules.py               # CN/HK/US 日历、涨跌停、价位表、印花税、收盘判定、代码映射与点位复权
 │   ├── data_gateway.py               # 新浪/Yahoo/腾讯取数、厂商数据校验、除权除息事件、腾讯快照补全简称/ST/港股每手股数、未收盘K线拆分、基准配对
 │   ├── structure.py                  # 结构层纯计算（拐点/轨道打分拟合/主+备选浪型计数/斐波那契/阶梯/三条推演），JSON 与 PNG 共用
-│   ├── scenarios.py                  # L1 多情景引擎（8 类标准情景前提判定、推动5浪识别、2~5 个活跃情景筛选、历史用时分位时间窗）
-│   ├── base_rates.py                 # L2 逐点无前视历史条件频率（三重屏障事件研究、95% Wilson 区间、小样本 Beta-Binomial 向基准收缩）
+│   ├── scenarios.py                  # L1 多情景引擎（8 类标准情景前提判定、推动5浪识别、2~5 个活跃情景筛选）
 │   ├── price_text.py                 # 价格文本识别与可引用价位收集
 │   ├── lint_response.py              # Agent 回复文本契约校验器（否决置顶、价格白名单、禁用术语与免责声明检查）
 │   ├── indicators.py                 # SMA/EMA/MACD/RSI/Stoch/ATR/ADX/Supertrend/BB/RVOL/VWAP + 量价因子
@@ -93,7 +92,7 @@ kline-structure-chart/
 │   └── render_structure_chart.py     # 1920x1160 PNG 渲染器（按市场配色；保留 v4.1 CLI）
 ├── references/                       # 公式字典、字段字典、解读指南与三市场制度规则（单一信息源）
 │   ├── math-patterns.md              # 指标、形态、预测区间公式
-│   ├── scenario-playbook.md          # 8 类标准情景库定义、历史条件频率与 Brier 检验口径（与 scenarios.py 一一对应）
+│   ├── scenario-playbook.md          # 8 类标准情景库定义与筛选、触发规则（与 scenarios.py 一一对应）
 │   ├── output-fields.md              # result.json / backtest.json 字段字典
 │   ├── interpretation-guide.md       # 形态、浪型、市场状态、风控与区间的解读要点和常见误读
 │   ├── failure-modes.md              # 撰写回复时的常见错误

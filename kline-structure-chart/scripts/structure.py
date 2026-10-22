@@ -10,7 +10,7 @@ import math
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Callable
 
-from scenarios import build_scenarios_with_base_rates
+from scenarios import build_scenarios
 
 REVERSAL = 0.05             # ABC：B 浪至少反向 5%
 B_MIN_RETRACE = 0.382       # ABC：B 浪至少收回 A 浪的 0.382
@@ -902,7 +902,6 @@ def compute_structure_layer(
     show: int,
     price_decimals: Callable[[float, str], int] | None = None,
     horizon_bars: int = 15,
-    benchmark_bars: list[dict] | None = None,
     round_price: Callable[[float, str], float] | None = None,
 ) -> dict[str, Any]:
     """一次性计算结构层全部结果，供 JSON 报告与 PNG 渲染共用。
@@ -962,7 +961,7 @@ def compute_structure_layer(
         live_price=float(ref_p) if active_intra else None,
         decimals=decimals,
     )
-    scen_bundle = build_scenarios_with_base_rates(
+    scen_bundle = build_scenarios(
         hist=hist,
         sview=sview,
         ref=float(last_c),
@@ -979,12 +978,8 @@ def compute_structure_layer(
         horizon_bars=horizon_bars,
         base_projections=projections,
         decimals=decimals,
-        benchmark_bars=benchmark_bars,
         round_price=round_price,
     )
-    projections["bull"]["historical_frequency"] = scen_bundle["bull_frequency"]
-    projections["neutral"]["historical_frequency"] = scen_bundle["neutral_frequency"]
-    projections["bear"]["historical_frequency"] = scen_bundle["bear_frequency"]
     projections["scenarios"] = scen_bundle["scenarios"]
     projections["scenario_count"] = scen_bundle["scenario_count"]
     projections["precondition_met_count"] = scen_bundle["precondition_met_count"]

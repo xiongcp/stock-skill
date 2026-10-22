@@ -152,49 +152,35 @@ def render_report_markdown(
     levels = report["mathematical_indicators"]["structure_levels"]
     wedge = levels["wedge_structure"]
     sc = report["rule_scenarios"]
-    bull_hf = (sc["bull"].get("historical_frequency") or {}).get("display_cn") or "—"
-    neut_hf = (sc["neutral"].get("historical_frequency") or {}).get("display_cn") or "—"
-    bear_hf = (sc["bear"].get("historical_frequency") or {}).get("display_cn") or "—"
     lines += [
         "## 3. 结构与条件推演（触发 → 目标 → 失效）",
         "",
         f"- 当前结构（近 120 日）：{wedge['pattern']}，{wedge['status_text']}。",
         "",
-        "| 路径 | 触发条件 | 目标位（来源） | 失效条件 | 历史条件频率 |",
-        "| --- | --- | --- | --- | --- |",
+        "| 路径 | 触发条件 | 目标位（来源） | 失效条件 |",
+        "| --- | --- | --- | --- |",
         f"| 上攻 | {_cell(sc['bull']['trigger'])} | {price(sc['bull']['target_price'])}（{_cell(sc['bull']['target_source'])}） "
-        f"| {_cell(sc['bull']['invalidation'])} | {_cell(bull_hf)} |",
-        f"| 震荡 | {_cell(sc['neutral']['condition'])} | 区间 {price(sc['neutral']['range'][0])} ~ {price(sc['neutral']['range'][1])} | — | {_cell(neut_hf)} |",
+        f"| {_cell(sc['bull']['invalidation'])} |",
+        f"| 震荡 | {_cell(sc['neutral']['condition'])} | 区间 {price(sc['neutral']['range'][0])} ~ {price(sc['neutral']['range'][1])} | — |",
         f"| 下探 | {_cell(sc['bear']['trigger'])} | {price(sc['bear']['target_price'])}（{_cell(sc['bear']['target_source'])}） "
-        f"| {_cell(sc['bear']['invalidation'])} | {_cell(bear_hf)} |",
+        f"| {_cell(sc['bear']['invalidation'])} |",
         "",
     ]
     multi_scenarios = sc.get("scenarios") or []
     if multi_scenarios:
         lines += [
-            "**多情景推演与无前视历史条件频率**",
+            "**多情景推演**",
             "",
-            "| 情景 | 状态 | 触发条件 | 目标位（来源） | 失效条件 | 预计用时（中位数） | 历史条件频率（先到目标） |",
-            "| --- | --- | --- | --- | --- | --- | --- |",
+            "| 情景 | 状态 | 触发条件 | 目标位（来源） | 失效条件 |",
+            "| --- | --- | --- | --- | --- |",
         ]
         for item in multi_scenarios:
-            tw = item.get("time_window_bars") or {}
-            hf_item = item.get("historical_frequency") or {}
-            tw_txt = f"{tw.get('median', '—')} 日（四分位 {tw.get('q25', '—')}~{tw.get('q75', '—')} 日）"
             lines += [
                 f"| {_cell(item['name'])} | {_cell(item.get('status_cn', item.get('status')))} "
                 f"| {_cell(item['trigger'])} | {price(item['target_price'])}（{_cell(item['target_source'])}） "
-                f"| {_cell(item['invalidation'])} | {tw_txt} | {_cell(hf_item.get('display_cn', '—'))} |"
+                f"| {_cell(item['invalidation'])} |"
             ]
-        lines += [
-            "",
-            "- 口径说明：历史条件频率是在本标的自身历史上逐日无前视统计的实际观测频率（只消费当时已成熟的样本，与括号内 Wilson 95% 区间同口径）。"
-            "它统计的是以触发日 ATR 为单位的**标准化屏障事件**（如「15 根K线内先触及 +1.55×ATR 而非 −1.05×ATR」，各情景定义见 `historical_frequency.event_definition_cn`），"
-            "**不是表中目标价的到达频率**；同一情景相邻触发日只间隔 2 根K线，结果期互相重叠，n 高估了独立样本数。"
-            "括号内的「收缩后估计」是低样本（n < 30）时向市场基准做 Beta-Binomial 修正后的模型估计（风控守门使用该值），不是观测频率。"
-            "该数字不是交易胜率，也不是未来上涨概率。",
-            "",
-        ]
+        lines += [""]
     imp = sc.get("impulse_wave")
     if imp:
         lines += [f"- 推动浪识别：{imp['label']}（{imp['invalidation_text']}；1.618×浪1 测算位 {price(imp['wave3_1618_target'])}）。"]
@@ -377,7 +363,7 @@ def render_report_markdown(
     if scf and scf.get("center_q50"):
         lines += [
             f"- 附：{scf.get('legend_label_cn', '情景混合（非校准区间）')}（仅供展示，不替代上方默认保形区间）："
-            f"按各情景历史条件频率加权混合，第 {horizon} 日混合中枢 {price(scf['center_q50'][-1])}，"
+            f"按各情景等权混合，第 {horizon} 日混合中枢 {price(scf['center_q50'][-1])}，"
             f"80% 混合带 {price(scf['q10'][-1])} ~ {price(scf['q90'][-1])}。"
         ]
     lines += ["- 这是逐日的边际区间，不代表整条价格路径的联合概率。", ""]
@@ -454,29 +440,6 @@ def render_report_markdown(
                 "BREAKOUT_LOW_VOLUME": "突破缺量",
             }
             lines += ["- 风控否决原因统计：" + "；".join(f"{veto_cn.get(k, k)} {v} 次" for k, v in veto_counts.items()) + "。"]
-        sfb = bt.get("scenario_frequency_brier") or {}
-        sfb_n = sfb.get("samples") or sfb.get("evaluated_events") or 0
-        if sfb and sfb_n > 0:
-            bss = sfb.get("brier_skill_score")
-            bss_txt = "—" if bss is None else f"{bss:+.4f}"
-            lines += [
-                f"- 历史条件频率样本外检验（共 {sfb_n} 次情景事件）："
-                f"Brier 分数 = {sfb['brier_score']:.4f}，各情景自身基准率加权 "
-                f"Brier 分数 = {sfb['climatology_brier_score']:.4f}，技能分 BSS = {bss_txt}（{sfb.get('verdict')}）。"
-            ]
-            non_empty_buckets = [b for b in (sfb.get("reliability_buckets") or []) if b.get("count", 0) > 0]
-            if non_empty_buckets:
-                lines += [
-                    "",
-                    "| 预测历史频率分桶 | 事件数 | 平均预测频率 | 实际先到目标占比 |",
-                    "| --- | --- | --- | --- |",
-                ]
-                for b in non_empty_buckets:
-                    b_label = b.get("bucket_pct") or b["bucket"]
-                    lines += [
-                        f"| {b_label} | {b['count']} | {_pct(b['mean_predicted_freq'])} | {_pct(b['empirical_hit_rate'])} |"
-                    ]
-                lines += [""]
         if audit_bt:
             lines += [
                 f"- 无前视审计：{'通过' if audit_bt.get('passed') else '未通过'}"

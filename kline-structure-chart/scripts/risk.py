@@ -366,16 +366,6 @@ def compute_triple_barrier_plan(
         action = "NEUTRAL_HOLD_WAIT"
         action_cn = "观望等待突破信号"
 
-    # L2 历史条件频率守门（经验 Meta-Labeling）：若该标的自身历史上攻先到目标频率 < 30% 且显著低于失效或下探频率，将确认做多降级为观察
-    bull_hf = (projections.get("bull") or {}).get("historical_frequency") or {}
-    bear_hf = (projections.get("bear") or {}).get("historical_frequency") or {}
-    b_tgt = min(_num_or(bull_hf, "target_freq", 0.45), _num_or(bull_hf, "raw_target_freq", 0.45))
-    b_inv = max(_num_or(bull_hf, "invalidation_freq", 0.40), _num_or(bull_hf, "raw_invalidation_freq", 0.40))
-    dn_tgt = max(_num_or(bear_hf, "target_freq", 0.40), _num_or(bear_hf, "raw_target_freq", 0.40))
-    if action == "LONG_CONFIRMED" and b_tgt < 0.30 and (b_inv > b_tgt + 0.12 or dn_tgt > b_tgt + 0.12):
-        action = "WATCH_LONG_SETUP"
-        action_cn = "条件观察（待放量/收盘确认）"
-
     # Position sizing calculation
     # 每股风险按入场区上沿（区内最差成交价）计：在入场区内任意价位成交，按止损价离场的亏损都不超过风险预算
     adj_factor = float(last_bar.get("adj_factor", 1.0)) or 1.0

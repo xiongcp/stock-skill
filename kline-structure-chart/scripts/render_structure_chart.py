@@ -659,23 +659,9 @@ def render(
     )
     draw.text((left, 50), subtitle, font=f_sub, fill=MUTED)
 
-    def _branch_freq_style(branch_key: str, default_dashed: bool) -> tuple[str, float, int, bool]:
-        hf = (projections.get(branch_key) or {}).get("historical_frequency") or {}
-        if not hf or hf.get("target_freq") is None:
-            return "", 2.8, 255, default_dashed
-        freq = max(0.0, min(1.0, float(hf["target_freq"])))
-        n_samp = int(hf.get("sample_size") or 0)
-        low_s = bool(hf.get("low_sample", n_samp < 30))
-        raw_freq = float(hf["raw_target_freq"]) if hf.get("raw_target_freq") is not None else freq
-        pct_str = f"{raw_freq * 100:.1f}%" if n_samp > 0 else f"先验{freq * 100:.0f}%"
-        w_val = round(1.8 + 2.2 * freq, 2)
-        a_val = max(135, min(255, int(round((145 if low_s else 175) + 80 * freq))))
-        tag_prefix = "[低样本] " if low_s else ""
-        return f" {tag_prefix}{pct_str}(n={n_samp})", w_val, a_val, (True if low_s else default_dashed)
-
-    bull_ftag, bull_w, bull_a, bull_dash = _branch_freq_style("bull", False)
-    neut_ftag, neut_w, neut_a, neut_dash = _branch_freq_style("neutral", True)
-    bear_ftag, bear_w, bear_a, bear_dash = _branch_freq_style("bear", False)
+    bull_ftag, bull_w, bull_a, bull_dash = "", 2.8, 255, False
+    neut_ftag, neut_w, neut_a, neut_dash = "", 2.8, 255, True
+    bear_ftag, bear_w, bear_a, bear_dash = "", 2.8, 255, False
 
     legend = [
         ("阳线", UP, "box"),
@@ -870,7 +856,7 @@ def render(
     dashed_line(draw, (div_x, top), (div_x, main_bottom), fill=(96, 165, 250, 220), width=1.8, dash=8, gap=6)
     scen_cnt = len(projections.get("scenarios") or [])
     zone_txt = (
-        f"规则推演区(三路径+{scen_cnt}情景) · 线宽按频率 · 虚线=低样本(n<30)"
+        f"规则推演区(三路径+{scen_cnt}情景) · 虚线=待触发"
         if scen_cnt
         else f"规则推演区 · {up_word}:上攻 / 黄:震荡 / {down_word}:下探（非预测）"
     )
@@ -1051,16 +1037,10 @@ def render(
             continue
         sc_dir = str(sc_item.get("direction") or "NEUTRAL")
         sc_col = PROJ_BULL if sc_dir == "BULLISH" else (PROJ_BEAR if sc_dir == "BEARISH" else PROJ_NEUTRAL)
-        sc_hf = sc_item.get("historical_frequency") or {}
-        sc_freq = max(0.0, min(1.0, float(sc_hf.get("target_freq") or 0.35)))
-        sc_n = int(sc_hf.get("sample_size") or 0)
-        sc_low = bool(sc_hf.get("low_sample", sc_n < 30))
-        sc_raw = float(sc_hf["raw_target_freq"]) if sc_hf.get("raw_target_freq") is not None else sc_freq
-        sc_pct = f"{sc_raw * 100:.1f}%" if sc_n > 0 else f"先验{sc_freq * 100:.0f}%"
         sc_pts = [(x_of(last_bar_idx + dx), yp(p)) for dx, p in sc_wps]
-        draw_arrow_polyline(draw, sc_pts, fill=sc_col, width=round(1.6 + 1.8 * sc_freq, 2), dashed=True, alpha=165 if sc_low else 200)
-        sc_low_tag = "[低样本] " if sc_low else ""
-        right_gutter_tags.append((sc_pts[-1][1], f"{sc_item['name']} {fp(sc_tgt)} {sc_low_tag}{sc_pct}(n={sc_n})", sc_col))
+        sc_pending = sc_item.get("status") != "ACTIVE"
+        draw_arrow_polyline(draw, sc_pts, fill=sc_col, width=2.2, dashed=sc_pending, alpha=200)
+        right_gutter_tags.append((sc_pts[-1][1], f"{sc_item['name']} {fp(sc_tgt)}", sc_col))
 
     step_boxes: list[tuple[int, int, int, int]] = []
     for key, col, _, _, _, _ in proj_configs:

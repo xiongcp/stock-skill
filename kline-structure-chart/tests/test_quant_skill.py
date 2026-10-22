@@ -193,7 +193,6 @@ def test_causal_replay_invariance_no_lookahead() -> None:
     assert audit["passed"] is True
     assert audit["mismatches_count"] == 0
     assert "conformal_forecast" in audit["modules_audited"]
-    assert "multi_scenarios_base_rates" in audit["modules_audited"]
 
     # C-08：历史相似 Patch 终点满足 cand_idx + H <= cur_end - L_patch（严格无重叠）
     ana = match_historical_analogues(bars, horizon_bars=15, patch_len=20, top_k=5)
@@ -1286,10 +1285,9 @@ def test_o3_20_multi_scenario_engine_diversity_active_trigger_and_impulse_rules(
         req = {"symbol": sym, "market": market, "asset_type": asset_type, "display_bars": 120, "horizon_bars": 15}
         bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
         bars = bundle["target"]["bars"]
-        bench_bars = (bundle.get("benchmark") or {}).get("bars")
         for cut in range(220, len(bars), 20):
             sub = bars[:cut]
-            layer = compute_structure_layer(sub, None, 120, horizon_bars=15, benchmark_bars=bench_bars)
+            layer = compute_structure_layer(sub, None, 120, horizon_bars=15)
             proj = layer["projections"]
             scs = proj["scenarios"]
             assert 2 <= len(scs) <= 5
@@ -1303,8 +1301,6 @@ def test_o3_20_multi_scenario_engine_diversity_active_trigger_and_impulse_rules(
                 if not s["precondition_met"]:
                     assert proj["precondition_met_count"] < 2
                     assert s["status"] == "PENDING_TRIGGER"
-                tw = s["time_window_bars"]
-                assert 1.0 <= tw["q25"] <= tw["median"] <= tw["q75"] <= 15.0
                 if s["precondition_met"] and s["trigger_distance_atr"] < 0.5:
                     assert s["status"] == "ACTIVE" and s["status_cn"] == "已在进行中"
                     assert s["trigger_price"] is None
@@ -1361,111 +1357,6 @@ def test_o3_20_multi_scenario_engine_diversity_active_trigger_and_impulse_rules(
         assert detect_impulse_wave(layer_cn["sview"], bad_pivs, 0.015) is None
 
 
-def test_o3_21_base_rates_point_in_time_no_lookahead_and_beta_binomial_shrinkage(replay_recorded) -> None:
-    from base_rates import (
-        MIN_RELIABLE_SAMPLES,
-        PRIOR_STRENGTH,
-        _build_causal_features,
-        compute_scenario_frequency,
-    )
-
-    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
-    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
-    bars = bundle["target"]["bars"]
-    bench_bars = bundle["benchmark"]["bars"]
-    cutoff = 300
-    horizon = 15
-
-    # 1. 严格无前视：在全序列上指定 max_cutoff_idx=cutoff 与直接截断 bars[:cutoff+1] 完全一致，
-    #    即使把 cutoff 之后的未来价格篡改为极端值，只要不超过 cutoff，历史条件频率也分毫不差
-    feat_trunc = _build_causal_features(bars[: cutoff + 1])
-    altered_bars = copy.deepcopy(bars)
-    for k in range(cutoff + 1, len(altered_bars)):
-        altered_bars[k]["close"] = float(altered_bars[k]["close"]) * 2.5
-        altered_bars[k]["high"] = float(altered_bars[k]["high"]) * 2.6
-        altered_bars[k]["low"] = float(altered_bars[k]["low"]) * 2.4
-    feat_altered = _build_causal_features(altered_bars[: cutoff + 1])
-
-    for sc_id in ("TREND_CONTINUATION", "BREAKOUT_RETEST", "RANGE_OSCILLATION", "BREAKDOWN_DECLINE", "OVERSOLD_BOUNCE"):
-        f1 = compute_scenario_frequency(feat_trunc, sc_id, horizon_bars=horizon)
-        f2 = compute_scenario_frequency(feat_altered, sc_id, horizon_bars=horizon)
-        assert f1 == f2
-        assert f1["sample_size"] == f1["target_hits"] + f1["invalidation_hits"] + f1["expired_count"]
-        lo_ci, hi_ci = f1["target_ci_95"]
-        assert 0.0 <= lo_ci <= hi_ci <= 1.0
-        if f1["sample_size"] > 0:
-            assert lo_ci <= f1["raw_target_freq"] <= hi_ci
-        assert abs(f1["target_freq"] + f1["invalidation_freq"] + f1["expired_freq"] - 1.0) <= 1e-3
-
-    # 2. 低样本 (n < 30) Beta-Binomial 向市场基准收缩校验
-    short_feat = _build_causal_features(bars[:140])
-    bench_feat = _build_causal_features(bench_bars[:300])
-    f_low = compute_scenario_frequency(
-        short_feat, "OVERSOLD_BOUNCE", horizon_bars=horizon, direction="BULLISH", bench_feat=bench_feat
-    )
-    assert f_low["sample_size"] < MIN_RELIABLE_SAMPLES
-    assert f_low["low_sample"] is True
-    assert f_low["shrinkage"]["applied"] is True
-    assert f_low["shrinkage"]["prior_source"] == "BENCHMARK_INDEX"
-    assert "低样本" in f_low["display_cn"] and "Beta-Binomial" in f_low["display_cn"]
-    expected_post = (
-        f_low["target_hits"] + PRIOR_STRENGTH * f_low["shrinkage"]["prior_target_freq"]
-    ) / (f_low["sample_size"] + PRIOR_STRENGTH)
-    assert f_low["shrunk_target_freq"] == pytest.approx(round(expected_post, 4), abs=1e-4)
-
-    # 3. 零样本 (n == 0) 与无市场基准 (UNIFORM_PRIOR) 时，raw_target_freq 不把先验伪装成观测频率，且文案写温和先验
-    f_zero = compute_scenario_frequency(
-        short_feat, "OVERSOLD_BOUNCE", horizon_bars=horizon, direction="BULLISH", bench_feat=None, max_cutoff_idx=65
-    )
-    assert f_zero["sample_size"] == 0
-    assert f_zero["raw_target_freq"] == 0.0
-    assert f_zero["shrinkage"]["prior_source"] == "UNIFORM_PRIOR"
-    assert "温和先验" in f_zero["display_cn"] and "市场基准" not in f_zero["display_cn"]
-
-
-def test_o3_22_backtest_scenario_frequency_brier_and_reliability_buckets(replay_recorded) -> None:
-    from evaluation import _evaluate_scenario_brier
-
-    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
-    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
-    bt = run_plan_backtest(bundle, req, horizon_bars=15, step=15)
-    sfb = bt["scenario_frequency_brier"]
-    assert sfb["samples"] > 0
-    assert 0.0 <= sfb["brier_score"] <= 1.0
-    assert 0.0 <= sfb["climatology_base_rate"] <= 1.0
-    assert 0.0 <= sfb["climatology_brier_score"] <= 1.0
-    assert len(sfb["reliability_buckets"]) == 5
-    assert sum(b["count"] for b in sfb["reliability_buckets"]) == sfb["samples"]
-    if sfb["brier_skill_score"] <= 0:
-        assert sfb["discriminative"] is False
-        assert "历史频率具有区分度" not in sfb["verdict"]
-    else:
-        assert sfb["discriminative"] is True
-        assert "历史频率具有区分度" in sfb["verdict"]
-
-    # 验证按各情景自身基准率（per-scenario climatology）计算的 BSS > 0 与 <= 0 边界：
-    # 仅靠跨情景常数差异（A 全 1、B 全 0）在各自情景内无区分度，BSS 必须 <= 0
-    pooled_only_records = [("TREND_CONTINUATION", 0.8, 1)] * 12 + [("BREAKDOWN_DECLINE", 0.2, 0)] * 12
-    res_pooled_only = _evaluate_scenario_brier(pooled_only_records)
-    assert res_pooled_only["brier_skill_score"] <= 0 and res_pooled_only["discriminative"] is False
-
-    # 在同一情景内部对高低概率样本有真实区分能力时，per-scenario BSS > 0
-    good_records = (
-        [("TREND_CONTINUATION", 0.85, 1)] * 8
-        + [("TREND_CONTINUATION", 0.15, 0)] * 8
-        + [("BREAKDOWN_DECLINE", 0.80, 1)] * 8
-        + [("BREAKDOWN_DECLINE", 0.20, 0)] * 8
-    )
-    res_good = _evaluate_scenario_brier(good_records)
-    assert res_good["brier_skill_score"] > 0 and res_good["discriminative"] is True
-    assert "历史频率具有区分度" in res_good["verdict"]
-
-    bad_records = [("TREND_CONTINUATION", 0.8, 0)] * 12 + [("BREAKDOWN_DECLINE", 0.2, 1)] * 12
-    res_bad = _evaluate_scenario_brier(bad_records)
-    assert res_bad["brier_skill_score"] <= 0 and res_bad["discriminative"] is False
-    assert "历史频率具有区分度" not in res_bad["verdict"]
-
-
 def test_o3_23_and_o3_24_renderers_and_scenario_conditional_fan(replay_recorded, tmp_path: Path) -> None:
     rep = run_pipeline(
         {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
@@ -1487,18 +1378,17 @@ def test_o3_23_and_o3_24_renderers_and_scenario_conditional_fan(replay_recorded,
     assert scf["q90"][0] - scf["center_q50"][0] >= last_close * 0.005
     assert scf["q10"][0] < last_close
 
-    # O3-23：HTML 与 Markdown 包含历史条件频率、样本数 n、情景混合（非校准区间）图层与说明
+    # O3-23：HTML 与 Markdown 包含多情景推演与情景混合（非校准区间）图层与说明
     html_text = Path(rep["rendered_paths"]["dashboard_html"]).read_text(encoding="utf-8")
     md_text = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
     png_path = Path(rep["rendered_paths"]["preview_png"])
     assert png_path.exists() and png_path.stat().st_size > 20_000
     assert "情景混合（非校准区间）" in html_text
-    assert "多情景推演与历史条件频率" in html_text
-    assert "多情景推演与无前视历史条件频率" in md_text
+    assert "多情景推演" in html_text
+    assert "多情景推演" in md_text
     assert "情景混合（非校准区间）" in md_text
     for sc_item in rep["rule_scenarios"]["scenarios"]:
         assert sc_item["name"] in md_text
-        assert f"n = {sc_item['historical_frequency']['sample_size']}" in md_text
 
 
 def test_hk_etp_auto_detection_and_stamp_duty_exemption() -> None:
@@ -1559,13 +1449,11 @@ def test_lint_response_catches_contract_violations_and_passes_clean_report(repla
     assert any("上涨概率" in e or "规则分" in e for e in errs_bad)
     assert any("9123.45" in e for e in errs_bad)
 
-    # UNAVAILABLE 时任何带交易动作的价格（如 "1300.00 买入"）与捏造历史条件频率均被拦截
+    # UNAVAILABLE 时任何带交易动作的价格（如 "1300.00 买入"）均被拦截
     unavail_rep = copy.deepcopy(rep)
     unavail_rep["quality"]["status"] = "UNAVAILABLE"
     errs_unavail = lint_agent_response("建议在 1300.00 买入，不构成投资建议。", unavail_rep)
     assert any("UNAVAILABLE" in e for e in errs_unavail)
-    errs_fake_hf = lint_agent_response("风控否决。该情景历史条件频率 99.9%，不构成投资建议。", rep)
-    assert any("历史条件频率" in e for e in errs_fake_hf)
     assert any("免责声明" in e for e in errs_bad)
 
 
@@ -1631,37 +1519,6 @@ def test_p0_mean_reversion_rule_score_adjustment_is_disclosed(replay_recorded, t
     assert f"四组规则分项合计 {mtf['components_total']:.1f} 经反转调整为 {mtf['rule_score']:.1f}" in digest
 
 
-def test_p0_l2_display_leads_with_observed_frequency_inside_its_wilson_interval(replay_recorded) -> None:
-    """「历史条件频率」数字必须是实际观测频率（与 Wilson 区间同口径）；收缩/体制加权估计单独标注，并写明标准化事件定义。"""
-    import re as _re
-
-    from base_rates import _build_causal_features, compute_scenario_frequency
-
-    bars = load_recorded("sina_daily/sh600519.json")
-    bench = load_recorded("sina_daily/sh000300.json")
-    checked = blended = 0
-    for cut in range(480, len(bars), 60):
-        feat = _build_causal_features(bars[: cut + 1])
-        bfeat = _build_causal_features([b for b in bench if b["day"] <= bars[cut]["day"]])
-        for sc_id, direction in (("OVERSOLD_BOUNCE", "BULLISH"), ("BREAKDOWN_DECLINE", "BEARISH"),
-                                 ("RANGE_OSCILLATION", "NEUTRAL"), ("BREAKOUT_RETEST", "BULLISH")):
-            hf = compute_scenario_frequency(feat, sc_id, horizon_bars=15, direction=direction, bench_feat=bfeat)
-            if hf["sample_size"] == 0:
-                continue
-            checked += 1
-            m = _re.match(r"历史条件频率 (\d+\.\d)%", hf["display_cn"])
-            assert m and float(m.group(1)) == hf["raw_target_freq_pct"], hf["display_cn"]
-            lo, hi = hf["target_ci_95_pct"]
-            assert lo - 0.05 <= hf["raw_target_freq_pct"] <= hi + 0.05
-            assert "标准化事件" in hf["event_definition_cn"] and "不是本情景目标价" in hf["event_definition_cn"]
-            if hf["low_sample"]:
-                assert "收缩后估计" in hf["display_cn"] and hf["estimate_method"] == "BETA_BINOMIAL_SHRINKAGE"
-            else:
-                assert hf["estimate_method"] == "RAW"
-                assert hf["target_freq"] == hf["raw_target_freq"]
-    assert checked >= 10
-
-
 def test_p0_lint_rejects_skill_md_counterexample_and_unvalidated_probabilities(replay_recorded, tmp_path: Path) -> None:
     """SKILL.md 自己列出的错误回复必须被 lint 拦截；合规的报告、否定式说明与带 95% 区间的回测胜率不得误报。"""
     from lint_response import lint_agent_response
@@ -1698,8 +1555,6 @@ def test_p0_lint_rejects_skill_md_counterexample_and_unvalidated_probabilities(r
         int(rep["meta"].get("price_decimals") or 2),
         (rep.get("series_export") or {}).get("bars") or [],
     )["prices"]
-    sc0 = rep["rule_scenarios"]["scenarios"][0]
-    assert all(abs(p - sc0["historical_frequency"]["target_freq"]) > 1e-9 for p in wl if p < 1.0)
     assert any(abs(p - rep["rule_scenarios"]["bear"]["rebound_cap"]) <= 0.01 for p in wl)
 
 
@@ -1707,7 +1562,6 @@ def test_p1_all_eight_audit_items_regression(replay_recorded, tmp_path: Path) ->
     """针对 8 项 P1 审查问题的逐项回归测试。"""
     from zoneinfo import ZoneInfo
     from analysis import analyze_bundle
-    from evaluation import _evaluate_scenario_brier
     from market_rules import get_daily_price_limit_pct, get_market_microstructure_rules, round_to_tick
     from risk import compute_triple_barrier_plan
 
@@ -1736,13 +1590,6 @@ def test_p1_all_eight_audit_items_regression(replay_recorded, tmp_path: Path) ->
                 assert sc_item["selection_role"] == "CONDITIONAL_FALLBACK"
                 assert sc_item["status"] == "PENDING_TRIGGER"
 
-    # 3. Brier 技能分按各情景自身基准率（per-scenario climatology）计算：茅台样本上 BSS <= 0，discriminative=False
-    sfb = bt["scenario_frequency_brier"]
-    assert sfb["brier_skill_score"] <= 0.0 and sfb["discriminative"] is False
-    assert "历史频率具有区分度" not in sfb["verdict"]
-    for sc_stat in sfb["per_scenario"].values():
-        assert "climatology_brier_score" in sc_stat and "brier_skill_score" in sc_stat
-
     # 4. --as-of 设为当天且尚未收盘时，必须拆出盘中未收盘 K 线，不得算进已完成序列
     sh_tz = ZoneInfo("Asia/Shanghai")
     intraday_now = datetime(2026, 10, 15, 10, 30, tzinfo=sh_tz)
@@ -1767,27 +1614,10 @@ def test_p1_all_eight_audit_items_regression(replay_recorded, tmp_path: Path) ->
     assert get_market_microstructure_rules("CN", "etf", "588000.SH")["daily_price_limit_pct"] == 0.20
     assert get_market_microstructure_rules("CN", "etf", "159915.SZ")["daily_price_limit_pct"] == 0.20
 
-    # 6. 风控守门：频率为 0.0 时不得被 or 0.45 误当成缺失值跳过守门
+    # 6/7 共用的伪造输入：把看多目标抬到现价 +15%，其余沿用真实报告
     fake_proj = copy.deepcopy(rep["rule_scenarios"])
-    fake_proj["bull"]["historical_frequency"] = {
-        "target_freq": 0.0,
-        "raw_target_freq": 0.0,
-        "invalidation_freq": 0.55,
-        "raw_invalidation_freq": 0.55,
-    }
-    fake_mtf = copy.deepcopy(rep["multi_timeframe_score"])
-    fake_mtf["rule_score"] = 75.0
-    fake_mtf["timeframes_aligned"]["scoring_regime"] = "MOMENTUM_TREND"
-    fake_wedge = {**rep["mathematical_indicators"]["structure_levels"]["wedge_structure"], "status": "above"}
-    fake_ind = copy.deepcopy(rep["mathematical_indicators"])
-    fake_ind["momentum"]["rvol20"] = 1.50
-    fake_ind["momentum"]["rsi14"] = 55.0
     fake_bench = {**rep["market_benchmark"], "regime_score": 60.0, "benchmark_missing": False}
     fake_proj["bull"]["target_price"] = float(bundle["target"]["bars"][-1]["close"]) * 1.15
-    dec_zero, _, _ = compute_triple_barrier_plan(
-        bundle["target"]["bars"], rep["meta"], fake_ind, fake_wedge, {}, fake_proj, fake_mtf, [], fake_bench
-    )
-    assert dec_zero["action"] == "WATCH_LONG_SETUP"
 
     # 7. 均值回归体制下 LEFT_SIDE_PULLBACK 入场区与止损按左侧回踩公式计算，且要求 RVOL20 <= 1.10 缩量
     mr_mtf = copy.deepcopy(rep["multi_timeframe_score"])
@@ -2294,14 +2124,14 @@ def test_lint_catches_every_buy_shares_mention_under_veto(replay_recorded) -> No
     assert not any("买入股数" in e for e in lint_agent_response(clean, rep))
 
 
-def test_png_draws_volume_profile_poc_and_low_sample_tag(replay_recorded, tmp_path: Path) -> None:
-    """PNG 必须同源绘制 POC（图例与右侧标签），且 L1 情景低样本时带 [低样本]；报告里 HTML 观察区全角一致。"""
+def test_png_draws_volume_profile_poc(replay_recorded, tmp_path: Path) -> None:
+    """PNG 必须同源绘制 POC（图例与右侧标签）；报告里 HTML 观察区全角一致。"""
     rep = run_pipeline(
         {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
         output_dir=tmp_path,
     )
     src = Path(render_structure_chart.__file__).read_text(encoding="utf-8")
-    assert "volume_profile" in src and "POC 成交分布近似" in src and "[低样本] " in src
+    assert "volume_profile" in src and "POC 成交分布近似" in src
     assert rep["volume_profile"]["poc_price"] > 0
     assert "获利盘" not in src and "主力筹码" not in src
 

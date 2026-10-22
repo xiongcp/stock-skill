@@ -216,14 +216,9 @@ def _build_scenario_conditional_fan(
     daily_limit_pct: float | None,
     scenarios: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
-    """按各适用情景的 L2 历史条件频率加权合成条件分布扇形（仅用于展示，非校准区间）。"""
+    """按各适用情景等权合成条件分布扇形（仅用于展示，非校准区间；整段将在后续任务中删除）。"""
     items = list(scenarios or [])
-    raw_weights: list[float] = []
-    for s in items:
-        hf = s.get("historical_frequency") or {}
-        raw_w = hf.get("target_freq") if hf.get("target_freq") is not None else hf.get("shrunk_target_freq")
-        w = float(raw_w) if raw_w is not None else 0.25
-        raw_weights.append(max(0.05, w))
+    raw_weights: list[float] = [1.0 for _ in items]
     w_sum = sum(raw_weights) or 1.0
     norm_weights = [w / w_sum for w in raw_weights]
 
@@ -242,8 +237,7 @@ def _build_scenario_conditional_fan(
             dn_disp = 0.0
             for s, w in zip(items, norm_weights):
                 tgt = float(s.get("target_price") or base_c)
-                tw = s.get("time_window_bars") or {}
-                t_med = max(1.0, float(tw.get("median") or horizon_bars))
+                t_med = float(max(1, horizon_bars))
                 prog = min(1.0, h / t_med)
                 c_s = base_c + (tgt - base_c) * prog * 0.55
                 center_h += w * c_s
@@ -281,13 +275,12 @@ def _build_scenario_conditional_fan(
         "display_only": True,
         "calibrated": False,
         "legend_label_cn": "情景混合（非校准区间）",
-        "note": "按各适用情景的 L2 历史条件频率加权合成的条件分布扇形，仅用于展示情景偏态，非校准区间；默认区间仍为鞅中心分期限保形区间。",
+        "note": "按各适用情景等权合成的条件分布扇形，仅用于展示情景偏态，非校准区间；默认区间仍为鞅中心分期限保形区间。",
         "weights": [
             {
                 "id": s["id"],
                 "name": s["name"],
                 "direction": s["direction"],
-                "target_freq": float((s.get("historical_frequency") or {}).get("target_freq") or 0.0),
                 "normalized_weight": round(w, 4),
             }
             for s, w in zip(items, norm_weights)

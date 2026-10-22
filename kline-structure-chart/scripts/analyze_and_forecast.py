@@ -60,14 +60,12 @@ def run_pipeline(
     )
     # 结构层只算一次：同一份结果写入 JSON 并交给 PNG 渲染器（算图分离）；价格文本按价位表精度，与 report.md 一致
     inst = bundle["target"]["instrument"]
-    bench_bars_raw = (bundle.get("benchmark") or {}).get("bars")
     layer = compute_structure_layer(
         bundle["target"]["bars"],
         bundle["target"].get("intraday"),
         int(request.get("display_bars") or 120),
         price_decimals=lambda price, day: price_decimals(price, inst["market"], inst["asset_type"], day),
         horizon_bars=horizon_bars,
-        benchmark_bars=bench_bars_raw,
         round_price=lambda price, day: round_to_tick(price, inst["market"], inst["asset_type"], day),
     )
     report = analyze_bundle(bundle, request, include_replay=True, structure=layer)

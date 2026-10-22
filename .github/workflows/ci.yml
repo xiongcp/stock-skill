@@ -52,7 +52,6 @@ jobs:
             test -L "$FAKE_HOME/$d/kline-structure-chart"
             test -f "$FAKE_HOME/$d/kline-structure-chart/SKILL.md"
             test -f "$FAKE_HOME/$d/kline-structure-chart/scripts/scenarios.py"
-            test -f "$FAKE_HOME/$d/kline-structure-chart/scripts/base_rates.py"
             test -f "$FAKE_HOME/$d/kline-structure-chart/scripts/price_text.py"
             test -f "$FAKE_HOME/$d/kline-structure-chart/scripts/lint_response.py"
           done

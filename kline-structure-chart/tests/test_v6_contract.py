@@ -57,3 +57,15 @@ def test_price_whitelist_moved_to_price_text() -> None:
     assert wl["prices"] == [12.35, 12.5, 12.8, 13.0]  # 盈亏比（ratio）与成交量不是价格
     assert price_in_whitelist(12.34, wl["prices"], wl["tolerance"])
     assert not price_in_whitelist(1.4, wl["prices"], wl["tolerance"])
+
+
+def test_historical_frequency_removed(replay_recorded, tmp_path: Path) -> None:
+    rep = _cn_moutai(tmp_path, run_backtest=True, backtest_step=20)
+    # pytest 的 tmp_path 目录名由测试函数名截断而来，会含 "historical_frequency"，先剔除再查字段
+    text = json.dumps({k: v for k, v in rep.items() if k != "rendered_paths"}, ensure_ascii=False).replace(str(tmp_path), "")
+    for token in ("historical_frequency", "time_window_bars", "target_freq", "bars_to_target"):
+        assert token not in text
+    bt = json.loads(Path(rep["rendered_paths"]["backtest_json"]).read_text(encoding="utf-8"))
+    assert "scenario_frequency_brier" not in bt["backtest"]
+    assert "multi_scenarios_base_rates" not in bt["causal_replay_audit"]["modules_audited"]
+    assert not (SCRIPTS / "base_rates.py").exists()

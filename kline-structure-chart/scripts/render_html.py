@@ -278,7 +278,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   <div class="layer-group" id="layerControls">
     <label class="layer-pill"><input type="checkbox" data-layer="conformal" checked /> 未来{horizon_n}日保形预测扇形(50%/80%)</label>
     <label class="layer-pill"><input type="checkbox" data-layer="quantiles" checked /> 分位数边界路径(q75/q50/q25)</label>
-    <label class="layer-pill"><input type="checkbox" data-layer="scenarios" checked /> 多情景路径(线宽/深浅按频率·虚线=n&lt;30)</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="scenarios" checked /> 多情景路径(虚线=待触发)</label>
     <label class="layer-pill"><input type="checkbox" data-layer="scenario_fan" /> 情景混合（非校准区间）</label>
     <label class="layer-pill"><input type="checkbox" data-layer="barriers" checked /> Triple-Barrier 止盈止损框</label>
     <label class="layer-pill"><input type="checkbox" data-layer="structure" checked /> 核平滑与楔形/波段轨道</label>
@@ -313,7 +313,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       <div class="kv-grid" id="barrierGrid"></div>
     </div>
     <div class="side-card">
-      <h3>3. 多情景推演与历史条件频率 (L1/L2)</h3>
+      <h3>3. 多情景推演</h3>
       <ul class="evidence-list" id="scenarioList"></ul>
     </div>
     <div class="side-card">
@@ -457,15 +457,11 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   const activeScenarios = (REPORT.rule_scenarios && REPORT.rule_scenarios.scenarios) ? REPORT.rule_scenarios.scenarios : [];
   activeScenarios.forEach(function(sc) {{
     const li = document.createElement('li');
-    const hf = sc.historical_frequency || {{}};
-    const tw = sc.time_window_bars || {{}};
     const head = document.createElement('strong');
     head.textContent = '[' + (sc.status_cn || sc.status) + '] ' + sc.name + ' → 目标 ' + fmtPrice(sc.target_price);
     const detail = document.createElement('span');
     detail.className = 'formula-code';
-    detail.textContent =
-      '触发: ' + sc.trigger + ' | 失效: ' + sc.invalidation +
-      ' | 预计用时中位数: ' + (tw.median || '--') + '日 | ' + (hf.display_cn || '');
+    detail.textContent = '触发: ' + sc.trigger + ' | 失效: ' + sc.invalidation;
     li.appendChild(head);
     li.appendChild(detail);
     scenList.appendChild(li);
@@ -956,22 +952,19 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       drawFutureCurve(activeFp.q25, DN_COL, '下侧q25');
     }}
 
-    // Layer: Multi-Scenario Playbook Paths (width & alpha scaled by historical_frequency, dashed if n < 30)
+    // Layer: Multi-Scenario Playbook Paths (dashed = pending trigger)
     if (layers.scenarios && activeScenarios.length > 0 && activeReplayIdx === replays.length) {{
       activeScenarios.forEach(function(sc, idxSc) {{
-        const hf = sc.historical_frequency || {{}};
-        const freq = typeof hf.target_freq === 'number' ? Math.max(0, Math.min(1, hf.target_freq)) : 0.35;
-        const nSamp = typeof hf.sample_size === 'number' ? hf.sample_size : 0;
-        const lowSample = Boolean(hf.low_sample || nSamp < 30);
-        const alpha = Math.min(1.0, (lowSample ? 0.52 : 0.68) + 0.30 * freq);
-        const lw = 1.6 + 2.4 * freq;
+        const pending = sc.status !== 'ACTIVE';
+        const alpha = 0.85;
+        const lw = 2.2;
         const rgb = sc.direction === 'BULLISH'
           ? (isCnColor ? '248, 113, 113' : '52, 211, 153')
           : (sc.direction === 'BEARISH' ? (isCnColor ? '52, 211, 153' : '248, 113, 113') : '250, 204, 21');
         ctx.save();
         ctx.strokeStyle = 'rgba(' + rgb + ', ' + alpha.toFixed(2) + ')';
         ctx.lineWidth = lw;
-        if (lowSample) ctx.setLineDash([6, 4]);
+        if (pending) ctx.setLineDash([6, 4]);
         ctx.beginPath();
         const wps = sc.waypoints_offset || [];
         wps.forEach(function(wp, wi) {{
@@ -987,9 +980,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
           const endY = yOfPrice(lastWp[1]);
           ctx.fillStyle = 'rgba(' + rgb + ', ' + Math.min(1, alpha + 0.1).toFixed(2) + ')';
           ctx.font = 'bold 11px sans-serif';
-          const rawFreq = typeof hf.raw_target_freq === 'number' ? hf.raw_target_freq : freq;
-          const pctStr = nSamp > 0 ? (rawFreq * 100).toFixed(1) + '%' : ('先验' + Math.round(freq * 100) + '%');
-          const tag = sc.name + ' ' + pctStr + '(n=' + nSamp + (lowSample ? ',低样本' : '') + ')';
+          const tag = sc.name + ' ' + fmtPrice(lastWp[1]);
           ctx.fillText(tag, Math.max(divX + 6, endX - 110), endY - 6 - (idxSc % 2) * 12);
         }}
         ctx.restore();

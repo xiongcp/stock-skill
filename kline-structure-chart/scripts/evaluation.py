@@ -4,7 +4,6 @@ import math
 import random
 from typing import Any
 
-from base_rates import _build_causal_features, compute_scenario_frequency, label_scenario_event
 from forecast import _local_sigma, compute_conformal_forecast
 from indicators import atr_series, compute_all_indicators
 from market_rules import (
@@ -131,20 +130,6 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
         ):
             mismatches.append(f"Conformal mature scores mutated at cut={cut}")
 
-        # 5. 多情景历史条件频率在追加极端未来 K 线并指定 max_cutoff_idx=len(sub_hist)-1 时保持不变
-        sc_sub = layer_sub["projections"].get("scenarios") or []
-        feat_ext = _build_causal_features(ext_hist)
-        for s_a in sc_sub:
-            freq_ext = compute_scenario_frequency(
-                feat_ext,
-                s_a["id"],
-                horizon_bars=15,
-                direction=s_a["direction"],
-                max_cutoff_idx=len(sub_hist) - 1,
-            )
-            if s_a["historical_frequency"] != freq_ext:
-                mismatches.append(f"Scenario base rate mutated at cut={cut}: {s_a['id']}")
-
     return {
         "checked_cutoffs": checked,
         "modules_audited": [
@@ -153,7 +138,6 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
             "candlestick_patterns",
             "smc_structures",
             "conformal_forecast",
-            "multi_scenarios_base_rates",
         ],
         "mismatches_count": len(mismatches),
         "mismatches": mismatches[:10],
@@ -420,108 +404,6 @@ def _spearman(xs: list[float], ys: list[float]) -> float | None:
 RULE_SCORE_BUCKETS = ((0.0, 38.0), (38.0, 52.0), (52.0, 65.0), (65.0, 100.01))
 MIN_IC_INDEPENDENT_SAMPLES = 20  # 有效独立样本低于此值时，IC 不足以说明规则分有排序能力
 MIN_STABLE_ABS_IC = 0.05
-RELIABILITY_BUCKETS = ((0.0, 0.2), (0.2, 0.4), (0.4, 0.6), (0.6, 0.8), (0.8, 1.0001))
-
-
-def _evaluate_scenario_brier(
-    records: list[tuple[str, float, int]],
-) -> dict[str, Any]:
-    """检验 L2 历史条件频率的样本外 Brier 分数、对照各情景自身基准率（per-scenario climatology）的技能分 BSS 与 5 档可靠性分桶。
-
-    records 每项为 (scenario_id, predicted_target_freq, actual_hit_target_0_or_1)。
-    不同情景的屏障几何与基础命中率不同，必须与各情景自身的经验基准率对比；
-    只有相对各情景自身基准率的技能分 BSS > 0 时，才允许输出「历史频率具有区分度」。
-    """
-    n = len(records)
-    if n == 0:
-        return {
-            "samples": 0,
-            "brier_score": None,
-            "climatology_base_rate": None,
-            "climatology_brier_score": None,
-            "pooled_climatology_brier_score": None,
-            "brier_skill_score": None,
-            "pooled_brier_skill_score": None,
-            "discriminative": False,
-            "reliability_buckets": [],
-            "per_scenario": {},
-            "verdict": "样本不足，无法评估历史频率的 Brier 分数",
-        }
-
-    brier = sum((p - y) ** 2 for _, p, y in records) / n
-    clim_rate = sum(y for _, _, y in records) / n
-    pooled_clim_brier = sum((clim_rate - y) ** 2 for _, _, y in records) / n
-    pooled_bss = (1.0 - (brier / pooled_clim_brier)) if pooled_clim_brier > 1e-9 else 0.0
-
-    buckets: list[dict[str, Any]] = []
-    for lo, hi in RELIABILITY_BUCKETS:
-        sub = [(p, y) for _, p, y in records if lo <= p < hi]
-        cnt = len(sub)
-        mean_p = round(sum(p for p, _ in sub) / cnt, 4) if cnt else None
-        emp_y = round(sum(y for _, y in sub) / cnt, 4) if cnt else None
-        buckets.append(
-            {
-                "bucket": [round(lo, 2), round(min(1.0, hi), 2)],
-                "bucket_pct": f"{int(round(lo * 100))}%~{int(round(min(1.0, hi) * 100))}%",
-                "count": cnt,
-                "mean_predicted_freq": mean_p,
-                "empirical_hit_rate": emp_y,
-                "calibration_gap": round(emp_y - mean_p, 4) if (mean_p is not None and emp_y is not None) else None,
-            }
-        )
-
-    by_sc: dict[str, list[tuple[float, int]]] = {}
-    for sc_id, p, y in records:
-        by_sc.setdefault(sc_id, []).append((p, y))
-    per_scenario: dict[str, Any] = {}
-    sc_clim_weighted_sum = 0.0
-    for sc_id, items in sorted(by_sc.items()):
-        m = len(items)
-        sc_brier = sum((p - y) ** 2 for p, y in items) / m
-        sc_emp = sum(y for _, y in items) / m
-        sc_clim = sum((sc_emp - y) ** 2 for _, y in items) / m
-        sc_bss = (1.0 - (sc_brier / sc_clim)) if sc_clim > 1e-9 else 0.0
-        sc_clim_weighted_sum += m * sc_clim
-        per_scenario[sc_id] = {
-            "samples": m,
-            "mean_predicted_freq": round(sum(p for p, _ in items) / m, 4),
-            "empirical_hit_rate": round(sc_emp, 4),
-            "brier_score": round(sc_brier, 4),
-            "climatology_brier_score": round(sc_clim, 4),
-            "brier_skill_score": round(sc_bss, 4),
-        }
-
-    clim_brier = sc_clim_weighted_sum / n
-    if clim_brier > 1e-9:
-        bss = 1.0 - (brier / clim_brier)
-    else:
-        bss = 0.0
-
-    discriminative = bool(n >= 10 and bss > 0.0)
-    if discriminative:
-        verdict = (
-            f"样本外 Brier = {brier:.4f}，优于各情景自身基准率加权 Brier = {clim_brier:.4f}"
-            f"（相对各情景基准率的技能分 BSS = {bss:+.3f} > 0，历史频率具有区分度）"
-        )
-    else:
-        verdict = (
-            f"样本外 Brier = {brier:.4f}，各情景自身基准率加权 Brier = {clim_brier:.4f}"
-            f"（相对各情景基准率的技能分 BSS = {bss:+.3f} ≤ 0，尚未优于各情景自身基准率，仅作历史统计参考）"
-        )
-
-    return {
-        "samples": n,
-        "brier_score": round(brier, 4),
-        "climatology_base_rate": round(clim_rate, 4),
-        "climatology_brier_score": round(clim_brier, 4),
-        "pooled_climatology_brier_score": round(pooled_clim_brier, 4),
-        "brier_skill_score": round(bss, 4),
-        "pooled_brier_skill_score": round(pooled_bss, 4),
-        "discriminative": discriminative,
-        "reliability_buckets": buckets,
-        "per_scenario": per_scenario,
-        "verdict": verdict,
-    }
 
 
 def _forward_stats(rets: list[float]) -> dict[str, Any]:
@@ -611,8 +493,6 @@ def run_plan_backtest(
     actions_seen: dict[str, int] = {}
     veto_counts: dict[str, int] = {}
     decision_rows: list[tuple[float, str, float]] = []  # (rule_score, action, 未来 H 日收益)
-    brier_records: list[tuple[str, float, int]] = []  # (scenario_id, predicted_freq, actual_hit_target)
-    full_causal_feat = _build_causal_features(bars)
     no_fill = 0
     decisions = 0
     busy_until_all = -1  # 合并组合持仓锁（持仓期间照常记录决策用于 IC 与动作前瞻收益）
@@ -642,16 +522,6 @@ def run_plan_backtest(
         decision_rows.append(
             (float(rep["multi_timeframe_score"]["rule_score"]), action, float(bars[t + horizon_bars]["close"]) / float(bars[t]["close"]) - 1.0)
         )
-        for sc_item in rep["rule_scenarios"].get("scenarios") or []:
-            if not sc_item.get("precondition_met", True):
-                continue
-            sc_id = str(sc_item["id"])
-            sc_dir = str(sc_item.get("direction") or "BULLISH")
-            hf_sc = sc_item.get("historical_frequency") or {}
-            p_pred = float(hf_sc["target_freq"]) if hf_sc.get("target_freq") is not None else 0.0
-            ev_res = label_scenario_event(full_causal_feat, t, sc_id, horizon_bars, direction=sc_dir)
-            y_hit = 1 if ev_res["outcome"] == "HIT_TARGET" else 0
-            brier_records.append((sc_id, p_pred, y_hit))
         if action in trades:
             can_open_bucket = t > busy_until_by_action[action]
             can_open_all = t > busy_until_all
@@ -757,7 +627,6 @@ def run_plan_backtest(
         "buy_and_hold_return_pct": round(bh_ret, 2),
         "veto_reason_counts": dict(sorted(veto_counts.items(), key=lambda kv: -kv[1])),
         **_decision_diagnostics(decision_rows, horizon_bars, step),
-        "scenario_frequency_brier": _evaluate_scenario_brier(brier_records),
         "sample_trades": all_trades[-3:],
         "sample_size_warning": (
             f"成交仅 {total} 笔（少于 30），胜率/夏普等统计量置信度很低，仅供参考" if total < 30 else None

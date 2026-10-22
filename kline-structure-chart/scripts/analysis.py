@@ -252,7 +252,6 @@ def analyze_bundle(
             show,
             price_decimals=lambda price, day: price_decimals(price, inst["market"], inst["asset_type"], day),
             horizon_bars=horizon_bars,
-            benchmark_bars=bench_bars_raw,
             round_price=lambda price, day: round_to_tick(price, inst["market"], inst["asset_type"], day),
         )
     )

@@ -162,18 +162,6 @@ def lint_agent_response(
         errors.append(
             f"检测到未经校验的概率/确定性表述: {hit!r}（只允许引用历史条件频率、通过校验的主观研判、带 95% 区间的回测胜率与区间覆盖率）"
         )
-    allowed_hf_pcts: list[float] = []
-    rs_obj = report.get("rule_scenarios") or {}
-    for sc_item in list(rs_obj.get("scenarios") or []) + [rs_obj.get(k) for k in ("bull", "neutral", "bear") if isinstance(rs_obj.get(k), dict)]:
-        hf = (sc_item or {}).get("historical_frequency") or {}
-        for fk in ("raw_target_freq_pct", "shrunk_target_freq_pct", "target_freq_pct"):
-            if hf.get(fk) is not None:
-                allowed_hf_pcts.append(float(hf[fk]))
-    if allowed_hf_pcts:
-        for m_hf in re.finditer(r"历史条件频率\s*(?:为|是|约)?\s*(\d+(?:\.\d+)?)\s*%", text):
-            val_hf = float(m_hf.group(1))
-            if not any(abs(val_hf - p) <= 0.25 for p in allowed_hf_pcts):
-                errors.append(f"回复中的历史条件频率 {val_hf}% 与 result.json 不一致")
 
     if backtest is not None:
         bt_node = backtest.get("backtest") if isinstance(backtest.get("backtest"), dict) else backtest
@@ -224,6 +212,7 @@ def lint_agent_response(
     for tk in ("take_profit_1", "take_profit_2"):
         if sp_node.get(tk) is not None:
             valid_target_prices.append(float(sp_node[tk]))
+    rs_obj = report.get("rule_scenarios") or {}
     for sc_item in list(rs_obj.get("scenarios") or []) + [rs_obj.get(k) for k in ("bull", "neutral", "bear") if isinstance(rs_obj.get(k), dict)]:
         if isinstance(sc_item, dict) and sc_item.get("target_price") is not None:
             valid_target_prices.append(float(sc_item["target_price"]))

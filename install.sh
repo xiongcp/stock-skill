@@ -351,10 +351,10 @@ register_agents() {
 
 self_test() {
   [ "$RUN_TEST" -eq 1 ] || { say "跳过自检（--no-test）"; return 0; }
-  say "检查核心脚本完整性（L1 结构 / L2 历史频率 / 回复校验）"
+  say "检查核心脚本完整性（L1 结构 / 回复校验）"
   if [ "$DRY_RUN" -eq 0 ]; then
     local s
-    for s in analyze_and_forecast.py resolve_symbol.py scenarios.py base_rates.py price_text.py lint_response.py doctor.py; do
+    for s in analyze_and_forecast.py resolve_symbol.py scenarios.py price_text.py lint_response.py doctor.py; do
       [ -f "$SKILL_SRC/scripts/$s" ] || die "缺少核心脚本: $SKILL_SRC/scripts/$s"
     done
   fi
