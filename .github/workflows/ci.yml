@@ -24,7 +24,7 @@ jobs:
         run: uv sync --frozen --python 3.12 --directory kline-structure-chart
 
       - name: 门禁 1：全量 pytest（conftest 统一断网）
-        run: uv run --frozen --directory kline-structure-chart pytest -v
+        run: uv run --frozen --directory kline-structure-chart pytest -v -n auto
 
       - name: 门禁 2：v4.1 结构层跨窗口不变性
         run: uv run --frozen --directory kline-structure-chart python tests/check_days_invariance.py --data tests/fixtures/recorded/sina_daily --step 40

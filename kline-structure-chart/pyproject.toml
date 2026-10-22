@@ -11,5 +11,6 @@ dependencies = [
 dev = [
     "numpy>=1.26.0",
     "pytest>=8.0.0",
+    "pytest-xdist>=3.8.0",
     "ta-lib>=0.6",
 ]

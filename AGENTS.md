@@ -65,7 +65,7 @@
 ```text
 kline-structure-chart/
 ├── SKILL.md                          # 运行契约（随 skill 分发）
-├── pyproject.toml / uv.lock          # Python >= 3.12；运行期只依赖 Pillow，dev 组含 numpy、pytest 与 TA-Lib（仅用于金标准测试）
+├── pyproject.toml / uv.lock          # Python >= 3.12；运行期只依赖 Pillow，dev 组含 numpy、pytest、pytest-xdist（并行跑测试）与 TA-Lib（仅用于金标准测试）
 ├── requirements.txt                  # 没有 uv 时 venv + pip 用的运行期依赖，版本与 uv.lock 一致（test_docs_contract 校验）
 ├── assets/
 │   └── analysis.schema.json          # AnalysisReport 顶层契约（contracts.validate_report 以它为唯一来源）
@@ -156,8 +156,8 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
 
 ### 3.3 测试与回归门禁（修改任何代码后必跑）
 ```bash
-# 1. 全量 pytest（单元、P0~P3 回归、TA-Lib 金标准、真实录制数据回放、网络异常、文档契约）
-uv run --directory kline-structure-chart pytest -v
+# 1. 全量 pytest（单元、P0~P3 回归、TA-Lib 金标准、真实录制数据回放、网络异常、文档契约），pytest-xdist 按 CPU 核数并行
+uv run --directory kline-structure-chart pytest -v -n auto
 
 # 2. v4.1 结构层跨窗口不变性（真实录制行情，必跑）
 uv run --directory kline-structure-chart python tests/check_days_invariance.py --data tests/fixtures/recorded/sina_daily --step 40
