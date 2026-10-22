@@ -226,3 +226,23 @@ def test_aggregate_baseline_sums_by_day_without_dedup() -> None:
     agg = ev.aggregate_baseline(rows)
     assert agg["2024-01-02"] == pytest.approx([0.03, 3, 3, 0.03 * 2 - 0.039])  # 同一标的相邻日不去重；未成交不计
     assert agg["2024-01-03"][1] == 2
+
+
+# 开发区全量扫描（509e499）里报 ZeroDivisionError 的全部港股股票-日：下跌中的 ABC 测算位、外推的形态轨道落到 0 或以下，
+# 被选作下方支撑 S1，scenarios.py 计算 ref / s1 时除零
+ZERO_SUPPORT_CASES = [("00616.HK", "2023-10-20"), ("00616.HK", "2023-10-24"), ("01259.HK", "2025-04-16"),
+                      ("01592.HK", "2022-02-22"), ("01592.HK", "2022-02-23")]
+
+
+def test_non_positive_levels_never_become_support() -> None:
+    """价格不为正的测算位、轨道不是有效价位：不进入支撑阶梯，不作 S1，流水线不再除零。"""
+    scan.init("HK")
+    for sym, day in ZERO_SUPPORT_CASES:
+        data = v2._load_symbol(sym)
+        t = next(t for d, t, _ in v2._eligible_days(sym, data) if d == day)
+        pit, cut = make_pit_slice(data["bars"], t, v2.HORIZON)
+        bundle, request = v2.build_bundle(sym, data, pit, cut, day)
+        rep = analyze_bundle(bundle, request, include_replay=False, include_forecast=False)
+        supports = rep["mathematical_indicators"]["structure_levels"]["key_levels"]["supports"]
+        assert all(lvl["price"] > 0 for lvl in supports), (sym, day, supports)
+        assert rep["rule_scenarios"]["breakdown_level"]["price"] > 0, (sym, day)

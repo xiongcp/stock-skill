@@ -712,6 +712,8 @@ def build_ladder(
 
     above = merge(sorted((p, s) for p, s in items if p > ref * 1.0005))
     below = merge(sorted(((p, s) for p, s in items if p < ref * 0.9995), reverse=True))
+    # 下跌中的 ABC 测算位、外推的形态轨道可能落到 0 或以下（取整后），不是有效价位，不作支撑
+    below = [lvl for lvl in below if lvl["price"] > 0]
     return {"resistances": above, "supports": below}
 
 
@@ -785,7 +787,7 @@ def compute_projections(
     above, below = ladder["resistances"], ladder["supports"]
     start = live_price if live_price is not None else ref
     u, l = struct["upper_today"], struct["lower_today"]
-    live_rails = () if struct["expired"] else (u, l)
+    live_rails = () if struct["expired"] else tuple(p for p in (u, l) if money(p) > 0)  # 取整后不为正的轨道不作触发位
     rails_up = sorted((p, "形态上轨" if p == u else "已跌破的下轨(反压)") for p in live_rails if p > ref)
     rails_dn = sorted(((p, "形态下轨" if p == l else "已突破的上轨(回踩支撑)") for p in live_rails if p < ref), reverse=True)
     cap = max(0.04, 3 * atr)  # 触发位离现价超过 max(4%, 3×ATR) 就失去短线参考意义

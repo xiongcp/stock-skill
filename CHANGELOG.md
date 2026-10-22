@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 修复（结构层不为正的支撑位）
+
+- `scripts/structure.py`：下跌中的 ABC 测算位、外推的形态轨道取整后可能落到 0 或以下，此前仍进入下方支撑阶梯并可能被选作下探触发位 S1，`scenarios.py` 计算 `ref / s1` 时除零，分析直接报错（主做多计划开发区扫描在 00616.HK、01259.HK、01592.HK 等低价港股上复现）。现在支撑阶梯剔除取整后不为正的价位，这类形态轨道也不作触发位；不改任何参数或阈值，其余股票-日的输出不变。
+
 ### 修复（Yahoo 港股占位K线）
 
 - `scripts/data_gateway.py` 新增 `drop_placeholder_bars`：Yahoo 日线（标的与基准）取数后剔除"成交量为 0 且开高低收四价相同"的K线。这类K线多为港股半日市当天缺数、停牌或停市日按前收盘价补出，不是真实成交；此前未过滤，会压低 ATR、扭曲 RSI 与 RVOL、被识别为十字星，回测也可能在无成交的日子成交。只剔除、只披露，不用其他来源补数：剔除数量与日期写入 `quality.notes`，完整日期写入新字段 `quality.placeholder_bars_removed.{target,benchmark}`（`references/output-fields.md`、`references/hk-market.md` 同步）。录制数据 `0700.HK` 剔除 7 根（2022-01-31、2024-12-24、2024-12-31、2025-01-28、2025-12-24、2025-12-31、2026-02-16），NVDA、SPY、^HSI 不受影响。
