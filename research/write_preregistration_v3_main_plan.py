@@ -30,6 +30,7 @@ RESEARCH_FILES = [
 ]
 DATA_FILES = ["artifacts/long_backtest/pit_universe_h1.json", "artifacts/long_backtest/cache/MANIFEST.json"]
 DEV_RESULT = ART / "dev_main_plan_v3_metrics.json"
+D1_EQUIVALENCE = ART / "d1_equivalence.json"
 GATE_DEFS = {
     "P1": "扣费后单笔净收益均值 > 0，且按信号日期分块 bootstrap 95% 下限 > 0（5 日限价成交层，episode 口径）",
     "P2b": "每个信号 episode 的净收益 − 其当日同日随机基准（移植几何）平均净收益，对全部配对取平均；按信号日分块 bootstrap 95% 下限 > 0",
@@ -110,6 +111,12 @@ def build() -> dict:
         "dev_region_evidence": {
             "file": str(DEV_RESULT.relative_to(ROOT)),
             "sha256": _sha(DEV_RESULT) if DEV_RESULT.exists() else None,
+            "code_commit": json.loads(DEV_RESULT.read_text(encoding="utf-8"))["code_commit"] if DEV_RESULT.exists() else None,
+            # 开发区运行之后的线上缺陷修复不重跑开发区，改用抽样等价核对（设计第 6.2、6.5 节）
+            "defect_fix_equivalence": {
+                "file": str(D1_EQUIVALENCE.relative_to(ROOT)),
+                "sha256": _sha(D1_EQUIVALENCE) if D1_EQUIVALENCE.exists() else None,
+            },
         },
         "trials_before_registration": _trials(),
         "disclosures": [
@@ -119,6 +126,8 @@ def build() -> dict:
             "ST 历史不可得，按当前名称判断",
             "港股成交稀疏：H1 港股池每期只有 51.6%~57.9% 的成分股期内 ≥95% 交易日有真实成交",
             "交易日历只覆盖 2021 年起，不在本回测路径上",
+            "开发区结果在提交 509e499 上运行，早于缺陷修复 D1（cf51a1d，支撑阶梯剔除不为正的价位）；H1 在修复后的代码上运行。"
+            "D1 未重跑开发区，改用抽样等价核对（d1_equivalence.json）：每市场随机 2,000 个股票-日与 2,000 个信号，信号无一变化",
         ],
     }
 
@@ -129,6 +138,8 @@ def main() -> None:
     args = ap.parse_args()
     if not DEV_RESULT.exists():
         raise SystemExit(f"缺少开发区结果 {DEV_RESULT}：按设计须先完成开发区诊断再冻结")
+    if not D1_EQUIVALENCE.exists():
+        raise SystemExit(f"缺少缺陷 D1 的抽样等价核对 {D1_EQUIVALENCE}：先运行 research/check_d1_equivalence.py")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(build(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {args.out}")

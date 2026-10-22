@@ -1525,7 +1525,9 @@ Run: `git fetch origin && gh pr view 7 --json state -q .state`
 - 然后核对开发区运行提交（第 9 节记录）到 HEAD 之间的技能代码差异：
 
 Run: `git diff --stat <开发区运行提交> HEAD -- kline-structure-chart/scripts`
-Expected: 只出现不在 `analyze_bundle` 调用链上的文件（如 `lint_response.py`、`render_*.py`）。若出现 `risk.py`、`analysis.py`、`indicators.py` 等调用链上的文件，先确认属于第 6.2 节的缺陷修复，再重跑 Task 4
+Expected: 只出现不在 `analyze_bundle` 调用链上的文件（如 `lint_response.py`、`render_*.py`），或已记入设计第 6.5 节的缺陷修复。若出现 `risk.py`、`analysis.py`、`indicators.py` 等调用链上的其他改动，先确认属于第 6.2 节的缺陷修复并记入第 6.5 节，再按第 6.2 节核对差异：默认重跑 Task 4；只在非法输入时改变输出的修复可改用抽样等价核对（`research/check_d1_equivalence.py` 的做法），抽样中信号有变化时仍须重跑 Task 4。
+
+（修订 2026-10-21，用户确认）D1（`structure.py`，提交 `cf51a1d`）按抽样等价核对处理，不重跑 Task 4：第 9 节使用 `509e499` 的开发区结果，预注册 `dev_region_evidence` 登记开发区运行提交与 `artifacts/long_backtest/d1_equivalence.json` 的 sha256，并写入披露。
 
 - [ ] **Step 10：同步设计文档第 6.3 节的数据核对方式**
 
