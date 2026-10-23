@@ -66,6 +66,7 @@ def test_historical_frequency_removed(replay_recorded, tmp_path: Path) -> None:
     for token in ("historical_frequency", "time_window_bars", "target_freq", "bars_to_target"):
         assert token not in text
     bt = json.loads(Path(rep["rendered_paths"]["backtest_json"]).read_text(encoding="utf-8"))
+    assert bt["schema_version"] == "6.0.0"
     assert "scenario_frequency_brier" not in bt["backtest"]
     assert "multi_scenarios_base_rates" not in bt["causal_replay_audit"]["modules_audited"]
     assert not (SCRIPTS / "base_rates.py").exists()
@@ -159,3 +160,39 @@ def test_v6_schema_marks_stability_and_rejects_unknown_fields() -> None:
     assert any("缺少必填字段 verdict" in e for e in errs)
     assert schema_errors(1.5, {"type": "integer"}) and not schema_errors(2, {"type": "number"})
     assert schema_errors(True, {"type": "number"})
+
+
+KEYPATH_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "contract" / "result_v6_keypaths_600519.json"
+
+
+def _key_paths(obj, path=""):
+    """result.json 的全部键路径：字典键用 . 连接，列表下标统一折叠为 [*]。"""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            sub = f"{path}.{k}" if path else k
+            yield sub
+            yield from _key_paths(v, sub)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _key_paths(v, f"{path}[*]")
+
+
+def test_v6_result_keypaths_match_snapshot(replay_recorded, tmp_path: Path) -> None:
+    """固定 600519.SH 录制行情下 result.json 的完整键集，防止内部新字段经透传投影静默进入稳定契约。
+
+    确认是有意的契约变更后重新生成快照：
+    UPDATE_V6_KEYPATHS=1 uv run pytest -q tests/test_v6_contract.py -k keypaths_match_snapshot
+    """
+    import os
+
+    result, _ = load_v6(_cn_moutai(tmp_path))
+    actual = sorted(set(_key_paths(result)))
+    if os.environ.get("UPDATE_V6_KEYPATHS") == "1":
+        KEYPATH_SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
+        KEYPATH_SNAPSHOT.write_text(json.dumps(actual, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    expected = json.loads(KEYPATH_SNAPSHOT.read_text(encoding="utf-8"))
+    added, removed = sorted(set(actual) - set(expected)), sorted(set(expected) - set(actual))
+    assert not added and not removed, (
+        f"result.json 键路径与快照不一致：新增 {added}；删除 {removed}。"
+        "新增或删除契约字段须同步 schema 的 x-stability 标注与 CHANGELOG\"契约变更\"，确认后再更新快照"
+    )
