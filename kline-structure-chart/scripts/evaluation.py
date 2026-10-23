@@ -29,7 +29,7 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
     1. 单边因果 Nadaraya-Watson 平滑在追加未来 K 线后绝不改变历史值；
     2. 在生产固定结构窗口（HISTORY_BARS / STRUCT_DAYS）与同一阈值下，截至 t_cut 已确认的拐点与 SMC 缺口在追加未来 K 线后不改变；
     3. 蜡烛形态检测在 t_cut 当日收盘确认后，不随未来 K 线追加而变化；
-    4. 保形预测在截取 bars[:cut] 时与完整序列上按同一截止日计算的结果完全一致。
+    4. 正常波动范围（split-conformal）在截取 bars[:cut] 时与完整序列上按同一截止日计算的结果完全一致。
     """
     n = len(bars)
     if n < 160:
@@ -109,7 +109,7 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
             if pkey not in full_cdl or pkey not in ext_cdl or ext_cdl[pkey] != pat["formula_verified"]:
                 mismatches.append(f"Candlestick pattern mutated at cut={cut}: {pkey}")
 
-        # 4. 保形预测波动率与非一致性分数仅依赖截至 cut 的已收盘 K 线（不受 cut 之后极端未来价格影响）
+        # 4. 正常波动范围的波动率与非一致性分数仅依赖截至 cut 的已收盘 K 线（不受 cut 之后极端未来价格影响）
         fc_a = compute_conformal_forecast(sub, meta=meta_stub, horizon_bars=15)
         sub_closes = [float(b["close"]) for b in sub]
         ext_closes = [float(b["close"]) for b in ext_corrupted]
@@ -576,7 +576,7 @@ def run_plan_backtest(
     total = len(all_trades)
     bh_ret = (float(bars[end]["close"]) / float(bars[start]["close"]) - 1.0) * 100.0
 
-    # 保形区间样本外覆盖（与线上同一构造）及中位数对随机游走的误差
+    # 正常波动范围样本外覆盖（split-conformal，与线上同一构造）及中位数对随机游走的误差
     eval_cuts = list(range(start, n - horizon_bars, horizon_bars))
     hit_50 = hit_80 = 0
     q50_err: list[float] = []

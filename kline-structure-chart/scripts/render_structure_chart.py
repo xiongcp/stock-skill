@@ -961,7 +961,7 @@ def render(
             draw.line(pts, fill=(*PANEL_BG, 150), width=3.8, joint="curve")
             draw.line(pts, fill=color, width=2.0, joint="curve")
 
-    # ---------------- 绘制右侧 15 日保形预测扇形（80% 外扇 + 50% 内扇）与三条预判路径 ----------------
+    # ---------------- 绘制右侧 15 日正常波动范围扇形（80% 外扇 + 50% 内扇）与三条预判路径 ----------------
     if conformal_forecast and conformal_forecast.get("q10") and conformal_forecast.get("q90"):
         q10_s = conformal_forecast["q10"]
         q25_s = conformal_forecast["q25"]

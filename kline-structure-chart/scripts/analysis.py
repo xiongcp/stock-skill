@@ -231,7 +231,7 @@ def analyze_bundle(
     structure: dict[str, Any] | None = None,
     include_forecast: bool = True,
 ) -> AnalysisReport:
-    """100% 纯数学计算核心：从 OHLCV 矩阵计算全部指标、形态证据、SMC、多周期共振分、三重屏障与保形预测。"""
+    """100% 纯数学计算核心：从 OHLCV 矩阵计算全部指标、形态证据、SMC、多周期共振分、三重屏障与正常波动范围。"""
     target = bundle["target"]
     inst = target["instrument"]
     bars = target["bars"]
@@ -419,7 +419,7 @@ def analyze_bundle(
         max_risk_pct=float(request.get("max_risk_pct") or 0.01),
     )
 
-    # 7. 未来 H 步（默认 15 日）分位数预测 + 序列保形预测校准
+    # 7. 未来 H 步（默认 15 日）分位数预测 + 序列 split-conformal 校准
     if include_forecast:
         future_proj = compute_conformal_forecast(
             completed,

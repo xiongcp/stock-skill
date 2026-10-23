@@ -158,7 +158,8 @@ def build_result(report: dict[str, Any], files: dict[str, str]) -> dict[str, Any
         "files": dict(files),
         "reproducibility": {**report["reproducibility"], "engine_version": SCHEMA_VERSION},
     }
-    # 可引用价位只从本文件自己的价位字段与最近 20 根K线收集，保证回复里出现的每个价格都能在 result.json 里找到出处
+    # 可引用价位只从 result.json 自己的价位字段与最近 20 根K线收集：前者能在 result.json 里找到出处，
+    # 最近 20 根K线的价格只存在于 chart_data.json（result.json 不含K线序列）
     wl = collect_price_whitelist(
         {k: result[k] for k in _QUOTABLE_SECTIONS},
         int(meta.get("price_decimals") or 2),

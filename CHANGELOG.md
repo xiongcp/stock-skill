@@ -1,8 +1,30 @@
 # 更新日志
 
-格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号与 `kline-structure-chart/SKILL.md`、`pyproject.toml`、`assets/analysis.schema.json`、`scripts/analysis.py` 四处保持同步。
+格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号与 `kline-structure-chart/SKILL.md`、`pyproject.toml`、`assets/analysis.schema.json`、`scripts/contract_v6.py`、`.claude-plugin/marketplace.json` 五处保持同步。
 
 ## [Unreleased]
+
+## [6.0.0] - 待定
+
+### 契约变更（破坏性）
+
+- `*_result.json` 升级为 v6 稳定契约，顶层改为 `schema_version`、`meta`、`quality`、`verdict`、`market_context`、`structure`、`indicators`、`scenarios`、`plan`、`volatility_range`、`quotable_prices`、`files`、`reproducibility`；v5 → v6 字段对照见 `references/output-fields.md`。
+- 新增 `*_chart_data.json`（渲染数据，非稳定接口）；删除 `*_judgment_pack.json`。
+- 命令行标准输出改为 JSON 信封；退出码 2 / 3 / 4 分别对应 `INVALID_ARGUMENT` / `DATA_UNAVAILABLE` / `INSUFFICIENT_HISTORY`（此前一律为 1），stderr 前缀不变。
+- 从 6.0.0 起：6.x 内只新增字段，不删除、不改名、不改语义。
+
+### 删除（去预测化）
+
+- 高置信反转层、L3 受约束研判（`judgment.py`、`validate_judgment.py`、`score_judgments.py`、`llm-judgment-protocol.md`）、L2 历史条件频率与到达用时分位（`base_rates.py`）、情景混合扇形。
+- 风控中的 L2 守门随之删除，评级只由规则分、结构与风控否决决定。录制数据回放上评级变化：<待 B10 填入>。
+- 情景折点时间改按扩散尺度估计（只影响画图位置）。
+- `momentum.rsi14_prev` 保留为普通指标（此前供高置信反转层判断 RSI 拐头）。
+
+### 变更
+
+- 15 日分位区间改称"正常波动范围"（`volatility_range`，q50/q75 去掉方向性命名）；PNG、报告与代码注释中面向用户的"保形区间 / 保形预测"同步改称"正常波动范围"，公式说明里仍保留 split-conformal 方法名。
+- 回复校验：概率类数字只放行带 95% 区间的回测胜率；可引用价位改读 `quotable_prices`。
+- 单次分析耗时（本机，录制行情）：<待 B10 填入>。
 
 ### 变更（研究代码移出 main）
 

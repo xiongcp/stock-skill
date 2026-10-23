@@ -1,6 +1,6 @@
 # 多情景推演手册（Scenario Playbook）
 
-本文件定义 `kline-structure-chart` L1 多情景结构引擎的 8 个标准情景，与 `scripts/scenarios.py` 中的 `SCENARIO_PLAYBOOK` 严格一一对应（由自动化测试守护）。
+本文件定义 `kline-structure-chart` 多情景结构引擎的 8 个标准情景，与 `scripts/scenarios.py` 中的 `SCENARIO_PLAYBOOK` 严格一一对应（由自动化测试守护）。
 
 ---
 

@@ -44,7 +44,7 @@ def test_skill_md_references_existing_files() -> None:
 
 def test_skill_md_keeps_runtime_contract_self_contained() -> None:
     text = SKILL.read_text(encoding="utf-8")
-    for must in ("DATA_UNAVAILABLE", "INVALID_ARGUMENT", "quality.status", "rule_score", "calibration_audit", "risk_officer_veto", "禁止合成数据"):
+    for must in ("DATA_UNAVAILABLE", "INVALID_ARGUMENT", "quality.status", "rule_score", "calibration_audit", "risk_veto", "禁止合成数据"):
         assert must in text, f"SKILL.md 缺少运行期规则关键字 {must}"
 
 
@@ -234,6 +234,21 @@ def test_docs_have_no_placeholders() -> None:
     docs = DOCS + [p for p in (AGENTS, README) if p.exists()]
     hits = [f"{d.name}: {m.group(0)}" for d in docs for m in PLACEHOLDER.finditer(d.read_text(encoding="utf-8"))]
     assert not hits, f"文档残留占位符: {hits}"
+
+
+def test_docs_have_no_probability_channels_after_v6() -> None:
+    banned = ("历史条件频率", "主观研判", "judgment_pack", "validate_judgment", "score_judgments",
+              "情景混合", "高置信反转", "校准先验", "future_projection_15d", "triple_barrier_plan",
+              "debate_and_veto", "rule_scenarios", "meta_labeling_decision")
+    docs = [SKILL, *(SKILL_DIR / "references").glob("*.md")]
+    hits = [f"{d.name}: {w}" for d in docs for w in banned if w in d.read_text(encoding="utf-8")]
+    assert not hits, f"文档仍引用已删除的概率通道或 v5 字段: {hits}"
+
+
+def test_skill_md_documents_cli_contract() -> None:
+    text = SKILL.read_text(encoding="utf-8")
+    for token in ('"status": "ok"', "INVALID_ARGUMENT", "DATA_UNAVAILABLE", "INSUFFICIENT_HISTORY", "退出码", "chart_data.json"):
+        assert token in text, token
 
 
 def test_output_fields_dictionary_covers_schema_top_level() -> None:
