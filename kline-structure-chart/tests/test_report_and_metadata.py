@@ -20,6 +20,8 @@ from market_rules import (
     tencent_quote_code_for,
     yahoo_symbol_for,
 )
+from conftest import load_v6
+from contract_v6 import artifact_files, build_result
 from render_report_md import render_report_markdown
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc)
@@ -132,12 +134,13 @@ def cn_pipeline(replay_recorded, tmp_path: Path) -> tuple[dict, str, dict]:
 @pytest.mark.slow
 def test_report_md_numbers_match_json(cn_pipeline) -> None:
     report, md, backtest = cn_pipeline
-    meta, fp = report["meta"], report["future_projection_15d"]
+    result, _ = load_v6(report)
+    meta, fp = result["meta"], result["volatility_range"]
     assert md.startswith(f"# {meta['name']}（{meta['symbol']}）")
     assert f"数据截至 **{meta['as_of']}**" in md
-    assert f"**{report['multi_timeframe_score']['rule_score']:.1f} / 100**" in md
+    assert f"**{result['verdict']['rule_score']:.1f} / 100**" in md
     assert "不是胜率" in md
-    plan = report["triple_barrier_plan"]
+    plan = result["plan"]["long"]
     assert f"{plan['entry_zone'][0]:.2f} ~ {plan['entry_zone'][1]:.2f}" in md
     assert f"| {plan['stop_loss_barrier']:.2f} | {plan['take_profit_1']:.2f} |" in md
     last = len(fp["horizon_dates"]) - 1
@@ -157,9 +160,10 @@ def test_report_md_numbers_match_json(cn_pipeline) -> None:
 @pytest.mark.slow
 def test_report_md_puts_veto_before_conclusions(cn_pipeline) -> None:
     report, md, _ = cn_pipeline
-    if report["debate_and_veto"]["risk_officer_veto"]:
+    verdict = load_v6(report)[0]["verdict"]
+    if verdict["risk_veto"]:
         assert md.index("**风控否决**") < md.index("## 1. 结论速览")
-        for reason in report["debate_and_veto"]["veto_reasons"]:
+        for reason in verdict["veto_reasons"]:
             assert reason in md
     else:
         assert "**风控否决**" not in md
@@ -170,17 +174,19 @@ def test_report_md_hides_all_prices_when_data_unavailable(cn_pipeline, tmp_path:
     from render_html import render_html
 
     report, _, _ = cn_pipeline
-    broken = copy.deepcopy(report)
+    result, chart = load_v6(report)
+    broken = copy.deepcopy(result)
     broken["quality"]["status"] = "UNAVAILABLE"
     broken["quality"]["warnings"] = ["标的行情为合成数据，价格与形态均非真实"]
     md = render_report_markdown(broken)
     assert "数据不可用" in md and "标的行情为合成数据" in md
     for section in ("## 1.", "## 3.", "## 4.", "## 6."):
         assert section not in md
-    assert f"{report['triple_barrier_plan']['stop_loss_barrier']:.2f}" not in md
-    html_out = render_html(broken, tmp_path / "unavailable.html")
+    stop = f"{result['plan']['long']['stop_loss_barrier']:.2f}"
+    assert stop not in md
+    html_out = render_html(broken, chart, tmp_path / "unavailable.html")
     html_text = html_out.read_text(encoding="utf-8")
-    assert f"{report['triple_barrier_plan']['stop_loss_barrier']:.2f}" not in html_text
+    assert stop not in html_text
     assert 'data-quality-status="UNAVAILABLE"' in html_text
 
 
@@ -189,7 +195,7 @@ def test_report_md_zero_trade_rows_show_dash(cn_pipeline) -> None:
     report, _, backtest = cn_pipeline
     bt = copy.deepcopy(backtest)
     bt["backtest"]["long_confirmed"] = {"trades": 0}
-    md = render_report_markdown(report, bt)
+    md = render_report_markdown(load_v6(report)[0], bt)
     assert "| 确认做多 | 0 | — | — | — | — |" in md
 
 
@@ -296,7 +302,7 @@ def test_missing_closed_session_is_disclosed_not_filled(replay_recorded) -> None
     assert report["quality"]["status"] == "OK"
     note = next(n for n in report["quality"]["notes"] if n.startswith("数据只到 2026-10-15"))
     assert "2026-10-16" in note and "不含该日行情" in note
-    assert note in render_report_markdown(report)
+    assert note in render_report_markdown(build_result(report, artifact_files("600519.SH", False)))
     # 收盘前 2026-10-15 就是最近已收盘交易日，不应提示
     early = load_bundle(req, now=datetime(2026, 10, 16, 6, 59, tzinfo=timezone.utc))
     assert early["provenance"]["missing_closed_session"] is None

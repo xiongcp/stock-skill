@@ -265,3 +265,26 @@ def test_report_digest_line_passes_lint_against_v6(replay_recorded, tmp_path: Pa
     assert m, digest
     tampered = reply.replace(m.group(1), f"{float(m.group(1)) * 1.37:.2f}", 1)
     assert lint_agent_response(tampered, result)
+
+
+def test_v6_html_reads_result_and_chart(replay_recorded, tmp_path: Path) -> None:
+    from render_html import render_html
+
+    rep = _cn_moutai(tmp_path)
+    result, chart = load_v6(rep)
+    out = render_html(result, chart, tmp_path / "dash.html").read_text(encoding="utf-8")
+    assert '"chart":{' in out.replace(" ", "") and '"result":{' in out.replace(" ", "")
+    assert "正常波动范围" in out and "保形预测" not in out
+
+
+def test_v6_report_md_reads_result(replay_recorded, tmp_path: Path) -> None:
+    from render_report_md import render_report_markdown
+
+    rep = _cn_moutai(tmp_path)
+    result, _ = load_v6(rep)
+    md = render_report_markdown(result)
+    vr = result["volatility_range"]
+    assert f"**{result['verdict']['rule_score']:.1f} / 100**" in md
+    assert f"{vr['q10'][-1]:.2f}" in md and f"{vr['q90'][-1]:.2f}" in md
+    assert "正常波动范围" in md
+    assert md == Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")

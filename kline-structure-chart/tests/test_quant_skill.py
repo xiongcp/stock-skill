@@ -335,7 +335,10 @@ def test_html_xss_escaping(replay_recorded, tmp_path: Path) -> None:
     bundle = load_bundle({"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15})
     bundle["target"]["instrument"]["name"] = "</script><script>window.__XSS=1;</script>"
     report = analyze_bundle(bundle, {"symbol": "600519.SH", "display_bars": 120, "horizon_bars": 15}, include_replay=False)
-    out_html = render_html(report, tmp_path / "xss_test.html")
+    from contract_v6 import artifact_files, build_chart_data, build_result
+
+    result = build_result(report, artifact_files("600519.SH", False))
+    out_html = render_html(result, build_chart_data(report), tmp_path / "xss_test.html")
     content = out_html.read_text(encoding="utf-8")
     assert "</script><script>window.__XSS=1;" not in content
     assert "\\u003c/script\\u003e" in content
@@ -1253,17 +1256,16 @@ def test_o3_report_md_shows_wave_counts_defense_and_short_plans(replay_recorded,
         output_dir=tmp_path,
     )
     md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
-    plan = rep["triple_barrier_plan"]
+    result = load_v6(rep)[0]
     assert "持仓防守计划" in md and "破位做空计划" in md
-    assert f"{plan['short_plan']['stop_loss_barrier']:.2f}" in md
-    if rep["mathematical_indicators"]["structure_levels"]["wave_counts"]:
+    assert f"{result['plan']['short']['stop_loss_barrier']:.2f}" in md
+    if result["structure"]["wave_counts"]:
         assert "| 浪型计数 |" in md and "此计数失效" in md
-    assert "只是时间量级，不是方向预测" in md
     # 风险预算折算不足一手时明确说明，不只显示"0 股"
     from render_report_md import render_report_markdown
 
-    zero = copy.deepcopy(rep)
-    zero["triple_barrier_plan"]["position_sizing"].update(
+    zero = copy.deepcopy(result)
+    zero["plan"]["long"]["position_sizing"].update(
         {"tradable": True, "account_equity": 500000.0, "max_risk_pct": 1.0, "risk_budget_amount": 5000.0,
          "lot_size": 100, "min_order_shares": 100, "lot_step": 100, "recommended_shares": 0, "estimated_notional": 0.0}
     )
@@ -1667,6 +1669,7 @@ def test_p1_all_eight_audit_items_regression(replay_recorded, tmp_path: Path) ->
 
 def test_position_sizing_uses_worst_fill_and_is_withheld_under_veto(replay_recorded, tmp_path: Path) -> None:
     from analysis import analyze_bundle
+    from contract_v6 import artifact_files, build_result
     from render_report_md import render_report_markdown
 
     now = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
@@ -1683,7 +1686,7 @@ def test_position_sizing_uses_worst_fill_and_is_withheld_under_veto(replay_recor
     assert sz["recommended_shares"] > 0 and sz["recommended_shares"] % 100 == 0
     assert sz["recommended_shares"] * worst <= sz["risk_budget_amount"] + 1e-6
     assert sz["max_loss_at_stop"] <= sz["risk_budget_amount"] and "跌停" in sz["gap_risk_note"]
-    md = render_report_markdown(hist)
+    md = render_report_markdown(build_result(hist, artifact_files("510300.SH", False)))
     assert f"**{sz['recommended_shares']} 股**" in md and "触及止损约亏" in md
 
     # 2026-10-15：风控否决（大盘偏弱等），股数本身就是买入建议，必须不给出，并写明原因
@@ -1692,7 +1695,7 @@ def test_position_sizing_uses_worst_fill_and_is_withheld_under_veto(replay_recor
     sz_now = rep["triple_barrier_plan"]["position_sizing"]
     assert sz_now["recommended_shares"] is None and sz_now["estimated_notional"] is None and sz_now["max_loss_at_stop"] is None
     assert "风控已否决" in sz_now["reason"]
-    md_now = render_report_markdown(rep)
+    md_now = render_report_markdown(build_result(rep, artifact_files("510300.SH", False)))
     assert "不给出建议股数" in md_now and "按入场区上沿" not in md_now
 
 

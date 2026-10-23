@@ -1,7 +1,7 @@
-"""把 AnalysisReport（及可选回测结果）确定性地渲染为中文 Markdown 分析报告 `*_report.md`。
+"""把 v6 result.json（及可选回测结果）确定性地渲染为中文 Markdown 分析报告 `*_report.md`。
 
 报告按 SKILL.md「回复契约」的顺序组织，agent 可直接据此回答用户：
-- 所有数字原样取自 report / backtest，不做任何再计算；价格按品种最小价位位数格式化。
+- 所有数字原样取自 v6 result / backtest，不做任何再计算；价格按品种最小价位位数格式化。
 - 数据质量为 UNAVAILABLE 时只输出告警，不输出任何价位与结论。
 - 规则分、区间、回测统计都附带口径说明，避免被误读为胜率或方向预测。
 """
@@ -38,15 +38,21 @@ def _num(value: Any, digits: int = 2) -> str:
 
 
 def render_report_markdown(
-    report: dict[str, Any],
+    result: dict[str, Any],
     backtest: dict[str, Any] | None = None,
 ) -> str:
-    meta = report["meta"]
-    quality = report["quality"]
+    meta = result["meta"]
+    quality = result["quality"]
     market = meta["market"]
     asset_type = meta["asset_type"]
-    bars = report.get("series_export", {}).get("bars") or []
-    last_close = float(bars[-1]["close"]) if bars else 0.0
+    verdict = result.get("verdict") or {}
+    ctx = result.get("market_context") or {}
+    st = result.get("structure") or {}
+    plan_all = result.get("plan") or {}
+    plan = plan_all.get("long") or {}
+    vr = result.get("volatility_range") or {}
+    sc = result.get("scenarios") or {}
+    last_close = float(st.get("last_close") or 0.0)
     decimals = price_decimals(last_close, market, asset_type, meta["as_of"])
 
     def price(value: Any) -> str:
@@ -77,48 +83,43 @@ def render_report_markdown(
     if quality.get("notes"):
         lines += ["**数据备注**", ""] + [f"- {n}" for n in quality["notes"]] + [""]
 
-    debate = report["debate_and_veto"]
-    decision = report["meta_labeling_decision"]
-    mtf = report["multi_timeframe_score"]
-    if debate.get("risk_officer_veto"):
+    if verdict.get("risk_veto"):
         lines += ["> **风控否决**：以下条件触发否决，本报告不构成任何做多建议。", ">"]
-        lines += [f"> - {r}" for r in debate.get("veto_reasons", [])]
+        lines += [f"> - {r}" for r in verdict.get("veto_reasons", [])]
         lines += [""]
 
     # 1. 结论速览
-    bench = report["market_benchmark"]
-    plan = report["triple_barrier_plan"]
-    fp = report["future_projection_15d"]
+    bench = ctx
     partial_prefix = (
         f"【数据说明（PARTIAL）：{'；'.join(quality.get('warnings') or ['缺少大盘基准或来源待核验'])}】"
         if quality.get("status") == "PARTIAL"
         else ""
     )
     veto_prefix = (
-        f"【风控否决：{'；'.join(debate.get('veto_reasons') or [])}，以下点位仅用于观察，不构成做多建议】"
-        if debate.get("risk_officer_veto")
+        f"【风控否决：{'；'.join(verdict.get('veto_reasons') or [])}，以下点位仅用于观察，不构成做多建议】"
+        if verdict.get("risk_veto")
         else ""
     )
-    plan_zone_label = "观察区（风控已否决）" if debate.get("risk_officer_veto") else "入场区"
-    mr_adj = mtf.get("regime_adjustment") or {}
+    plan_zone_label = "观察区（风控已否决）" if verdict.get("risk_veto") else "入场区"
+    mr_adj = (verdict.get("rule_detail") or {}).get("regime_adjustment") or {}
     mr_note = f"{mr_adj['note_cn']}。" if mr_adj.get("applied") else ""
     flash_digest = (
         f"{partial_prefix}{veto_prefix}数据截至 {meta['as_of']}（数据源 {meta['data_source']}，{ADJUSTMENT_CN.get(meta.get('adjustment'), meta.get('adjustment'))}，质量 {quality['status']}）。"
         f"基准 {bench['index_name']}（{bench['index_symbol']}）处于{bench['regime_label_cn']}（状态分 {bench['regime_score']:.1f}/100）。"
-        f"本标的规则分 {mtf['rule_score']:.1f}/100（{mtf['rating_cn']}，确定性规则加权分，不是胜率或上涨概率），{mr_note}"
-        f"当前评级为「{decision['action_cn']}」（{decision['setup_label_cn']}），最新收盘 {price(last_close)}，"
+        f"本标的规则分 {verdict['rule_score']:.1f}/100（{verdict['rating_cn']}，确定性规则加权分，不是胜率或上涨概率），{mr_note}"
+        f"当前评级为「{verdict['action_cn']}」（{verdict['setup_label_cn']}），最新收盘 {price(last_close)}，"
         f"三重屏障计划{plan_zone_label} {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])}、止损 {price(plan['stop_loss_barrier'])}、"
         f"TP1 {price(plan['take_profit_1'])}（扣费后净盈亏比 {plan['risk_reward_ratio']:.2f}）；"
-        f"未来 {fp['horizon_bars']} 日 80% 保形区间为 {price(fp['q10'][-1])} ~ {price(fp['q90'][-1])}（中枢 q50 = {price(fp['base_median_q50'][-1])}，只描述波动幅度，不含方向预测）。"
+        f"未来 {vr['horizon_bars']} 日 80% 正常波动范围为 {price(vr['q10'][-1])} ~ {price(vr['q90'][-1])}（中枢 q50 = {price(vr['q50'][-1])}，只描述波动幅度，不含方向预测）。"
     )
     lines += [
         "## 1. 结论速览",
         "",
         f"- 直出摘要（供 Agent / Flash 模型首段原样引用）：{flash_digest}",
-        f"- 结论：{debate['final_verdict_cn']}",
-        f"- 规则分：**{mtf['rule_score']:.1f} / 100**（{mtf['rating_cn']}）。这是确定性规则加权分，不是胜率，也不是上涨概率。"
+        f"- 结论：{verdict['headline_cn']}",
+        f"- 规则分：**{verdict['rule_score']:.1f} / 100**（{verdict['rating_cn']}）。这是确定性规则加权分，不是胜率，也不是上涨概率。"
         + (f"{mr_note}" if mr_note else ""),
-        f"- 最新收盘：{price(last_close)}；计划类型：{decision['setup_label_cn']}。",
+        f"- 最新收盘：{price(last_close)}；计划类型：{verdict['setup_label_cn']}。",
         "",
     ]
 
@@ -149,9 +150,8 @@ def render_report_markdown(
         ]
 
     # 3. 结构与条件推演
-    levels = report["mathematical_indicators"]["structure_levels"]
-    wedge = levels["wedge_structure"]
-    sc = report["rule_scenarios"]
+    wedge = st["channel"]
+    sp = sc["paths"]
     lines += [
         "## 3. 结构与条件推演（触发 → 目标 → 失效）",
         "",
@@ -159,14 +159,14 @@ def render_report_markdown(
         "",
         "| 路径 | 触发条件 | 目标位（来源） | 失效条件 |",
         "| --- | --- | --- | --- |",
-        f"| 上攻 | {_cell(sc['bull']['trigger'])} | {price(sc['bull']['target_price'])}（{_cell(sc['bull']['target_source'])}） "
-        f"| {_cell(sc['bull']['invalidation'])} |",
-        f"| 震荡 | {_cell(sc['neutral']['condition'])} | 区间 {price(sc['neutral']['range'][0])} ~ {price(sc['neutral']['range'][1])} | — |",
-        f"| 下探 | {_cell(sc['bear']['trigger'])} | {price(sc['bear']['target_price'])}（{_cell(sc['bear']['target_source'])}） "
-        f"| {_cell(sc['bear']['invalidation'])} |",
+        f"| 上攻 | {_cell(sp['bull']['trigger'])} | {price(sp['bull']['target_price'])}（{_cell(sp['bull']['target_source'])}） "
+        f"| {_cell(sp['bull']['invalidation'])} |",
+        f"| 震荡 | {_cell(sp['neutral']['condition'])} | 区间 {price(sp['neutral']['range'][0])} ~ {price(sp['neutral']['range'][1])} | — |",
+        f"| 下探 | {_cell(sp['bear']['trigger'])} | {price(sp['bear']['target_price'])}（{_cell(sp['bear']['target_source'])}） "
+        f"| {_cell(sp['bear']['invalidation'])} |",
         "",
     ]
-    multi_scenarios = sc.get("scenarios") or []
+    multi_scenarios = sc.get("active") or []
     if multi_scenarios:
         lines += [
             "**多情景推演**",
@@ -184,22 +184,13 @@ def render_report_markdown(
     imp = sc.get("impulse_wave")
     if imp:
         lines += [f"- 推动浪识别：{imp['label']}（{imp['invalidation_text']}；1.618×浪1 测算位 {price(imp['wave3_1618_target'])}）。"]
-    horizon_sc = sc.get("horizon_bars")
-    for key, label in (("bull", "上攻"), ("bear", "下探")):
-        eta = sc[key].get("eta_bars")
-        if eta and horizon_sc:
-            reach = f"在 {horizon_sc} 日预测期内" if sc[key].get("target_within_horizon") else f"超出 {horizon_sc} 日预测期"
-            lines += [
-                f"- {label}路径时间尺度：按近 60 日日波动 {sc['sigma_1d_pct']:.2f}% 的随机游走扩散尺度估算，走到触发位约 {max(1.0, eta['trigger']):.0f} 个交易日、"
-                f"走到目标位约 {max(1.0, eta['target']):.0f} 个交易日，{reach}（只是时间量级，不是方向预测）。"
-            ]
     contested = sc.get("contested_levels") or []
     if contested:
         items = "；".join(f"{price(c['price'])}（{'/'.join(c['sources'])}）" for c in contested)
         lines += [
             f"- 现价 {sc['min_trigger_distance_atr']} 个 ATR 以内正在争夺的价位：{items}。这些价位落在日常波动范围内，不作触发条件。"
         ]
-    counts = levels.get("wave_counts") or []
+    counts = st.get("wave_counts") or []
     if counts:
         lines += ["", "| 浪型计数 | A 浪 | B 浪终点 | C 浪进度 | 1.0 倍测算位 | 否定条件 |", "| --- | --- | --- | --- | --- | --- |"]
         for wc in counts:
@@ -212,7 +203,7 @@ def render_report_markdown(
             ]
         lines += ["", "- 浪型计数是对同一段走势的不同数法，备选计数用于提示主计数可能错在哪里，不代表可能性大小。"]
     lines += [""]
-    ladder = levels.get("key_levels") or {}
+    ladder = st.get("key_levels") or {}
     res = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("resistances") or [])[:3]]
     sup = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("supports") or [])[:3]]
     lines += [
@@ -222,7 +213,6 @@ def render_report_markdown(
     ]
 
     # 4. 风控计划
-    plan = report["triple_barrier_plan"]
     rules = plan["market_microstructure"]
     sizing = plan["position_sizing"]
     lines += [
@@ -230,7 +220,7 @@ def render_report_markdown(
         "",
         f"| 计划类型 | {plan_zone_label} | 止损 | TP1 | TP2 | 时间屏障 | 扣费后盈亏比 |",
         "| --- | --- | --- | --- | --- | --- | --- |",
-        f"| {decision['setup_label_cn']} | {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])} "
+        f"| {verdict['setup_label_cn']} | {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])} "
         f"| {price(plan['stop_loss_barrier'])} | {price(plan['take_profit_1'])} | {price(plan['take_profit_2'])} "
         f"| {plan['time_barrier_bars']} 根 K 线 | {plan['risk_reward_ratio']:.2f} |",
         "",
@@ -271,20 +261,20 @@ def render_report_markdown(
         ]
     elif sizing.get("reason"):
         lines += [f"- 仓位：{sizing['reason']}"]
-    if debate.get("risk_officer_veto"):
+    if verdict.get("risk_veto"):
         lines += ["- 风控已否决：以上点位只用于观察与复核，不构成做多建议。"]
-    elif decision.get("action") not in ("LONG_CONFIRMED", "WATCH_LONG_SETUP"):
+    elif verdict.get("action") not in ("LONG_CONFIRMED", "WATCH_LONG_SETUP"):
         lines += ["- 非做多评级提示：当前未触发做多确认，以下点位仅作结构观察与条件触发参考，当前不构成买入建议。"]
-    aq_traps = decision.get("anti_quant_traps") or {}
+    aq_traps = verdict.get("anti_quant_traps") or {}
     for aq_w in aq_traps.get("warnings_cn") or []:
         lines += [f"- 反量化收割风险提示：{aq_w}。"]
-    defense = plan.get("holder_defense_plan") or {}
+    defense = plan_all.get("holder_defense") or {}
     if defense.get("available"):
         lines += ["", "**持仓防守计划**（已持有该标的时参考）", ""] + [f"- {r}" for r in defense["rules"]]
         lines += [f"- 下方参考位：{price(defense['downside_reference']['price'])}（{_cell(defense['downside_reference']['source'])}）。"]
         if defense.get("note"):
             lines += [f"- {defense['note']}。"]
-    short = plan.get("short_plan") or {}
+    short = plan_all.get("short") or {}
     if short.get("available"):
         lines += [
             "",
@@ -306,30 +296,29 @@ def render_report_markdown(
 
     # 5. 形态与信号证据
     lines += ["## 5. 形态与信号证据（公式可复核）", ""]
-    patterns = report.get("algebraic_patterns_detected") or []
+    patterns = st.get("patterns") or []
     for p in patterns[:6]:
         lines += [
             f"- {p['name_cn']}（{DIRECTION_CN.get(p['direction'], p['direction'])}，{p.get('confirmed_at') or p.get('observed_at')}）："
             f"`{p['formula_verified']}`"
         ]
-    for s in report.get("strategy_signals") or []:
+    for s in verdict.get("strategy_signals") or []:
         if s.get("direction") != "NEUTRAL":
             lines += [f"- 策略 {s['name_cn']} → {s['state']}：`{s['formula_verified']}`"]
-    breaks = (report.get("smc_structures") or {}).get("structure_breaks") or []
+    breaks = (st.get("smc") or {}).get("structure_breaks") or []
     if breaks:
         last_break = breaks[-1]
         lines += [f"- 最近一次结构破位：{last_break['type']}（{last_break['day']}，破位价 {price(last_break['broken_level'])}）"]
-    if not patterns and not breaks and not any(s.get("direction") != "NEUTRAL" for s in report.get("strategy_signals") or []):
+    if not patterns and not breaks and not any(s.get("direction") != "NEUTRAL" for s in verdict.get("strategy_signals") or []):
         lines += ["- 当前窗口未触发蜡烛形态、背离或策略信号。"]
     lines += [""]
 
     # 6. 未来区间
-    fp = report["future_projection_15d"]
-    audit = fp["calibration_audit"]
-    horizon = int(fp["horizon_bars"])
+    audit = vr["calibration_audit"]
+    horizon = int(vr["horizon_bars"])
     steps = sorted({h for h in (1, 5, 10, horizon) if 1 <= h <= horizon})
     lines += [
-        f"## 6. 未来 {horizon} 个交易日价格区间（只描述波动幅度，不含方向判断）",
+        f"## 6. 未来 {horizon} 个交易日正常波动范围（只描述波动幅度，不含方向判断）",
         "",
         "| 日期 | 第几日 | 80% 下沿 q10 | 50% 下沿 q25 | 中枢 q50 | 50% 上沿 q75 | 80% 上沿 q90 |",
         "| --- | --- | --- | --- | --- | --- | --- |",
@@ -337,10 +326,10 @@ def render_report_markdown(
     for h in steps:
         i = h - 1
         lines += [
-            f"| {fp['horizon_dates'][i]} | {h} | {price(fp['q10'][i])} | {price(fp['q25'][i])} | {price(fp['base_median_q50'][i])} "
-            f"| {price(fp['optimistic_q75'][i])} | {price(fp['q90'][i])} |"
+            f"| {vr['horizon_dates'][i]} | {h} | {price(vr['q10'][i])} | {price(vr['q25'][i])} | {price(vr['q50'][i])} "
+            f"| {price(vr['q75'][i])} | {price(vr['q90'][i])} |"
         ]
-    promoted = "已达标" if fp["promotion_status"] == "PROMOTED" else "校准观察期"
+    promoted = "已达标" if vr["promotion_status"] == "PROMOTED" else "校准观察期"
     lines += [
         "",
         "- 中枢 q50 就是最新收盘价（不加任何漂移），区间宽度来自历史波动的分期限校准。",
@@ -356,7 +345,7 @@ def render_report_markdown(
     ]
     if audit.get("uncalibrated_overlays"):
         lines += [f"- 未经历史校准的放大项：{'；'.join(audit['uncalibrated_overlays'])}。"]
-    cal = fp.get("calendar_coverage") or {}
+    cal = vr.get("calendar_coverage") or {}
     if cal and not cal.get("covered", True):
         lines += [f"- {len(cal['estimated_dates'])} 个未来日期超出休市表覆盖范围（至 {cal['coverage_end']}），按工作日估算。"]
     lines += ["- 这是逐日的边际区间，不代表整条价格路径的联合概率。", ""]
@@ -441,10 +430,11 @@ def render_report_markdown(
         lines += [""]
 
     # 8. 文件
-    paths = report.get("rendered_paths") or {}
+    paths = result.get("files") or {}
     file_labels = (
         ("report_md", "本报告"),
         ("result_json", "完整计算结果 JSON"),
+        ("chart_data_json", "渲染数据 JSON（非稳定接口）"),
         ("dashboard_html", "离线交互看板 HTML"),
         ("preview_png", "结构推演图 PNG"),
         ("backtest_json", "回测明细 JSON"),

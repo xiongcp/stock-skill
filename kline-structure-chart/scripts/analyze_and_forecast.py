@@ -134,11 +134,11 @@ def run_pipeline(
     chart = build_chart_data(report)
     validate_report(result)
     validate_chart_data(chart)
-    render_html(report, paths["dashboard_html"])  # Task B8 改为读 v6
+    render_html(result, chart, paths["dashboard_html"])
     paths["result_json"].write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     paths["chart_data_json"].write_text(json.dumps(chart, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     # 面向回答的中文 Markdown 报告：数字全部取自 result.json，供 agent 直接转述
-    paths["report_md"].write_text(render_report_markdown(report, bt_payload), encoding="utf-8")  # Task B8 改为读 v6
+    paths["report_md"].write_text(render_report_markdown(result, bt_payload), encoding="utf-8")
     return report
 
 
