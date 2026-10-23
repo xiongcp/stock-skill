@@ -2,8 +2,6 @@
 
 `kline-structure-chart` 是一个符合 [Agent Skills 开放规范](https://agentskills.io/specification) 的金融量化与 K 线数学结构分析技能包。装进 Claude Code、Codex、Hermes Agent、Cursor、Gemini CLI、OpenCode 等 AI 助手之后，你只需用自然语言提问（例如："帮我看看贵州茅台的 K 线结构和支撑压力，账户 50 万，带回测"），助手就会自动完成从**真实行情拉取 → 确定性数学结构识别 → 三重屏障风控与正常波动范围 → 离线交互看板与高清图生成 → 回复契约校验**的完整投研闭环。
 
-![kline-structure-chart 架构与分析流水线总览](examples/architecture_overview.png)
-
 ---
 
 ## 0. 我们究竟解决什么问题？（为什么不能让大模型直接看图猜 K 线）
@@ -355,8 +353,6 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 stderr 同时打印 `[CODE] message`。
 
 每个字段的含义、单位、能否为空和稳定级别见 [references/output-fields.md](kline-structure-chart/references/output-fields.md)（6.x 内只新增字段，不删除、不改名、不改语义）。完整产物示例见 [examples/](examples/README.md)。
-
-![产物视觉导读：PNG 五大分区与 HTML 九大图层](examples/chart_reading_guide.png)
 
 ---
 

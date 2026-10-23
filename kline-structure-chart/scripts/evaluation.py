@@ -504,7 +504,7 @@ def run_plan_backtest(
         ipo_at_t = bool(is_ipo_no_limit and t < 5)
         pit_bars = rescale_bars_as_of(bars[: min(n, t + horizon_bars + 10)], t)
         sub_bundle = {
-            "schema_version": "5.3.0",
+            "schema_version": "6.0.0",
             "market": market,
             "target": {"instrument": inst, "bars": pit_bars[: t + 1], "intraday": None},
             "benchmark": {**bench, "bars": [b for b in bench["bars"] if b["day"] <= cut_day]} if bench else None,

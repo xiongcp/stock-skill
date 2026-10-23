@@ -339,7 +339,6 @@ def test_uv_directory_commands_use_paths_relative_to_skill_dir() -> None:
             assert " kline-structure-chart/" not in tail, f"{doc.name} 命令路径会被解析成 kline-structure-chart/kline-structure-chart/…: {line.strip()}"
 
 
-@pytest.mark.skip(reason="examples 在 Task B10 按 v6 重新生成")
 def test_example_reply_passes_lint_and_counterexample_is_rejected() -> None:
     """examples/ 的标准回复必须与同目录 result.json 一致并通过回复契约，反例必须被 lint 拦截。"""
     import json
