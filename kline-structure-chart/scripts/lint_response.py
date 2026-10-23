@@ -4,9 +4,9 @@
 校验项：
 1. quality.status == UNAVAILABLE 时，禁止输出任何价格点位或交易计划。
 2. quality.status == PARTIAL 时，必须在回复前部披露数据告警。
-3. debate_and_veto.risk_officer_veto == true 时，必须在回复开头（前 400 个字符内）出现「风控否决」提示。
-4. 严禁把规则分（rule_score）称为「胜率」「上涨概率」或「置信度」；严禁「上涨概率 70%」「大概率」「胜算」等未经校验的概率措辞。
-5. 价位词或交易动作（目标、止损、买入、突破、站上……）前后出现的价格数字必须能在 result.json 白名单中找到，严禁捏造价格。
+3. verdict.risk_veto == true 时，必须在回复开头（前 400 个字符内）出现「风控否决」提示。
+4. 严禁把规则分称为「胜率」「上涨概率」「置信度」；除「回测胜率 + 95% 区间」外，不得出现任何概率、胜率、频率数字或「大概率」「胜算」等措辞。
+5. 价位词或交易动作（目标、止损、买入、突破、站上……）前后出现的价格数字必须能在 result.json 的 quotable_prices 白名单中找到，严禁捏造价格。
 6. 必须包含免责声明（「不构成投资建议」）。
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from price_text import CONTEXT_PRICE_RE, NON_PRICE_PATTERNS, collect_price_whitelist, price_in_whitelist
+from price_text import CONTEXT_PRICE_RE, NON_PRICE_PATTERNS, price_in_whitelist
 
 _FORBIDDEN_PROB_PHRASES = (
     re.compile(r"(?:多周期)?(?:规则(?:综合)?(?:评分|分)|过滤分|状态分)[^\n。；]{0,16}(?:胜率|上涨概率|置信度|确定性)"),
@@ -25,18 +25,20 @@ _FORBIDDEN_PROB_PHRASES = (
     re.compile(r"(?:主力|真实)?持仓筹码|主力(?:真实)?筹码|获利盘(?:比例|占比)"),
 )
 
-# 未经校验的概率/确定性措辞：只有历史条件频率、通过校验的主观研判、回测成交胜率（带 95% 区间）与区间覆盖率可以带概率数字
+# 未经校验的概率/确定性措辞：只有回测成交胜率（同一句出现「回测」并带 95% 区间）可以带概率数字
 _UNVALIDATED_PROB_PHRASES = (
     re.compile(r"大概率|小概率|胜算|稳赚|必涨|必跌|十拿九稳|板上钉钉"),
     re.compile(r"(?:上涨|下跌|突破|反弹|上攻|下探|成功|盈利|翻倍|见顶|见底|涨|跌)(?:的)?(?:概率|可能性|几率)"),
     re.compile(
-        r"(?:概率|可能性|几率|胜率|成功率|命中率|命中概率|准确率|把握)\s*"
+        r"(?:概率|可能性|几率|胜率|成功率|命中率|命中概率|准确率|把握|频率)\s*"
         r"(?:约|大约|为|是|达|达到|高达|超|超过|高于|接近|有|在|>=?|:|：|=)?\s*\d+(?:\.\d+)?\s*%"
     ),
     re.compile(r"[一二三四五六七八九]成(?:把握|胜算|概率|机会|以上)?(?=[^\d]|$)"),
 )
 _NEGATION_RE = re.compile(r"不是|不叫|不代表|并非|不得|不能|严禁|禁止|不构成|不等于|不要|不应|不宜|而非|不含|没有")
-_PROB_ALLOWED_CONTEXT_RE = re.compile(r"历史条件频率|主观研判|脚本预填|研判模板|覆盖率|95% 区间|95%区间|Wilson")
+# 唯一允许的概率类数字：回测成交胜率，同一句必须出现「回测」并给出 95% 区间
+_BACKTEST_SENTENCE_RE = re.compile(r"回测")
+_CI_RE = re.compile(r"95%\s*区间|Wilson")
 # 回测胜率专用：必须与 backtest.json 的成交样本一致；小样本不得被包装为 70% 目标证据
 _BACKTEST_RATE_RE = re.compile(
     r"(?:胜率|成功率|命中率|命中概率|准确率)\s*(?:为|是|约|达|达到|高达|超|超过|高于|接近|在|>=?|:|：|=|攀升至)?\s*(\d+(?:\.\d+)?)\s*%"
@@ -86,7 +88,8 @@ def _unvalidated_probability_hits(text: str) -> list[str]:
             before = text[sentence_start : m.start()]
             if _NEGATION_RE.search(before):
                 continue  # 「不是胜率或上涨概率」「不得出现大概率突破」之类的否定说明
-            if pat is numeric_pat and _PROB_ALLOWED_CONTEXT_RE.search(_sentence_around(text, m.start(), m.end())):
+            sent = _sentence_around(text, m.start(), m.end())
+            if pat is numeric_pat and _BACKTEST_SENTENCE_RE.search(sent) and _CI_RE.search(sent):
                 continue
             hits.append(m.group(0))
     return hits
@@ -105,8 +108,12 @@ def lint_agent_response(
 
     quality = report.get("quality") or {}
     q_status = str(quality.get("status") or "OK")
-    debate = report.get("debate_and_veto") or {}
-    veto = bool(debate.get("risk_officer_veto"))
+    verdict = report.get("verdict") or {}
+    veto = bool(verdict.get("risk_veto"))
+    plan = report.get("plan") or {}
+    long_plan = plan.get("long") or {}
+    scen = report.get("scenarios") or {}
+    struct = report.get("structure") or {}
 
     # 1. UNAVAILABLE 检查
     if q_status == "UNAVAILABLE":
@@ -123,24 +130,24 @@ def lint_agent_response(
     # 3. 风控否决置顶检查
     if veto:
         if "风控否决" not in text and "风控已否决" not in text:
-            errors.append("risk_officer_veto == true 时，回复必须明确写出「风控否决」")
+            errors.append("risk_veto == true 时，回复必须明确写出「风控否决」")
         first_veto = min(
             (pos for pos in (text.find("风控否决"), text.find("风控已否决")) if pos >= 0),
             default=-1,
         )
         first_plan = text.find("风控计划")
         if first_veto >= 0 and first_plan >= 0 and first_veto > first_plan:
-            errors.append("risk_officer_veto == true 时，「风控否决」提示必须出现在「风控计划」之前")
+            errors.append("risk_veto == true 时，「风控否决」提示必须出现在「风控计划」之前")
         if first_veto > VETO_HEAD_CHARS:
-            errors.append(f"risk_officer_veto == true 时，「风控否决」必须置顶（出现在回复前 {VETO_HEAD_CHARS} 个字符内）")
+            errors.append(f"risk_veto == true 时，「风控否决」必须置顶（出现在回复前 {VETO_HEAD_CHARS} 个字符内）")
         for m_buy in _VETO_POSITIVE_BUY_RE.finditer(text):
             sent_start = max((sm.end() for sm in _SENTENCE_SPLIT_RE.finditer(text, 0, m_buy.start())), default=0)
             before_buy = text[sent_start : m_buy.start()]
             if not _NEGATION_RE.search(before_buy) and not _NEGATION_RE.search(m_buy.group(0)):
-                errors.append(f"risk_officer_veto == true 时，严禁给出做多/买入建议: {m_buy.group(0)!r}")
+                errors.append(f"risk_veto == true 时，严禁给出做多/买入建议: {m_buy.group(0)!r}")
 
     # 3b. 报告没有给出建议股数（风控否决、评级非做多或未给账户净值）时，回复不得自行换算买入股数
-    sizing = (report.get("triple_barrier_plan") or {}).get("position_sizing") or {}
+    sizing = long_plan.get("position_sizing") or {}
     if sizing.get("recommended_shares") is None:
         for m_sh in _BUY_SHARES_RE.finditer(text):
             sent_sh = _sentence_around(text, m_sh.start(), m_sh.end())
@@ -160,7 +167,7 @@ def lint_agent_response(
                 break
     for hit in dict.fromkeys(_unvalidated_probability_hits(text)):
         errors.append(
-            f"检测到未经校验的概率/确定性表述: {hit!r}（只允许引用历史条件频率、通过校验的主观研判、带 95% 区间的回测胜率与区间覆盖率）"
+            f"检测到未经校验的概率/确定性表述: {hit!r}（只允许引用带 95% 区间的回测胜率）"
         )
 
     if backtest is not None:
@@ -188,36 +195,27 @@ def lint_agent_response(
                     errors.append("小样本回测（n<30）不得被表述为达到/证明 70% 目标或作为充分证据")
 
     # 5. 价格白名单检查（针对带价格语境的数值）
-    meta = report.get("meta") or {}
-    whitelist = collect_price_whitelist(
-        {k: report[k] for k in ("mathematical_indicators", "smc_structures", "volume_profile",
-                                "triple_barrier_plan", "rule_scenarios", "future_projection_15d") if k in report},
-        int(meta.get("price_decimals") or 2),
-        (report.get("series_export") or {}).get("bars") or [],
-    )
+    whitelist = report.get("quotable_prices") or {}
     wl_prices: list[float] = [float(p) for p in whitelist.get("prices") or []]
     wl_tol = float(whitelist.get("tolerance") or 0.01)
     wave_only_prices: list[float] = []
-    levels_node = (report.get("mathematical_indicators") or {}).get("structure_levels") or {}
-    for wc in list(levels_node.get("wave_counts") or []) + ([levels_node["abc_scenario"]] if levels_node.get("abc_scenario") else []):
+    for wc in list(struct.get("wave_counts") or []) + ([struct["abc_scenario"]] if struct.get("abc_scenario") else []):
         for lv in (wc or {}).get("levels") or []:
             if lv.get("price") is not None:
                 wave_only_prices.append(float(lv["price"]))
     valid_target_prices: list[float] = []
-    tb_node = report.get("triple_barrier_plan") or {}
     for tk in ("take_profit_1", "take_profit_2"):
-        if tb_node.get(tk) is not None:
-            valid_target_prices.append(float(tb_node[tk]))
-    sp_node = tb_node.get("short_plan") or {}
+        if long_plan.get(tk) is not None:
+            valid_target_prices.append(float(long_plan[tk]))
+    sp_node = plan.get("short") or {}
     for tk in ("take_profit_1", "take_profit_2"):
         if sp_node.get(tk) is not None:
             valid_target_prices.append(float(sp_node[tk]))
-    rs_obj = report.get("rule_scenarios") or {}
-    for sc_item in list(rs_obj.get("scenarios") or []) + [rs_obj.get(k) for k in ("bull", "neutral", "bear") if isinstance(rs_obj.get(k), dict)]:
+    for sc_item in list(scen.get("active") or []) + [(scen.get("paths") or {}).get(k) for k in ("bull", "neutral", "bear")]:
         if isinstance(sc_item, dict) and sc_item.get("target_price") is not None:
             valid_target_prices.append(float(sc_item["target_price"]))
-    if isinstance(rs_obj.get("impulse_wave"), dict) and rs_obj["impulse_wave"].get("wave3_1618_target") is not None:
-        valid_target_prices.append(float(rs_obj["impulse_wave"]["wave3_1618_target"]))
+    if isinstance(scen.get("impulse_wave"), dict) and scen["impulse_wave"].get("wave3_1618_target") is not None:
+        valid_target_prices.append(float(scen["impulse_wave"]["wave3_1618_target"]))
 
     cleaned = text
     for pat in NON_PRICE_PATTERNS:

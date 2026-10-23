@@ -1437,19 +1437,20 @@ def test_lint_response_catches_contract_violations_and_passes_clean_report(repla
         output_dir=tmp_path,
         run_backtest=False,
     )
+    result, _ = load_v6(rep)
     clean_md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
-    errs_clean = lint_agent_response(clean_md, rep)
+    errs_clean = lint_agent_response(clean_md, result)
     assert errs_clean == [], errs_clean
 
     # 违规：把规则分说成「胜率 75%」，且捏造白名单外价格 9123.45，且删去免责声明
     bad_text = "本报告规则分对应的上涨概率为 75%，建议在目标位 9123.45 元附近离场。"
-    errs_bad = lint_agent_response(bad_text, rep)
+    errs_bad = lint_agent_response(bad_text, result)
     assert len(errs_bad) >= 2
     assert any("上涨概率" in e or "规则分" in e for e in errs_bad)
     assert any("9123.45" in e for e in errs_bad)
 
     # UNAVAILABLE 时任何带交易动作的价格（如 "1300.00 买入"）均被拦截
-    unavail_rep = copy.deepcopy(rep)
+    unavail_rep = copy.deepcopy(result)
     unavail_rep["quality"]["status"] = "UNAVAILABLE"
     errs_unavail = lint_agent_response("建议在 1300.00 买入，不构成投资建议。", unavail_rep)
     assert any("UNAVAILABLE" in e for e in errs_unavail)
@@ -1529,12 +1530,14 @@ def test_p0_lint_rejects_skill_md_counterexample_and_unvalidated_probabilities(r
         run_backtest=False,
     )
     assert rep["debate_and_veto"]["risk_officer_veto"] is True
+    result, _ = load_v6(rep)
+    assert result["verdict"]["risk_veto"] is True
     md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
-    assert lint_agent_response(md, rep) == []
+    assert lint_agent_response(md, result) == []
 
     disclaimer = "以上为规则化技术分析，仅供研究参考，不构成投资建议。"
     counter = f"风控否决：大盘偏弱。茅台已经向上突破，上涨概率约 70%，胜算七成，大概率突破，建议 1330 附近买入，目标 1440。\n{disclaimer}"
-    errs = lint_agent_response(counter, rep)
+    errs = lint_agent_response(counter, result)
     for token in ("上涨概率", "概率约 70%", "胜算", "大概率", "七成", "1330", "1440"):
         assert any(token in e for e in errs), (token, errs)
 
@@ -1542,10 +1545,10 @@ def test_p0_lint_rejects_skill_md_counterexample_and_unvalidated_probabilities(r
         "风控否决：大盘环境评分偏弱。规则分不是胜率或上涨概率，回复里不得出现「大概率突破」之类的说法。"
         "回测全部做多信号胜率 50.0%（95% 区间 21.5% ~ 78.5%），成交仅 8 笔。" + disclaimer
     )
-    assert lint_agent_response(ok_text, rep) == []
+    assert lint_agent_response(ok_text, result) == []
 
     late_veto = "茅台的结构说明。" * 60 + "风控否决：大盘偏弱。" + disclaimer
-    assert any("置顶" in e for e in lint_agent_response(late_veto, rep))
+    assert any("置顶" in e for e in lint_agent_response(late_veto, result))
 
     # 价格白名单只收价格字段：频率、根数、比值、百分比不能让捏造的"价格"蒙混过关
     wl = collect_price_whitelist(
@@ -1767,15 +1770,17 @@ def test_plan_geometry_guard_vetoes_stop_inside_entry_zone(replay_recorded) -> N
 
 def test_lint_rejects_share_count_when_report_withholds_sizing(replay_recorded) -> None:
     from analysis import analyze_bundle
+    from contract_v6 import artifact_files, build_result
     from lint_response import lint_agent_response
 
     req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15,
            "account_equity": 500000.0, "max_risk_pct": 0.01}
     rep = analyze_bundle(load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC)), req, include_replay=False)
     assert rep["triple_barrier_plan"]["position_sizing"]["recommended_shares"] is None
+    result = build_result(rep, artifact_files("600519.SH", False))
     head = "【风控否决】大盘偏弱，以下点位只用于观察。交易制度：每手 100 股（最小申报 100 股）。以上不构成投资建议。"
-    assert not any("买入股数" in e for e in lint_agent_response(head, rep))
-    errors = lint_agent_response(head + "按账户 50 万可买入 300 股。", rep)
+    assert not any("买入股数" in e for e in lint_agent_response(head, result))
+    errors = lint_agent_response(head + "按账户 50 万可买入 300 股。", result)
     assert any("买入股数" in e for e in errors)
 
 
@@ -1816,13 +1821,14 @@ def test_expert_audit_fixes_regression(replay_recorded, tmp_path: Path) -> None:
     assert snap0["base_close"] > 1300.0
     assert snap0["bars_window"][-1]["close"] == snap0["base_close"]
 
+    result_cn, _ = load_v6(rep_cn)
     disclaimer = "以上为规则化技术分析，仅供研究参考，不构成投资建议。"
-    errs_buy_under_veto = lint_agent_response(f"风控否决：大盘偏弱，但仍建议逢低买入。{disclaimer}", rep_cn)
+    errs_buy_under_veto = lint_agent_response(f"风控否决：大盘偏弱，但仍建议逢低买入。{disclaimer}", result_cn)
     assert any("严禁给出做多/买入建议" in e for e in errs_buy_under_veto)
-    errs_wave_as_target = lint_agent_response(f"风控否决：大盘偏弱，上方目标位 1440.44。{disclaimer}", rep_cn)
+    errs_wave_as_target = lint_agent_response(f"风控否决：大盘偏弱，上方目标位 1440.44。{disclaimer}", result_cn)
     assert any("浪型测算位" in e for e in errs_wave_as_target)
     fake_bt = {"backtest": {"all_long_signals": {"win_rate_pct": 46.15}, "long_confirmed": {"win_rate_pct": 83.33}, "watch_long_setup": {"win_rate_pct": 38.46}}}
-    errs_fake_wr = lint_agent_response(f"风控否决：大盘偏弱。回测胜率 95.0%（95% 区间 80%~99%）。{disclaimer}", rep_cn, backtest=fake_bt)
+    errs_fake_wr = lint_agent_response(f"风控否决：大盘偏弱。回测胜率 95.0%（95% 区间 80%~99%）。{disclaimer}", result_cn, backtest=fake_bt)
     assert any("回测胜率" in e for e in errs_fake_wr)
 
 
@@ -1834,11 +1840,12 @@ def test_lint_audit_regressions_wave_numbers_small_sample_and_veto_bypass(replay
         {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15},
         output_dir=tmp_path / "lint_audit",
     )
-    price = float(rep["triple_barrier_plan"]["stop_loss_barrier"])
+    result, _ = load_v6(rep)
+    price = float(result["plan"]["long"]["stop_loss_barrier"])
     disclaimer = "以上为规则化技术分析，仅供研究参考，不构成投资建议。"
 
     wave_text = f"风控否决：大盘偏弱。若收盘跌破浪 1 起点 {price:.2f} 则上升推动浪计数失效。{disclaimer}"
-    errs_wave = lint_agent_response(wave_text, rep)
+    errs_wave = lint_agent_response(wave_text, result)
     assert not any("白名单中的价格" in e for e in errs_wave), errs_wave
 
     fake_bt = {"backtest": {
@@ -1847,13 +1854,13 @@ def test_lint_audit_regressions_wave_numbers_small_sample_and_veto_bypass(replay
         "watch_long_setup": {"win_rate_pct": 50.0, "trades": 4},
     }}
     small_text = f"风控否决：大盘偏弱。回测胜率 83.3%（n=6），证明该系统达到 70% 目标。{disclaimer}"
-    errs_small = lint_agent_response(small_text, rep, backtest=fake_bt)
+    errs_small = lint_agent_response(small_text, result, backtest=fake_bt)
     assert any("小样本回测" in e for e in errs_small), errs_small
 
     bypass_text = (
         f"风控否决：大盘偏弱。建议在 {price:.2f} 附近买入做多；投资者亦可于 {price:.2f} 建仓，逢低吸纳。{disclaimer}"
     )
-    errs_bypass = lint_agent_response(bypass_text, rep)
+    errs_bypass = lint_agent_response(bypass_text, result)
     assert sum(1 for e in errs_bypass if "严禁给出做多/买入建议" in e) >= 2, errs_bypass
 
 
@@ -2087,15 +2094,18 @@ def test_pit_rescale_precision_after_large_split() -> None:
 
 
 def _real_report_for_lint(replay_recorded) -> dict:
+    from contract_v6 import artifact_files, build_result
+
     req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
-    return analyze_bundle(load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC)), req, include_replay=False)
+    internal = analyze_bundle(load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC)), req, include_replay=False)
+    return build_result(internal, artifact_files("600519.SH", False))
 
 
 def test_lint_blocks_probability_bragging_variants_but_allows_negations(replay_recorded) -> None:
     from lint_response import lint_agent_response
 
     report = copy.deepcopy(_real_report_for_lint(replay_recorded))
-    report["debate_and_veto"]["risk_officer_veto"] = False
+    report["verdict"]["risk_veto"] = False
     bt = {"backtest": {"all_long_signals": {"trades": 6, "win_rate_pct": 83.3}}}
     base = "不构成投资建议。"
     for bad in (
@@ -2115,8 +2125,8 @@ def test_lint_catches_every_buy_shares_mention_under_veto(replay_recorded) -> No
     from lint_response import lint_agent_response
 
     rep = copy.deepcopy(_real_report_for_lint(replay_recorded))
-    rep["debate_and_veto"]["risk_officer_veto"] = True
-    rep["triple_barrier_plan"]["position_sizing"]["recommended_shares"] = None
+    rep["verdict"]["risk_veto"] = True
+    rep["plan"]["long"]["position_sizing"]["recommended_shares"] = None
     text = "【风控否决】观察。港股每手 100 股，仓位按 100 股/手假设计算。直接买入 500 股。不构成投资建议。"
     assert any("买入股数" in e for e in lint_agent_response(text, rep))
     clean = "【风控否决】观察。仓位按 100 股/手假设计算。不构成投资建议。"

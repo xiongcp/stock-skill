@@ -220,3 +220,48 @@ def test_cli_insufficient_history_exit_code(replay_recorded, tmp_path: Path, cap
     assert env == {"status": "error", "error": {"code": "INSUFFICIENT_HISTORY", "message": env["error"]["message"]}}
     assert "历史长度不足" in env["error"]["message"]
     assert captured.err.startswith("[INSUFFICIENT_HISTORY]")
+
+
+@pytest.mark.slow
+def test_lint_reads_v6_and_blocks_any_probability(replay_recorded, tmp_path: Path) -> None:
+    from lint_response import lint_agent_response
+
+    rep = _cn_moutai(tmp_path, run_backtest=True, backtest_step=10)
+    result, _ = load_v6(rep)
+    bt = json.loads(Path(rep["rendered_paths"]["backtest_json"]).read_text(encoding="utf-8"))
+    head = "风控否决：大盘偏弱。" if result["verdict"]["risk_veto"] else ""
+    stop = result["plan"]["long"]["stop_loss_barrier"]
+    ok = f"{head}止损 {stop:.2f}。以上为规则化技术分析，不构成投资建议。"
+    assert lint_agent_response(ok, result, bt) == []
+    for bad in ("上涨概率 62%", "历史条件频率 55%", "主观研判概率 40%", "命中率约 70%"):
+        errs = lint_agent_response(f"{head}{bad}。不构成投资建议。", result, bt)
+        assert errs, bad
+    wr = bt["backtest"]["all_long_signals"].get("win_rate_pct")
+    if wr is not None:
+        n = bt["backtest"]["all_long_signals"]["trades"]
+        good_bt = f"{head}回测胜率 {wr}%（n={n}，95% 区间见报告）。不构成投资建议。"
+        assert lint_agent_response(good_bt, result, bt) == []
+    fake = f"{head}止损 {stop * 1.37:.2f}。不构成投资建议。"
+    assert any("白名单" in e for e in lint_agent_response(fake, result, bt))
+
+
+@pytest.mark.slow
+def test_report_digest_line_passes_lint_against_v6(replay_recorded, tmp_path: Path) -> None:
+    """report.md 的「直出摘要」加免责声明作为短回复，必须通过对 v6 result.json 的回复校验（B2 遗失的覆盖）。"""
+    from lint_response import lint_agent_response
+
+    rep = _cn_moutai(tmp_path)
+    result, _ = load_v6(rep)
+    md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    line = next(ln for ln in md.splitlines() if "直出摘要" in ln)
+    digest = line.split("：", 1)[1].strip()
+    assert len(digest) > 20
+    reply = f"{digest}\n以上为规则化技术分析，不构成投资建议。"
+    assert lint_agent_response(reply, result) == []
+    # 同一摘要篡改一个价位数字后必须被拦截
+    import re
+
+    m = re.search(r"(?:目标|止损|入场|收盘)[^\d\n]{0,4}(\d+\.\d+)", digest)
+    assert m, digest
+    tampered = reply.replace(m.group(1), f"{float(m.group(1)) * 1.37:.2f}", 1)
+    assert lint_agent_response(tampered, result)
