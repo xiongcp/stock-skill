@@ -7,6 +7,7 @@ from contract_v6 import SCHEMA_VERSION
 from contracts import (
     AnalysisReport,
     AnalysisRequest,
+    InsufficientHistoryError,
     MarketDataBundle,
     assess_data_quality,
     compute_canonical_hash,
@@ -257,7 +258,7 @@ def analyze_bundle(
     )
     completed, active_intra, data_note = layer["completed"], layer["active_intra"], layer["data_note"]
     if len(completed) < 60:
-        raise ValueError(f"Insufficient completed bars ({len(completed)} < 60) for {inst['symbol']}")
+        raise InsufficientHistoryError(f"历史长度不足：已收盘K线 {len(completed)} < 60（{inst['symbol']}）")
     view, hist, sview, off = layer["view"], layer["hist"], layer["sview"], layer["off"]
     last_c = layer["last_c"]
     pivots, zz_thr = layer["pivots"], layer["zz_thr"]

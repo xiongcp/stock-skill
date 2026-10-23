@@ -196,3 +196,27 @@ def test_v6_result_keypaths_match_snapshot(replay_recorded, tmp_path: Path) -> N
         f"result.json 键路径与快照不一致：新增 {added}；删除 {removed}。"
         "新增或删除契约字段须同步 schema 的 x-stability 标注与 CHANGELOG\"契约变更\"，确认后再更新快照"
     )
+
+
+def test_cli_success_envelope(replay_recorded, tmp_path: Path, capsys) -> None:
+    from analyze_and_forecast import main
+
+    rc = main(["--market", "CN", "--symbol", "600519.SH", "--asset-type", "equity", "--output-dir", str(tmp_path)])
+    assert rc == 0
+    env = json.loads(capsys.readouterr().out)
+    assert env["status"] == "ok" and env["schema_version"] == "6.0.0"
+    assert set(env["verdict"]) == {"action", "action_cn", "risk_veto", "veto_reasons", "rule_score", "rating_cn", "headline_cn"}
+    assert env["files"]["result_json"] == "600519.SH_result.json"
+    assert (tmp_path / env["files"]["result_json"]).exists()
+
+
+def test_cli_insufficient_history_exit_code(replay_recorded, tmp_path: Path, capsys) -> None:
+    from analyze_and_forecast import main
+
+    rc = main(["--market", "CN", "--symbol", "600519.SH", "--asset-type", "equity", "--as-of", "2022-12-01", "--output-dir", str(tmp_path)])
+    assert rc == 4
+    captured = capsys.readouterr()
+    env = json.loads(captured.out)
+    assert env == {"status": "error", "error": {"code": "INSUFFICIENT_HISTORY", "message": env["error"]["message"]}}
+    assert "历史长度不足" in env["error"]["message"]
+    assert captured.err.startswith("[INSUFFICIENT_HISTORY]")

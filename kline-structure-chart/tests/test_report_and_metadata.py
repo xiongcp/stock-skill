@@ -239,15 +239,15 @@ def test_default_benchmark_itself_needs_no_external_benchmark(replay_recorded, t
 
 
 @pytest.mark.parametrize(
-    ("args", "prefix", "message"),
+    ("args", "code", "exit_code", "message"),
     [
-        (["--symbol", "600519"], "[INVALID_ARGUMENT]", "Cannot resolve market"),
-        (["--symbol", "000001"], "[INVALID_ARGUMENT]", "Ambiguous symbol"),
-        (["--symbol", "600519.SH", "--days", "30"], "[INVALID_ARGUMENT]", "--days must be between 60 and 500"),
-        (["--symbol", "600519.SH", "--offline"], "[DATA_UNAVAILABLE]", "网络已禁用"),
+        (["--symbol", "600519"], "INVALID_ARGUMENT", 2, "Cannot resolve market"),
+        (["--symbol", "000001"], "INVALID_ARGUMENT", 2, "Ambiguous symbol"),
+        (["--symbol", "600519.SH", "--days", "30"], "INVALID_ARGUMENT", 2, "--days must be between 60 and 500"),
+        (["--symbol", "600519.SH", "--offline"], "DATA_UNAVAILABLE", 3, "网络已禁用"),
     ],
 )
-def test_cli_errors_are_labelled_without_traceback(tmp_path: Path, args: list[str], prefix: str, message: str) -> None:
+def test_cli_errors_are_labelled_without_traceback(tmp_path: Path, args: list[str], code: str, exit_code: int, message: str) -> None:
     import subprocess
     import sys
 
@@ -256,9 +256,12 @@ def test_cli_errors_are_labelled_without_traceback(tmp_path: Path, args: list[st
         [sys.executable, str(script), *args, "--output-dir", str(tmp_path / "out")],
         capture_output=True, text=True, timeout=120,
     )
-    assert proc.returncode != 0
-    assert prefix in proc.stderr and message in proc.stderr
+    assert proc.returncode == exit_code
+    assert f"[{code}]" in proc.stderr and message in proc.stderr
     assert "Traceback" not in proc.stderr
+    envelope = json.loads(proc.stdout)
+    assert envelope["status"] == "error" and envelope["error"]["code"] == code
+    assert message in envelope["error"]["message"]
 
 
 def test_cli_help_renders() -> None:

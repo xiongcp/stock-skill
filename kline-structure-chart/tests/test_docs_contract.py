@@ -96,7 +96,8 @@ def test_readme_cli_parameters_and_outputs_match_code() -> None:
     actual = set(re.findall(r'add_argument\(\s*"(--[\w-]+)"', cli))
     assert documented == actual, f"README 参数表与 CLI 不同步：多列 {documented - actual}，漏列 {actual - documented}"
     for label in set(re.findall(r"\[([A-Z_]{5,})\]", text)):
-        assert f"[{label}]" in cli, f"README 提到的错误前缀 [{label}] 在 CLI 中不存在"
+        # CLI 以 _fail("CODE", ...) 统一拼出 stderr 的 [CODE] 前缀，源码里只有带引号的错误码
+        assert f'"{label}"' in cli, f"README 提到的错误前缀 [{label}] 在 CLI 中不存在"
     outputs = text.split("## 6.", 1)[1].split("## 7.", 1)[0]
     documented_files = set(re.findall(r"`\*(_\w+\.\w+)`", outputs))
     contract_py = (SKILL_DIR / "scripts" / "contract_v6.py").read_text(encoding="utf-8")

@@ -14,12 +14,13 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any
 
 from analysis import analyze_bundle
 from contract_v6 import SCHEMA_VERSION, artifact_files, build_chart_data, build_result
-from contracts import AnalysisRequest, sanitize_filename, validate_chart_data, validate_report
+from contracts import AnalysisRequest, InsufficientHistoryError, sanitize_filename, validate_chart_data, validate_report
 from data_gateway import load_bundle
 from evaluation import run_causal_replay_audit, run_plan_backtest
 from market_rules import price_decimals, round_to_tick
@@ -29,6 +30,18 @@ from render_structure_chart import render as render_png_chart
 from structure import compute_structure_layer
 
 MAX_RISK_PCT_LIMIT = 0.05  # 单笔风险上限 5%：更大的值几乎都是把百分数当比例传入
+
+EXIT_INVALID_ARGUMENT = 2
+EXIT_DATA_UNAVAILABLE = 3
+EXIT_INSUFFICIENT_HISTORY = 4
+_ENVELOPE_VERDICT_KEYS = ("action", "action_cn", "risk_veto", "veto_reasons", "rule_score", "rating_cn", "headline_cn")
+
+
+def _fail(code: str, message: str, exit_code: int) -> int:
+    # 标准输出给 agent 解析的 JSON；stderr 保留 [CODE] 前缀，兼容按文字前缀判断的旧调用方
+    print(json.dumps({"status": "error", "error": {"code": code, "message": message}}, ensure_ascii=False))
+    print(f"[{code}] {message}", file=sys.stderr)
+    return exit_code
 
 
 def run_pipeline(
@@ -129,7 +142,7 @@ def run_pipeline(
     return report
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Multi-market K-line algebraic analyzer & conformal forecaster")
     parser.add_argument("--market", choices=["CN", "HK", "US"], default=None, help="Market code: CN, HK, US")
     parser.add_argument("--symbol", required=True, help="Instrument symbol, e.g. 000001.SH, 600519.SH, 00700.HK, NVDA.US")
@@ -162,7 +175,7 @@ def main() -> None:
     parser.add_argument("--offline", action="store_true", help="Disable live network requests (requires --input local file)")
     parser.add_argument("--backtest", action="store_true", help="Run plan-replay backtest & causal replay audit")
     parser.add_argument("--backtest-step", type=int, default=1, help="Decision-day step for plan replay backtest (default 1 = every bar)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     req: AnalysisRequest = {
         "symbol": args.symbol,
@@ -200,36 +213,25 @@ def main() -> None:
             run_backtest=args.backtest,
             backtest_step=max(1, args.backtest_step),
         )
+    except InsufficientHistoryError as exc:
+        return _fail("INSUFFICIENT_HISTORY", str(exc), EXIT_INSUFFICIENT_HISTORY)
     except RuntimeError as exc:
-        # 真实行情取不到：数据源失败、限流、数据损坏或历史不足
-        raise SystemExit(f"[DATA_UNAVAILABLE] {exc}") from exc
+        # 真实行情取不到：数据源失败、限流、数据损坏
+        return _fail("DATA_UNAVAILABLE", str(exc), EXIT_DATA_UNAVAILABLE)
     except ValueError as exc:
         # 参数或输入不合法：代码无法识别、参数越界、本地文件格式错误
-        raise SystemExit(f"[INVALID_ARGUMENT] {exc}") from exc
-    summary_out = {
-        "meta": report["meta"],
-        "quality": {k: report["quality"][k] for k in ("status", "data_source_class", "benchmark_source", "warnings", "notes")},
-        "market_benchmark": {
-            "index_symbol": report["market_benchmark"]["index_symbol"],
-            "regime": report["market_benchmark"]["regime"],
-            "regime_score": report["market_benchmark"]["regime_score"],
-            "relative_strength_vs_index": report["market_benchmark"]["relative_strength_vs_index"],
-        },
-        "multi_timeframe_score": report["multi_timeframe_score"],
-        "meta_labeling_decision": report["meta_labeling_decision"],
-        "triple_barrier_plan": report["triple_barrier_plan"],
-        "future_projection_15d": {
-            "horizon_dates": report["future_projection_15d"]["horizon_dates"],
-            "q25": report["future_projection_15d"]["q25"],
-            "base_median_q50": report["future_projection_15d"]["base_median_q50"],
-            "optimistic_q75": report["future_projection_15d"]["optimistic_q75"],
-            "calibration_audit": report["future_projection_15d"]["calibration_audit"],
-        },
-        "debate_and_veto": report["debate_and_veto"],
-        "rendered_paths": report["rendered_paths"],
+        return _fail("INVALID_ARGUMENT", str(exc), EXIT_INVALID_ARGUMENT)
+    result = json.loads(Path(report["rendered_paths"]["result_json"]).read_text(encoding="utf-8"))
+    envelope = {
+        "status": "ok",
+        "schema_version": result["schema_version"],
+        "verdict": {k: result["verdict"][k] for k in _ENVELOPE_VERDICT_KEYS},
+        "quality": {k: result["quality"][k] for k in ("status", "warnings", "notes")},
+        "files": result["files"],
     }
-    print(json.dumps(summary_out, ensure_ascii=False, indent=2))
+    print(json.dumps(envelope, ensure_ascii=False, indent=2))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
