@@ -1,6 +1,6 @@
 ---
 name: kline-structure-chart
-description: "Deterministic multi-market (A-share CN / Hong Kong HK / US) candlestick (K-line) technical analysis from real OHLCV data: indicators, swing and candlestick patterns, SMC zones, volume profile, triple-barrier risk levels, a calibrated 15-bar price range and a plan-replay backtest, rendered as JSON + PNG + offline HTML. Use when the user asks to analyze an index, stock or ETF chart, e.g. 上证指数/沪深300/茅台/600519.SH/小米/00700.HK/恒生指数/NVDA/SPY; 分析K线、走势、技术形态、支撑压力、买卖点、回测或未来区间. Not for fundamentals, news, earnings, real-time order placement, or personalized investment advice."
+description: "Deterministic multi-market (A-share CN / Hong Kong HK / US) candlestick (K-line) technical analysis from real OHLCV data: indicators, swing and candlestick patterns, SMC zones, volume profile, triple-barrier risk levels, a direction-free 15-bar normal volatility range and a plan-replay backtest, rendered as JSON + PNG + offline HTML. Use when the user asks to analyze an index, stock or ETF chart, e.g. 上证指数/沪深300/茅台/600519.SH/小米/00700.HK/恒生指数/NVDA/SPY; 分析K线、走势、技术形态、支撑压力、买卖点、回测或未来区间. Not for fundamentals, news, earnings, real-time order placement, or personalized investment advice."
 license: MIT
 compatibility: "Requires Python 3.12+ with Pillow (uv recommended but optional: without uv, create .venv from requirements.txt and run .venv/bin/python), plus network access to Sina / Yahoo / Tencent market-data endpoints. Without live data the scripts exit with [DATA_UNAVAILABLE] instead of fabricating prices."
 metadata:

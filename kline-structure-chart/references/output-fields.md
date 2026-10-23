@@ -236,8 +236,8 @@
 | `backtest.all_long_signals` / `long_confirmed` / `watch_long_setup` | 三个口径的成交统计：`trades`、`cumulative_return_pct`、`win_rate_pct` 与 `win_rate_95ci_pct`（Wilson）、`mean_return_95ci_pct`（Bootstrap）、`sharpe`、`max_drawdown_pct`、`profit_factor` | 笔 / % | 无成交时部分可空 | 唯一允许出现的概率类数字：胜率必须带 95% 区间与笔数；是已发生成交的统计，不是未来概率 |
 | `backtest.buy_and_hold_return_pct` | 同期买入持有收益 | % | 否 | 与策略累计收益对比 |
 | `backtest.rule_score_ic` | 规则分与未来 H 日收益的 Spearman 秩相关：`spearman`、`decisions`、`effective_independent_samples`（≈ 决策数 × 步长 / H）、`informative`（独立样本 ≥ 20 且 \|IC\| ≥ 0.05）、`verdict` | −1~1 / 个数 | `spearman` 可空 | 原文转述 `verdict`；`informative = false` 时说"规则分在该标的上只作描述" |
-| `backtest.rule_score_buckets[]` | 按规则分 [0,38)、[38,52)、[52,65)、[65,100] 分层的决策日数、未来 H 日平均/中位收益、上涨占比 | 个 / % | 无样本的层为空 | 是历史统计，不是未来概率 |
-| `backtest.action_forward_returns.*` | 各动作标签之后的未来 H 日平均/中位收益与上涨占比 | 个 / % | 无样本时为空 | 用来检验动作标签与后续走势是否一致 |
+| `backtest.rule_score_buckets[]` | 按规则分 [0,38)、[38,52)、[52,65)、[65,100] 分层的决策日数、未来 H 日平均/中位收益、上涨占比 | 个 / % | 无样本的层为空 | 不对外转述（只供维护者诊断）；上涨占比是频率数字 |
+| `backtest.action_forward_returns.*` | 各动作标签之后的未来 H 日平均/中位收益与上涨占比 | 个 / % | 无样本时为空 | 不对外转述（只供维护者诊断）；上涨占比是频率数字，不要说成上涨概率 |
 | `backtest.veto_reason_counts` | 回放期间各否决编码出现次数 | 次 | 否（可为空对象） | — |
 | `backtest.sample_trades[]` | 成交样例：入场/出场日与价、`outcome`（`TP_BARRIER` / `SL_BARRIER` / `TIME_BARRIER` 等）、`net_return` | — | 否 | — |
 | `backtest.sample_size_warning` | 成交少于 30 笔时的提示 | 文本 | 是 | 有则原文转述 |

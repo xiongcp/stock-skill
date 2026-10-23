@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "kline-structure-chart",
-      "description": "Deterministic CN/HK/US candlestick structure analysis from real OHLCV data: indicators, patterns, multi-scenario historical frequencies, risk levels, calibrated price ranges and plan-replay backtests",
+      "description": "Deterministic CN/HK/US candlestick structure analysis from real OHLCV data: indicators, patterns, multi-scenario structure paths, risk levels, direction-free volatility ranges and plan-replay backtests",
       "source": "./",
       "strict": false,
       "skills": [

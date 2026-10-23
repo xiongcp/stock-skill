@@ -26,39 +26,30 @@
 - 回复校验：概率类数字只放行带 95% 区间的回测胜率；可引用价位改读 `quotable_prices`。
 - 单次分析耗时（本机，录制行情）：<待 B10 填入>。
 
-### 变更（研究代码移出 main）
+### 6.0.0 开发期间先行合入的变更（部分已被上文"删除"取代）
+
+以下条目在 6.0.0 之前已合入、尚未发布，仍然有效的保留原文；涉及已删除能力的只各留一行说明。
+
+#### 已被 6.0.0 取代的条目（仅留说明）
+
+- 高置信反转层（暂停输出与 `HC_PAUSE_REASONS`、`decision_probability`、触发口径与 `high_conviction_suppressed_subtype`、`math-patterns.md` 第 8 节）：6.0.0 已整体删除；`momentum.rsi14_prev` 保留为普通指标。
+- `lint_response.py` 拦截"校准先验"与反转层百分比：对应内容已删除；回复校验现统一为只放行带 95% 区间的回测胜率。
+- L2 历史条件频率的展示口径与 Brier 检验（`scenario_frequency_brier`）、风控 L2 守门、`scenario_conditional_fan` 的量纲修复：6.0.0 已删除，不再适用。
+- L3 受约束研判（`--auto-init` 预填模板、`origin` 记录、到期打分修复、证伪条件文案）与 `*_judgment.json` 示例：6.0.0 已删除，不再适用。
+- 研究脚本（H2 前向跟踪、H1 验收、开发区回测 v2 及其提速与缓存）：已随 `research/` 移至 `research/archive` 分支。
+- `examples/` 此前按旧输出生成，6.0.0 按 v6 契约重新生成。
+
+#### 变更（研究代码移出 main）
 
 - `research/`（长周期回测、预注册、H1 验收与 H2 前向跟踪脚本）移到长期分支 `research/archive`，main 只保留技能。冻结提交打了标签：`h2-frozen`（H2 服务器运行的提交）、`main-plan-h1-v3-frozen`（主做多计划 H1 预注册 v3）、`v5.3.0-final`（移出之前 main 的最后一个提交）。H2 服务器按 `H2_RUNBOOK.md` 检出冻结提交运行，不受影响。研究设计文档仍在 `docs/superpowers/specs/`。
 
-### 修复（Yahoo 港股占位K线）
+#### 修复（Yahoo 港股占位K线）
 
 - `scripts/data_gateway.py` 新增 `drop_placeholder_bars`：Yahoo 日线（标的与基准）取数后剔除"成交量为 0 且开高低收四价相同"的K线。这类K线多为港股半日市当天缺数、停牌或停市日按前收盘价补出，不是真实成交；此前未过滤，会压低 ATR、扭曲 RSI 与 RVOL、被识别为十字星，回测也可能在无成交的日子成交。只剔除、只披露，不用其他来源补数：剔除数量与日期写入 `quality.notes`，完整日期写入新字段 `quality.placeholder_bars_removed.{target,benchmark}`（`references/output-fields.md`、`references/hk-market.md` 同步）。录制数据 `0700.HK` 剔除 7 根（2022-01-31、2024-12-24、2024-12-31、2025-01-28、2025-12-24、2025-12-31、2026-02-16），NVDA、SPY、^HSI 不受影响。
 - 研究缓存 `research/common.py` 新增 `clean_bars`，`load_bars`、`adjusted_bars` 以及 `run_backtest.py`、`export_bundle.py` 的基准序列走同一函数，回测与线上口径一致。
 - `_load_single_series` 返回值增加第 4 项（剔除的占位K线日期）。
 
-### 变更（高置信反转层：线上与回测统一口径，见 `docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md`）
-
-- **反转层三个市场全部暂停输出入场计划与统计数字**（方案 D10=a）：按冻结的预注册 v2，在留出集 H1（2017-10 ~ 2020-11）上一次性验收，CN、US 都未通过（扣费均值及其相对同日随机入场的超额，95% 区间下限都未大于 0），港股（诊断）显著为负。具体改动：
-  1. `risk.HC_PAUSE_REASONS` 记录各市场的暂停原因（CN/US `PAUSED_H1_NOT_PASSED`，港股 `PAUSED_NO_DEV_EDGE`）。
-  2. 删除 v1 的 `_DEV_CALIBRATED_REBOUND_PRIORS`（72% 等数字移入 v1 研究脚本，仅供复现）；`decision_probability` 只保留 `available=false`、`method`、`event_definition` 与 `validation`，不再含任何数字。
-  3. HTML 删除"开发集校准先验 (L4)"一行。
-  4. `BACKTEST_AND_SKILL_AUDIT_REPORT.md` 与 v1 回测报告开头加更正说明。
-- **回复校验拦截反转层数字**（`scripts/lint_response.py`）：此前句子里只要出现"校准先验"，其中的概率数字就被当作合规放行（例如"开发集校准先验显示净正率 72.2%"能通过）。现在去掉这条豁免；提到"校准先验 / 开发集校准"即拦截；提到高置信 / 超跌反转 / 共振反转 / 反转层 / 反转计划的句子，出现任何百分比，或在计划未触发时转述 `high_conviction_plan` 价位，都会拦截。否定说明（如"暂不给出反转计划，也不报统计数字"）照常放行。`SKILL.md` 第五节同步补充。
-- `examples/` 用录制行情 `--as-of 2026-10-15` 重新生成：反转层暂停、`decision_probability` 不含数字；港股剔除 7 根占位K线并在报告中披露；茅台的过热降级提示恢复显示。`600519.SH_judgment.json` 与 `reply.md` 未改，研判对新结果重新校验为 `VALID`。顺带清除旧示例 JSON 中残留的他人本机绝对路径。
-- 触发器抽成纯函数 `risk.detect_high_conviction_rebound`，计划价位抽成 `risk.high_conviction_plan_levels`，线上与研究回测共用。线上触发口径改为与开发集校准时一致：
-  1. `DEEP_OVERSOLD_TURN` 的"拐头"改看 RSI14 是否高于前一根（此前看收盘价是否上涨）；指标快照新增 `momentum.rsi14_prev`。
-  2. CN/US 的 `BENCH_SYNC_REBOUND` 改为要求大盘当日涨幅 ≥ 0.3%（此前要求大盘收阳）；港股门槛 0.5% 不变。
-- 新增 `meta_labeling_decision.high_conviction_suppressed_subtype`：反转条件触发但被大盘否决（`BENCHMARK_WEAK`）抑制时记录原本的子类型。`references/output-fields.md` 补齐反转层全部字段（此前未登记）。
-- **港股暂停输出反转计划**（方案 D6）：`risk.HC_PAUSED_MARKETS = {"HK"}`。开发区回测 v2 中港股相对同日随机入场没有超额，触发时只记录 `high_conviction_paused_subtype`，`high_conviction_plan.triggered = false`，`decision_probability.method = PAUSED_NO_DEV_EDGE`。
-- `high_conviction_plan_levels` 新增可选参数 `tp_atr` / `sl_atr`，只供研究网格使用；计划文案改为引用 `HC_TP1_ATR` / `HC_SL_ATR`，不再写死。`references/math-patterns.md` 新增第 8 节：反转层触发、抑制与暂停、计划几何，以及不套用 1.20 盈亏比否决、改用期望口径的理由（方案 D3）。
-- 研究（第 8 步，H2 前向跟踪）：新增 `research/h2_forward.py`（增量刷新行情、延续股票池调仓、只记最近一个已收盘交易日、到期打分、状态只报数量、一次性验收）、`research/H2_RUNBOOK.md`（Hermes agent · Linux 2 核 4GB 的部署与调度）与测试；`run_dev_region_v2.py` 增加 `mode="h2"`，子进程配置显式传入，基准K线同口径剔除占位K线（开发区结果不变）。
-- 研究（第 6 步）：`run_dev_region_v2.py` 新增 `mode="h1"`（仅在 `run_h1_holdout.py` 校验预注册通过后授权）；新增 `run_h1_holdout.py`（校验冻结文件与数据 hash、git 无未提交改动，只能成功运行一次，`--check` 只校验）与 `write_preregistration_v2.py`（生成 `research/preregistration/preregistration_v2.json`）。
-- 研究提速：`aggregate.date_block_bootstrap` 改用 numpy 向量化（单次约 0.38 s → 0.07 s，点估计不变，区间因随机数生成器不同有小数点后的差异）；线上流水线结果按"技能脚本 + 管线函数源码 + 区间参数 + 股票池 + 行情清单"的哈希缓存到 `artifacts/long_backtest/v2_live_cache/`，命中后重跑不再调用线上流水线（`--refresh-live-cache` 强制重算）。
-- 研究：`run_dev_region_v2.py --grid` 评估方案第 8 节写定的 18 个配置（6 种 TP/SL 几何 × 3 种子类型），按预先写定的规则选择，结果写入 `dev_region_v2_grid.json`。
-- 研究：新增开发区回测 v2 `research/run_dev_region_v2.py`。对预筛候选逐个调用线上 `analyze_bundle`（`research/tests/test_dev_region_v2.py` 校验预筛不漏线上信号），按线上固定价位撮合、套用大盘否决；新增同日随机入场等三类基准与按信号日期分块的 bootstrap（`aggregate.date_block_bootstrap`）；只评估 2021-01-04 起的开发区，拒绝触碰留出集（2020-11-30 及以前）。每次运行追加 `artifacts/long_backtest/trial_ledger.jsonl`。v1 脚本保留不改，以便复现已发布的数字，但不再用于新结论。
-
-
-### 修复（资金计算与 K 线计算深度审查）
+#### 修复（资金计算与 K 线计算深度审查）
 
 - 仓位计算（`scripts/risk.py`、`scripts/render_report_md.py`、`scripts/render_html.py`）：
   1. 风控否决或评级不是 `LONG_CONFIRMED` / `WATCH_LONG_SETUP` 时不再输出建议股数（`recommended_shares = null` 并给出 `reason`）。此前截至 2026-10-15 的 10 个录制标的全部被否决，报告仍加粗给出股数（如 510300.SH 给出 27,300 股），与"否决时只给观察位"冲突。
@@ -71,7 +62,7 @@
 - 低价品种指标快照精度（`scripts/indicators.py`、`scripts/strategies.py`）：均线、VWAP、Supertrend、布林带按价格量级保留小数（`max(2, ⌈4 − log10(价格)⌉)`），ATR 与 MACD 多保留 1 位；价格 ≥ 100 时仍为 2 位，输出不变。此前一律 2 位小数后再参与 `(收盘 − EMA20)/ATR`、EMA20 与 EMA50、收盘与布林带的比较，510300.SH 在 763 个交易日中有 17 天"EMA20 > EMA50"、3 天"偏离 > 2ATR"的判断因舍入翻转。RVOL 为 0 时不再被 `or 1.0` 改写。
 - 文档与实现对齐：`references/math-patterns.md` 第 7 节"区间观察"的入场区与止损公式改为与代码一致（此前写的是 `C − 0.40 ATR` 与 `C − 1.45 ATR`，实现为按阴阳线分支、止损 `C − 1.40 ATR`），并补充仓位公式与 `PLAN_GEOMETRY_INVALID`；`references/cn-market.md` 补充涨跌停价取整规则。
 
-### 新增（对话安装；uv 改为推荐而非必需）
+#### 新增（对话安装；uv 改为推荐而非必需）
 
 - 新增仓库根目录 `INSTALL_FOR_AGENTS.md`：给 AI 助手的安装指引（选技能目录、检查前置、一键脚本或 venv + pip、doctor 自检、安全边界）。README 新增 3.0 节，用户把一句提示词发给助手即可完成安装。
 - `SKILL.md` 新增「运行环境」一节：有 uv 用 `uv run python`；没有 uv 时在技能目录建 `.venv` 并 `pip install -r requirements.txt`，命令改用 `.venv/bin/python`。新增 `kline-structure-chart/requirements.txt`（只含 Pillow，版本与 `uv.lock` 一致，由文档契约测试校验）。
@@ -79,29 +70,23 @@
 - `scripts/doctor.py`：没有 uv 但当前 Python 与依赖可用时不再判为失败，修复建议补充 venv + pip 路径。
 - 一键安装脚本缺 uv 时不再直接退出（`install.sh`、`install.ps1`）：未加 `--install-uv` / `-InstallUv` 且不安装 uv 时（非交互运行或回答 N），依次查找 `python3.13`、`python3.12`、`python3`（Windows：`py -3.13`、`py -3.12`、`python`）中第一个 ≥ 3.12 的解释器，在技能目录建 `.venv` 并 `pip install -r requirements.txt`，跳过 `uv sync`；安装后自检跳过 pytest（不在 `requirements.txt` 中），改用 `.venv` 里的解释器运行 `doctor`；`--dry-run` 打印上述命令。找不到 3.12+ 时退出并提示安装 Python 3.12+ 或加 `--install-uv`。README 3.1 / 3.2 与 `INSTALL_FOR_AGENTS.md` 同步；`tests/test_tools.py` 新增在 PATH 中去掉 uv、临时 HOME 下的 dry-run 回归测试。
 
-### 修复（深度审查 P0 / P1）
+#### 修复（深度审查 P0 / P1）
 
-- 文档命令路径：`SKILL.md` Flash SOP 中的产物文件名改为脚本实际生成的 `600519.SH_result.json`（`sanitize_filename` 保留代码中的点）；`references/llm-judgment-protocol.md` 中 `uv run --directory kline-structure-chart` 之后的相对路径去掉多余的 `kline-structure-chart/` 前缀。新增文档契约测试守护两类错误。
-- 均值回归体制规则分披露（`scripts/strategies.py`、`scripts/render_report_md.py`、`scripts/judgment.py`）：`multi_timeframe_score` 新增 `components_total`（四组分项合计）与 `regime_adjustment`（调整前后分数、动量 IC 与 `note_cn`）；体制调整时 `rating_cn` 改为「均值回归体制评分偏多/偏空/中性」，不再沿用「多周期共振/承压」；直出摘要、结论速览与证据 E5 同步写明调整。
-- `--auto-init` 预填模板（`scripts/judgment.py`、`scripts/validate_judgment.py`、`scripts/score_judgments.py`、`scripts/render_report_md.py`）：模板带 `generator = AUTO_INIT_TEMPLATE`，标题、综述与理由写明「脚本预填模板，尚未经 Agent 主观研判」；校验与日志按各情景概率是否与模板一致记 `origin`，未改写的模板在报告第 8 节显示为「情景研判模板」且不计入 LLM 技能分（`template_judgments_excluded`）。证伪条件改为按主情景方向生成：做空/假突破主情景以收盘反向收回失效位为证伪，不再写「跌破做多止损即证伪」。
-- L2 历史条件频率展示口径与 Brier 检验基准修正（`scripts/base_rates.py`、`scripts/evaluation.py`、`scripts/render_report_md.py`）：`display_cn` 的「历史条件频率」数字一律为实际观测频率 `raw_target_freq`，与 Wilson 区间同口径；`n >= 30` 时直接使用观测频率 `k / n`（移除未经样本外数据集验证的体制加权混合与先验乘数），`n < 30` 时在括号内标明「收缩后估计」；`scenario_frequency_brier` 改为按各情景自身基准率（per-scenario climatology）加权计算基准 Brier 分数与技能分 `BSS`，仅在 `precondition_met = true` 的情景上评估，且仅当相对各情景自身基准率的 `BSS > 0` 时才判定 `discriminative = true`。
+- 文档命令路径：`SKILL.md` Flash SOP 中的产物文件名改为脚本实际生成的 `600519.SH_result.json`（`sanitize_filename` 保留代码中的点）。新增文档契约测试守护两类错误。
+- 均值回归体制规则分披露（`scripts/strategies.py`、`scripts/render_report_md.py`）：`multi_timeframe_score` 新增 `components_total`（四组分项合计）与 `regime_adjustment`（调整前后分数、动量 IC 与 `note_cn`）；体制调整时 `rating_cn` 改为「均值回归体制评分偏多/偏空/中性」，不再沿用「多周期共振/承压」；直出摘要与结论速览同步写明调整。
 - 回测与线上计划同源对齐（`scripts/risk.py`、`scripts/evaluation.py`、`scripts/render_report_md.py`、`assets/analysis.schema.json`）：`triple_barrier_plan` 新增 `breakeven_ratchet` 字段（`+0.90R` 盘中触发、当日收盘 `≥ +0.30R` 确认、自次日起保护性止损上移至 `+0.08R` 保本位及对应价格），回测直接读取计划中的 `breakeven_ratchet` 参数并修正 `entry_rule` 中“无移动止损”的错误描述；统一硬止损屏障 `stop_loss_barrier` 为盘中最低价触及离场（A 股受 T+1 约束自入场次日起生效），结构触发位与减仓位保持日线收盘判定。
 - 多情景前提诚实判定与标注（`scripts/structure.py`、`scripts/scenarios.py`）：修正 `scenarios.py` 中 `st_code == "breakout_up"` / `"breakdown_down"` 与 `structure.py`（实际为 `"above"` / `"below"`）不一致的缺陷；移除将补足情景强制改写为 `precondition_met = true` 的逻辑，不足 2 个时补充的备选情景保持 `precondition_met = false` 并标注 `selection_role = "CONDITIONAL_FALLBACK"` 与 `status_cn = "待触发（前提未成立，条件备选）"`。
 - `--as-of` 当日未收盘 K 线隔离（`scripts/data_gateway.py`）：无论是否指定 `--as-of`（含本地文件输入），统一执行 `split_incomplete_last_bar`，确保盘中未收盘 K 线绝不进入已收盘计算序列。
 - 科创板、创业板及双创 ETF 涨跌幅限制修正（`scripts/market_rules.py`、`references/cn-market.md`）：新增 `is_cn_20pct_etf`，识别上交所 `588xxx`/`589xxx.SH` 科创板/双创 ETF 与深交所跟踪创业板/双创指数的 `159xxx.SZ` ETF（代码表与名称匹配），自 `2020-08-24` 起按 `±20%` 计算涨跌停限制。
-- 风控守门频率零值回退与均值回归左侧回踩参数同源（`scripts/risk.py`）：将 `float(bull_hf.get(...) or 0.45)` 改为显式 `None` 判断，避免 `0.0` 频率被误当缺失值回退为 `0.45`；均值回归体制（`MEAN_REVERSION_ADAPTED`）的 `LEFT_SIDE_PULLBACK` 判定移至入场区与止损位计算之前，并增加 `RVOL20 <= 1.10` 缩量条件检查。
-- 移除无脚本/无数据可复现的“1,500 股盲测”调参与引用（`scripts/base_rates.py`、`scripts/forecast.py`、`scripts/strategies.py`、`SKILL.md`、`references/interpretation-guide.md`）：恢复 `forecast.py` 为 `references/math-patterns.md` 第 5 节定义的 60 日对数收益 RMS 与 $\lceil (n+1)\alpha \rceil$ 次序统计量，清理文档中无法核实的盲测统计数字。
-- `scripts/lint_response.py` 加强：拦截「上涨概率 70%」「大概率」「胜算」「七成」等未经校验的概率措辞（否定式说明与带 95% 区间的回测胜率、历史条件频率、主观研判、模板数字除外）；价格检查扩展到交易动作前后的数字（如「1330 附近买入」「目标 1440」）；风控否决须出现在回复前 400 个字符内；价格白名单不再收录频率、百分比、根数、比值等非价格字段，并补收反抽上限、回踩位、区间与缺口区等价格字段。`SKILL.md` 自己列出的错误回复示例现在会被拦截。同时修正价格识别会把「1 个交易日」等中文单位前的数字误当价格的问题，并让「规则分不是胜率或上涨概率」之类的否定说明不再误报。
-- 待触发主情景的证伪条件写明「预测期内始终未触发，或触发后出现失效条件」，避免把触发前已经成立的失效条件当成证伪。
-- 全量金融与量化审查修复（`scripts/data_gateway.py`、`scripts/analysis.py`、`scripts/forecast.py`、`scripts/scenarios.py`、`scripts/evaluation.py`、`scripts/score_judgments.py`、`scripts/base_rates.py`、`scripts/judgment.py`、`scripts/market_rules.py`、`scripts/render_html.py`、`scripts/render_structure_chart.py`）：
+- 移除无脚本/无数据可复现的“1,500 股盲测”调参与引用（`scripts/forecast.py`、`scripts/strategies.py`、`SKILL.md`、`references/interpretation-guide.md`）：恢复 `forecast.py` 为 `references/math-patterns.md` 第 5 节定义的 60 日对数收益 RMS 与 $\lceil (n+1)\alpha \rceil$ 次序统计量，清理文档中无法核实的盲测统计数字。
+- `scripts/lint_response.py` 加强：拦截「上涨概率 70%」「大概率」「胜算」「七成」等未经校验的概率措辞（否定式说明与带 95% 区间的回测胜率除外）；价格检查扩展到交易动作前后的数字（如「1330 附近买入」「目标 1440」）；风控否决须出现在回复前 400 个字符内；价格白名单不再收录频率、百分比、根数、比值等非价格字段，并补收反抽上限、回踩位、区间与缺口区等价格字段。`SKILL.md` 自己列出的错误回复示例现在会被拦截。同时修正价格识别会把「1 个交易日」等中文单位前的数字误当价格的问题，并让「规则分不是胜率或上涨概率」之类的否定说明不再误报。
+- 全量金融与量化审查修复（`scripts/data_gateway.py`、`scripts/analysis.py`、`scripts/forecast.py`、`scripts/scenarios.py`、`scripts/evaluation.py`、`scripts/market_rules.py`、`scripts/render_html.py`、`scripts/render_structure_chart.py`）：
   1. 复权动作过滤 `ex_date > as_of`，本地 bundle 输入统一执行 `as_of` 截断与未收盘 K 线隔离，历史回放截面按当时截止日重算基准状态分与相对强弱；
-  2. 修复 `scenario_conditional_fan` 漏乘价格基准 `base_c` 的量纲错误；
-  3. 消除 `scenarios.py` 中触发状态、目标位与失效位的自相矛盾（如看空情景下现价高于失效位、已过期交叉形态触发 `APEX_BREAKOUT` 等）；
-  4. 无前视回放审计 `run_causal_replay_audit` 改为真实对比截断序列与追加极端未来 K 线后的序列；
-  5. `UNAVAILABLE` 时 PNG 与 HTML 屏蔽具体价格点位，并区分 `PARTIAL` 水印文案；
-  6. 回测按 `LONG_CONFIRMED` 与 `WATCH_LONG_SETUP` 分桶独立维护持仓锁，补齐 A 股 T+1 首日保本上移与到期一字跌停顺延；
-  7. 修正 L3 到期打分同向多情景达标归属与未命中兜底偏差，修复证据 `E4` 结构字段读取，支持港美股半日市/提前收市判定与 A 股 T+0 ETF 识别。
-- `examples/` 以 `--as-of 2026-10-16` 用实时行情重新生成；茅台 `judgment.json` 改为 Agent 在预填模板上改写的主观研判（`origin = AGENT`），`reply.md` 与 `SKILL.md` 回复示例同步为新的规则分披露、频率口径与回测数字。
+  2. 消除 `scenarios.py` 中触发状态、目标位与失效位的自相矛盾（如看空情景下现价高于失效位、已过期交叉形态触发 `APEX_BREAKOUT` 等）；
+  3. 无前视回放审计 `run_causal_replay_audit` 改为真实对比截断序列与追加极端未来 K 线后的序列；
+  4. `UNAVAILABLE` 时 PNG 与 HTML 屏蔽具体价格点位，并区分 `PARTIAL` 水印文案；
+  5. 回测按 `LONG_CONFIRMED` 与 `WATCH_LONG_SETUP` 分桶独立维护持仓锁，补齐 A 股 T+1 首日保本上移与到期一字跌停顺延；
+  6. 支持港美股半日市/提前收市判定与 A 股 T+0 ETF 识别。
 
 ## [5.3.0] - 2026-10-18
 

@@ -1,4 +1,4 @@
-# 数学形态、指标、SMC 与分位区间公式字典 (v5.1)
+# 数学形态、指标、SMC 与正常波动范围公式字典
 
 本文件定义 `scripts/indicators.py`、`scripts/patterns.py`、`scripts/strategies.py`、`scripts/risk.py` 与 `scripts/forecast.py` 中使用的 100% 确定性数学公式。禁止使用视觉图像识别（CV/VLM）推断形态或点位。
 
