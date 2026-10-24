@@ -1,6 +1,6 @@
 # 示例：真实行情生成的完整产物
 
-本目录的全部文件都由技能脚本用**真实行情**联网生成，没有任何手工修改或合成数据（只把报告与 JSON 里的本机绝对路径改成了仓库内相对路径）。示例中的数字只用于说明输出格式，不代表当前行情，也不构成投资建议。
+本目录的全部文件都由技能脚本基于仓库内录制的**真实行情**（`tests/fixtures/recorded/`）生成，没有任何手工修改或合成数据；报告与 JSON 里的文件路径本身就是相对路径，未做改写。示例中的数字只用于说明输出格式，不代表当前行情，也不构成投资建议。
 
 - 生成时间：2026-10-22（按 6.0.0 契约基于仓库真实录制行情 `--as-of 2026-10-15` 重新生成；港股剔除 Yahoo 占位K线并在报告"数据备注"中披露）
 - 数据截止日（最后一根已收盘日 K 线）：**2026-10-15**
@@ -13,8 +13,8 @@
 | 目录 | 标的 | 文件 |
 | --- | --- | --- |
 | [600519.SH](600519.SH) | 贵州茅台（A 股，基准沪深300） | 报告、结果 JSON、渲染数据 JSON、回测 JSON、结构图 PNG、交互看板 HTML、[标准回复](600519.SH/reply.md) |
-| [00700.HK](00700.HK) | 腾讯控股（港股，基准恒生指数） | 报告、结果 JSON、渲染数据 JSON、结构图 PNG、交互看板 HTML |
-| [NVDA.US](NVDA.US) | 英伟达（美股，基准 SPY） | 报告、结果 JSON、渲染数据 JSON、结构图 PNG、交互看板 HTML |
+| [00700.HK](00700.HK) | 腾讯控股（港股，基准恒生指数） | 报告、结果 JSON、渲染数据 JSON、结构图 PNG、交互看板 HTML（未传 `--backtest`，没有回测 JSON） |
+| [NVDA.US](NVDA.US) | 英伟达（美股，基准 SPY） | 报告、结果 JSON、渲染数据 JSON、结构图 PNG、交互看板 HTML（未传 `--backtest`，没有回测 JSON） |
 
 ## 三市场实盘生成图例预览
 
@@ -39,7 +39,7 @@
 
 ## 生成命令
 
-在仓库根目录执行（需要联网），产物写入 `kline-structure-chart/artifacts/examples/`，再复制到本目录：
+示例本身是用 `tests/fixtures/recorded/` 的录制行情回放同一条流水线（`run_pipeline`，`as_of` 为 2026-10-15）生成的。下面的命令在仓库根目录执行，会联网取行情，产物写入 `kline-structure-chart/artifacts/examples/`；联网取到的行情可能比示例新，数字会不同：
 
 ```bash
 uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py --market CN --symbol 600519.SH --asset-type equity --account-equity 500000 --as-of 2026-10-15 --output-dir artifacts/examples --backtest

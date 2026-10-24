@@ -236,7 +236,7 @@ uv run --directory kline-structure-chart pytest -q
 uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py --market CN --symbol 600519.SH --output-dir artifacts/smoke
 ```
 
-失败时脚本以非零码退出：`[DATA_UNAVAILABLE]` 表示取不到真实行情，`[INVALID_ARGUMENT]` 表示代码或参数有误（见第 8 节）。成功时退出码为 0，`kline-structure-chart/artifacts/smoke/` 下会出现 `600519.SH_report.md`、`600519.SH_result.json`、`600519.SH_preview.png`、`600519.SH_dashboard.html` 四个文件。
+失败时脚本以非零码退出：`[DATA_UNAVAILABLE]` 表示取不到真实行情，`[INVALID_ARGUMENT]` 表示代码或参数有误，`[INSUFFICIENT_HISTORY]`（退出码 4）表示已收盘K线不足（见第 8 节）。成功时退出码为 0，`kline-structure-chart/artifacts/smoke/` 下会出现 `600519.SH_report.md`、`600519.SH_result.json`、`600519.SH_chart_data.json`、`600519.SH_preview.png`、`600519.SH_dashboard.html` 五个文件。
 
 ---
 
@@ -346,6 +346,7 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 | 退出码 | 标准输出 | 含义 |
 | --- | --- | --- |
 | 0 | `{"status": "ok", "schema_version", "verdict", "quality", "files"}` | 成功；`files` 是相对 `--output-dir` 的产物文件名 |
+| 1 | 无 JSON 信封（stderr 为 Python traceback） | 内部错误（包括契约自检失败以外的未预期异常） |
 | 2 | `{"status": "error", "error": {"code": "INVALID_ARGUMENT", "message"}}` | 代码或参数有误（argparse 自身的参数错误也是 2，但不输出 JSON） |
 | 3 | 同上，`code = DATA_UNAVAILABLE` | 真实行情取不到 |
 | 4 | 同上，`code = INSUFFICIENT_HISTORY` | 上市太短或 `--as-of` 太早，已收盘K线不足 |

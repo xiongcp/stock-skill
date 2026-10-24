@@ -107,6 +107,7 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 | 退出码 | 标准输出 | 含义 |
 | --- | --- | --- |
 | 0 | `{"status": "ok", "schema_version", "verdict", "quality", "files"}` | 成功；`files` 是相对 `--output-dir` 的产物文件名 |
+| 1 | 无 JSON 信封（stderr 为 Python traceback） | 内部错误（包括契约自检失败以外的未预期异常） |
 | 2 | `{"status": "error", "error": {"code": "INVALID_ARGUMENT", "message"}}` | 代码或参数有误（argparse 自身的参数错误也是 2，但不输出 JSON） |
 | 3 | 同上，`code = DATA_UNAVAILABLE` | 真实行情取不到 |
 | 4 | 同上，`code = INSUFFICIENT_HISTORY` | 上市太短或 `--as-of` 太早，已收盘K线不足 |
