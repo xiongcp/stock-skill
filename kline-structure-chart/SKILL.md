@@ -107,10 +107,10 @@ uv run python scripts/analyze_and_forecast.py --market US --symbol NVDA.US --ass
 | 退出码 | 标准输出 | 含义 |
 | --- | --- | --- |
 | 0 | `{"status": "ok", "schema_version", "verdict", "quality", "files"}` | 成功；`files` 是相对 `--output-dir` 的产物文件名 |
-| 1 | 无 JSON 信封（stderr 为 Python traceback） | 内部错误（包括契约自检失败以外的未预期异常） |
+| 1 | `{"status": "error", "error": {"code": "INTERNAL_ERROR", "message"}}`（契约自检失败，不写任何产物）；其他未预期异常无信封，stderr 为 Python traceback | 技能内部错误，不是参数或行情问题：告诉用户是技能出错，不要改参数重试 |
 | 2 | `{"status": "error", "error": {"code": "INVALID_ARGUMENT", "message"}}` | 代码或参数有误（argparse 自身的参数错误也是 2，但不输出 JSON） |
 | 3 | 同上，`code = DATA_UNAVAILABLE` | 真实行情取不到 |
-| 4 | 同上，`code = INSUFFICIENT_HISTORY` | 上市太短或 `--as-of` 太早，已收盘K线不足 |
+| 4 | 同上，`code = INSUFFICIENT_HISTORY` | 已收盘K线不足：上市太短、`--as-of` 太早，或数据源本次只返回了部分历史（可稍后重试） |
 
 stderr 同时打印 `[CODE] message`。本节列出的命令行参数都是稳定接口。
 
@@ -118,7 +118,7 @@ stderr 同时打印 `[CODE] message`。本节列出的命令行参数都是稳�
 
 ## 三、运行后必检（按顺序，任一不满足即停止解读）
 
-1. **退出码**：脚本非零退出时不输出任何价位。退出码 3（`DATA_UNAVAILABLE`）表示真实行情取不到，如实告诉用户原因，不得改用合成或估算数据；退出码 2（`INVALID_ARGUMENT`）表示代码或参数有误，退出码 4（`INSUFFICIENT_HISTORY`）表示已收盘K线不足，均按"失败处理"处理。
+1. **退出码**：脚本非零退出时不输出任何价位。退出码 3（`DATA_UNAVAILABLE`）表示真实行情取不到，如实告诉用户原因，不得改用合成或估算数据；退出码 2（`INVALID_ARGUMENT`）表示代码或参数有误，退出码 4（`INSUFFICIENT_HISTORY`）表示已收盘K线不足，均按"失败处理"处理；退出码 1（`INTERNAL_ERROR` 或无信封的 traceback）是技能自身的错误，如实告诉用户，不要改参数重试。
 2. **`quality.status`**：
    - `UNAVAILABLE` → 不输出任何价位与结论。
    - `PARTIAL` → 回答首段逐条列出 `quality.warnings`，再谨慎解读。
@@ -159,7 +159,7 @@ stderr 同时打印 `[CODE] message`。本节列出的命令行参数都是稳�
 ## 五、对外表述与概率规则
 
 - `verdict.rule_score`、`market_context.regime_score` 等都是确定性规则打分，**不是**胜率、概率或置信度；Volume Profile 是成交分布近似，不是真实持仓筹码。
-- **不输出任何概率、胜率或频率数字。** 唯一例外是 `*_backtest.json` 的回测成交胜率：必须同时给出样本量 n 与 95% 区间，并说明它是这套规则在该标的上已发生成交的统计，不是未来上涨概率。
+- **不输出任何概率、胜率或频率数字。** 唯一例外是 `*_backtest.json` 的回测成交胜率：必须同时给出样本量 n 与 95% 区间，并说明它是这套规则在该标的上已发生成交的统计，不是未来上涨概率。`lint_response.py` 只在同一句同时出现"回测"与"95% 区间"（或"95% 置信区间"）时放行"胜率"这一个数字；命中率、频率、占比等即使同句带区间也会被拦截。
 - 不得出现"大概率突破""胜算七成"等等价说法；15 个交易日的方向本身接近随机，推演路径只写"触发条件 → 目标位 → 失效条件"，不承诺涨跌。
 
 ## 六、失败处理
@@ -168,7 +168,7 @@ stderr 同时打印 `[CODE] message`。本节列出的命令行参数都是稳�
 | --- | --- |
 | `[DATA_UNAVAILABLE]`（退出码 3：网络失败、代码无法映射、限流、数据损坏） | 转述错误原因，请用户核对代码格式或稍后重试；不估算、不改用合成数据。可运行 `scripts/doctor.py` 定位是哪个数据源不通 |
 | `[INVALID_ARGUMENT]`（退出码 2：`Cannot resolve market` / `Ambiguous symbol` / 参数越界；argparse 自身的参数错误同为 2，但没有 JSON 信封，只有 stderr 用法提示） | 先用 `scripts/resolve_symbol.py` 查代码，仍不确定就请用户补充交易所后缀，例如 `000001.SH`（上证指数）与 `000001.SZ`（平安银行）的区别；参数越界时改正后重跑 |
-| `[INSUFFICIENT_HISTORY]`（退出码 4） | 说明该标的上市时间太短或 `--as-of` 太早，已收盘K线不足，无法计算 |
+| `[INSUFFICIENT_HISTORY]`（退出码 4） | 说明已收盘K线不足、无法计算：可能是上市时间太短、`--as-of` 太早，或数据源本次只返回了部分历史（建议稍后重试一次） |
 | 基准指数取不到 | 整次分析失败，按 `[DATA_UNAVAILABLE]` 处理（不得跳过大盘直接分析个股） |
 | `quality.notes` 提示复权未生效（如北交所） | 告知价格为不复权原始价，除权缺口可能被误识别 |
 | `quality.notes` 提示港股每手股数或证券简称未取得 | 转述该提示；仓位股数按假设值计算，提醒用户下单前向券商核对 |

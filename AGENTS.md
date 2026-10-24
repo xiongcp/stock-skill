@@ -186,7 +186,7 @@ uv run --directory kline-structure-chart python tests/record_fixtures.py --only 
    - 五处版本号（`SKILL.md`、`pyproject.toml`、`assets/analysis.schema.json`、`scripts/contract_v6.py`、`.claude-plugin/marketplace.json`）必须保持同步（当前 `6.0.0`）。
 3. **契约与安全校验**：
    - 任何新增 JSON 字段不得包含 `NaN` 或 `Infinity`（`contracts.validate_report` 拦截）。
-   - 新增或移除 `result.json` 契约字段时，同步更新 `assets/analysis.schema.json` 的 `x-stability`、`CHANGELOG.md` 的"契约变更"小节与 `tests/fixtures/contract/result_v6_keypaths_{600519_plain,600519_equity_backtest,00700_hk,nvda_us,000001_index}.json` 各配置的全键路径快照（`test_v6_result_keypaths_match_snapshot` 按配置参数化；有意变更后用 `UPDATE_V6_KEYPATHS=1` 重新生成）；6.x 内只新增字段，不删除、不改名、不改语义。
+   - 新增或移除 `result.json` 契约字段时，同步更新 `assets/analysis.schema.json` 的 `x-stability`、`CHANGELOG.md` 的"契约变更"小节与 `tests/fixtures/contract/result_v6_keypaths_{600519_plain,600519_equity_backtest,00700_hk,nvda_us,000001_index}.json` 各配置的全键路径快照（`test_v6_result_keypaths_match_snapshot` 按配置参数化）；`backtest.json` 同样由 `tests/fixtures/contract/backtest_v6_keypaths_600519.json` 守护。有意变更后用 `UPDATE_V6_KEYPATHS=1` 重新生成：测试改写快照后会以失败结束，确认 `git diff` 后去掉该变量重跑；6.x 内只新增字段，不删除、不改名、不改语义。
    - 写入 `<script>` 的 JSON 必须经过 `_safe_json_for_script` 转义；页面字串一律用 `textContent` 或 `html.escape`。
 4. **指标口径**：修改 `indicators.py` 后必须通过 `test_indicator_golden.py`。若有意偏离 TA-Lib 口径，须在测试与 `references/math-patterns.md` 中写明原因。
 5. **UI 变更必测浏览器**：修改 `render_html.py` 或 `render_structure_chart.py` 后，必须实际生成产物并在浏览器中检查图层开关、相对强弱切换、时间回放滑块及控制台零报错；PNG 需目视确认配色与文字随市场切换。
