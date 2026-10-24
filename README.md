@@ -346,10 +346,10 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 | 退出码 | 标准输出 | 含义 |
 | --- | --- | --- |
 | 0 | `{"status": "ok", "schema_version", "verdict", "quality", "files"}` | 成功；`files` 是相对 `--output-dir` 的产物文件名 |
-| 1 | 无 JSON 信封（stderr 为 Python traceback） | 内部错误（包括契约自检失败以外的未预期异常） |
+| 1 | `{"status": "error", "error": {"code": "INTERNAL_ERROR", "message"}}`（契约自检失败，不写任何产物）；其他未预期异常无信封，stderr 为 Python traceback | 技能内部错误，不是参数或行情问题：告诉用户是技能出错，不要改参数重试 |
 | 2 | `{"status": "error", "error": {"code": "INVALID_ARGUMENT", "message"}}` | 代码或参数有误（argparse 自身的参数错误也是 2，但不输出 JSON） |
 | 3 | 同上，`code = DATA_UNAVAILABLE` | 真实行情取不到 |
-| 4 | 同上，`code = INSUFFICIENT_HISTORY` | 上市太短或 `--as-of` 太早，已收盘K线不足 |
+| 4 | 同上，`code = INSUFFICIENT_HISTORY` | 已收盘K线不足：上市太短、`--as-of` 太早，或数据源本次只返回了部分历史（可稍后重试） |
 
 stderr 同时打印 `[CODE] message`。
 
@@ -416,7 +416,7 @@ uv run --directory kline-structure-chart python scripts/lint_response.py --resul
 | `[INVALID_ARGUMENT] Cannot resolve market` | 代码没有后缀，加上 `.SH` / `.SZ` / `.HK` / `.US` 或传 `--market` |
 | `[INVALID_ARGUMENT] Ambiguous symbol '000001'` | 需要明确是 `000001.SH`（上证指数）还是 `000001.SZ`（平安银行） |
 | `[INVALID_ARGUMENT] --days must be between 60 and 500` | `--days` 超出范围；`--horizon-bars` 同理（1~60） |
-| `[INSUFFICIENT_HISTORY] ...`（退出码 4） | 上市时间太短，或 `--as-of` 太早，已收盘K线不足 |
+| `[INSUFFICIENT_HISTORY] ...`（退出码 4） | 已收盘K线不足：上市时间太短、`--as-of` 太早，或数据源本次只返回了部分历史（可稍后重试） |
 | `no CJK font found` | 没有中文字体，运行 `scripts/doctor.py` 查看对应发行版的安装命令 |
 | `uv: command not found` | 安装 uv：<https://docs.astral.sh/uv/>，或重新执行安装脚本并加 `--install-uv`；不想装 uv 时按 3.4「不用 uv 的手动安装」建 `.venv`，再把命令里的 `uv run python` 换成 `.venv/bin/python` |
 | 新会话里看不到 `kline-structure-chart` | 运行 `scripts/doctor.py` 检查技能软链；确认注册到了正在使用的 agent 的目录（第 3.1 节表格），然后新开会话 |
