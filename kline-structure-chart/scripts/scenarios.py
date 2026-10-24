@@ -5,7 +5,6 @@
 2. 识别推动 5 浪（检验浪 2 不破浪 1 起点、浪 3 非最短、浪 4 不重叠浪 1 价格区间）；
 3. 根据近 120 日结构（轨道、浪型计数、阶梯、RSI14、RVOL20、收敛顶点）筛选当前截面适用的 2~5 个情景；
 4. 触发位距最新收盘价不足 0.5 个 ATR 时归为「已在进行中」(status="ACTIVE")，不再作为待触发条件；
-5. 结合 base_rates.py 的历史事件研究，挂载无前视历史条件频率（含 n、95% Wilson 区间与低样本 Beta-Binomial 收缩）及历史到达目标用时分位时间窗。
 """
 from __future__ import annotations
 
@@ -13,8 +12,6 @@ import re
 from collections.abc import Callable
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
-
-from base_rates import _get_or_build_causal_features, compute_scenario_frequency
 
 MIN_TRIGGER_ATR = 0.5
 
@@ -238,6 +235,40 @@ def detect_impulse_wave(
     return None
 
 
+def _last_causal_state(bars: list[dict[str, Any]]) -> dict[str, float]:
+    """最后一根已收盘K线的 RSI14（Wilder）、RVOL20、MA20、MA60，口径与原历史事件研究模块一致。"""
+    closes = [float(b["close"]) for b in bars]
+    vols = [float(b.get("volume") or 0.0) for b in bars]
+    n = len(closes)
+    rsi14 = 50.0
+    avg_gain = avg_loss = 0.0
+    for i in range(1, n):
+        chg = closes[i] - closes[i - 1]
+        gain, loss = max(0.0, chg), max(0.0, -chg)
+        if i <= 14:
+            avg_gain += gain / 14.0
+            avg_loss += loss / 14.0
+            if i < 14:
+                continue
+        else:
+            avg_gain = (avg_gain * 13.0 + gain) / 14.0
+            avg_loss = (avg_loss * 13.0 + loss) / 14.0
+        if avg_gain == 0.0 and avg_loss == 0.0:
+            rsi14 = 50.0
+        elif avg_loss == 0.0:
+            rsi14 = 100.0
+        else:
+            rsi14 = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    win_v = vols[-20:]
+    mean_v = sum(win_v) / len(win_v) if win_v else 0.0
+    return {
+        "rsi14": rsi14,
+        "rvol20": vols[-1] / mean_v if mean_v > 0 else 1.0,
+        "ma20": sum(closes[-20:]) / len(closes[-20:]) if closes else 0.0,
+        "ma60": sum(closes[-60:]) / len(closes[-60:]) if closes else 0.0,
+    }
+
+
 def _slot_triplet(t_med: float, horizon: int) -> tuple[int, int, int]:
     if horizon < 3:
         return horizon, horizon, horizon
@@ -247,7 +278,7 @@ def _slot_triplet(t_med: float, horizon: int) -> tuple[int, int, int]:
     return t1, t2, t3
 
 
-def build_scenarios_with_base_rates(
+def build_scenarios(
     *,
     hist: list[dict[str, Any]],
     sview: list[dict[str, Any]],
@@ -265,28 +296,20 @@ def build_scenarios_with_base_rates(
     horizon_bars: int,
     base_projections: dict[str, Any],
     decimals: int = 2,
-    benchmark_bars: list[dict[str, Any]] | None = None,
     round_price: Callable[[float, str], float] | None = None,
 ) -> dict[str, Any]:
-    """根据 L1 状态评估 8 类情景，选出 2~5 个适用情景，并附加 L2 历史条件频率与时间窗。"""
+    """根据 L1 状态评估 8 类情景，选出 2~5 个适用情景。"""
     horizon = max(1, int(horizon_bars))
     start_p = float(live_price) if live_price is not None else float(ref)
     fp = lambda v: _fmt(v, decimals)
     as_of_day = str(sview[-1]["day"]) if sview else ""
     rp = (lambda v: float(round_price(float(v), as_of_day))) if round_price is not None else (lambda v: _money(v, decimals))
 
-    target_feat = _get_or_build_causal_features(hist)
-    bench_feat: dict[str, list[float]] | None = None
-    if benchmark_bars:
-        last_day = str(hist[-1]["day"])
-        b_sub = [b for b in benchmark_bars if str(b["day"]) <= last_day][-len(hist) :]
-        if len(b_sub) >= 80:
-            bench_feat = _get_or_build_causal_features(b_sub)
-
-    rsi_now = target_feat["rsi14"][-1] if target_feat["rsi14"] else 50.0
-    rvol_now = target_feat["rvol20"][-1] if target_feat["rvol20"] else 1.0
-    ma20 = ma_last.get(20) or (target_feat["ma20"][-1] if target_feat["ma20"] else ref)
-    ma60 = ma_last.get(60) or (target_feat["ma60"][-1] if target_feat["ma60"] else ref)
+    state = _last_causal_state(hist)
+    rsi_now = state["rsi14"]
+    rvol_now = state["rvol20"]
+    ma20 = ma_last.get(20) or (state["ma20"] or ref)
+    ma60 = ma_last.get(60) or (state["ma60"] or ref)
 
     u = float(struct["upper_today"])
     l = float(struct["lower_today"])
@@ -322,20 +345,6 @@ def build_scenarios_with_base_rates(
     piv_ls = [float(p["price"]) for p in pivots if p.get("confirmed") and p.get("kind") == "L"]
     status_run_bars = int(struct.get("status_run_bars") or 1)
 
-    freq_cache: dict[tuple[str, str], dict[str, Any]] = {}
-
-    def get_freq(sc_id: str, direction: str) -> dict[str, Any]:
-        key = (sc_id, direction)
-        if key not in freq_cache:
-            freq_cache[key] = compute_scenario_frequency(
-                target_feat,
-                sc_id,
-                horizon_bars=horizon,
-                direction=direction,
-                bench_feat=bench_feat,
-            )
-        return freq_cache[key]
-
     def build_item(
         *,
         sc_id: str,
@@ -355,16 +364,9 @@ def build_scenarios_with_base_rates(
         already_active: bool = False,
     ) -> dict[str, Any]:
         meta = PLAYBOOK_BY_ID[sc_id]
-        freq = get_freq(sc_id, direction)
-        btt = freq["bars_to_target"]
+        # 折点时间按扩散尺度 t≈(距离/日波动σ)² 估计，只用于画路径，截断在预测期内
         diff_eta = ((abs(target_price / ref - 1.0)) / max(sigma, 1e-6)) ** 2
-        raw_med = btt["median"] if btt["median"] is not None else (btt["median_all_outcomes"] or round(diff_eta, 1))
-        raw_q25 = btt["q25"] if btt["q25"] is not None else round(max(1.0, raw_med * 0.6), 1)
-        raw_q75 = btt["q75"] if btt["q75"] is not None else round(raw_med * 1.35, 1)
-
-        q25_c = min(float(horizon), max(1.0, round(float(raw_q25), 1)))
-        med_c = min(float(horizon), max(q25_c, round(float(raw_med), 1)))
-        q75_c = min(float(horizon), max(med_c, round(float(raw_q75), 1)))
+        med_c = min(float(horizon), max(1.0, round(diff_eta, 1)))
 
         trig_dist_atr = round(abs(raw_trigger_price / ref - 1.0) / max(atr, 1e-6), 2)
         is_active = bool(precondition_met and (already_active or abs(raw_trigger_price / ref - 1.0) < min_trig_dist))
@@ -419,17 +421,8 @@ def build_scenarios_with_base_rates(
             "invalidation": invalidation_text,
             "invalidation_template": meta["invalidation"],
             "invalidation_price": inv_p_clean,
-            "time_window_bars": {
-                "q25": q25_c,
-                "median": med_c,
-                "q75": q75_c,
-                "untruncated_median": round(float(raw_med), 1),
-                "target_within_horizon": float(raw_med) <= horizon,
-                "method": "历史到达目标用时分位数（截断在预测期内）" if btt["median"] is not None else "历史触发样本到达用时/扩散尺度兜底",
-            },
             "waypoints_offset": [(0, start_p), (t1, wp1_price), (t2, wp2_price), (t3, wp3_price)],
             "step_labels": [(t1, step1_txt), (t2, mid_step_label)],
-            "historical_frequency": freq,
         }
 
     candidates: list[dict[str, Any]] = []
@@ -786,28 +779,10 @@ def build_scenarios_with_base_rates(
         )
         selected = (met_list + rest)[:2]
 
-    # 为向后兼容的三路径（bull / neutral / bear）挂载对应的历史条件频率
-    bull_sc = next(
-        (s for s in selected if s["id"] in ("BREAKOUT_RETEST", "TREND_CONTINUATION") and s["direction"] == "BULLISH"),
-        None,
-    )
-    neut_sc = next((s for s in selected if s["id"] == "RANGE_OSCILLATION"), None)
-    bear_sc = next(
-        (s for s in selected if s["id"] in ("BREAKDOWN_DECLINE", "FALSE_BREAKOUT_REVERSAL") and s["direction"] == "BEARISH"),
-        None,
-    )
-
-    bull_freq = bull_sc["historical_frequency"] if bull_sc else get_freq("bull", "BULLISH")
-    neut_freq = neut_sc["historical_frequency"] if neut_sc else get_freq("RANGE_OSCILLATION", "NEUTRAL")
-    bear_freq = bear_sc["historical_frequency"] if bear_sc else get_freq("bear", "BEARISH")
-
     return {
         "scenarios": selected,
         "scenario_count": len(selected),
         "precondition_met_count": len(met_list),
         "scenario_signature": [s["id"] for s in selected],
         "impulse_wave": impulse,
-        "bull_frequency": bull_freq,
-        "neutral_frequency": neut_freq,
-        "bear_frequency": bear_freq,
     }

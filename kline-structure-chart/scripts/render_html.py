@@ -5,8 +5,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from contracts import AnalysisReport, validate_report
-
 
 def _safe_json_for_script(data: Any) -> str:
     raw = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
@@ -38,25 +36,21 @@ def _render_quality_banner(quality: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def render_html(report: AnalysisReport, output_path: Path) -> Path:
-    """将已通过 Schema 校验的 AnalysisReport 渲染为零外部依赖、断网双击即开的单文件交互式 HTML 终端。"""
-    validate_report(report)
-    meta = report["meta"]
-    horizon_n = int((report.get("future_projection_15d") or {}).get("horizon_bars") or 15)
-    title_str = html.escape(f"{meta['name']} ({meta['symbol']}) · K线数学结构与{horizon_n}日保形预测终端")
-    q_status = str((report.get("quality") or {}).get("status") or "OK")
+def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path) -> Path:
+    """把 v6 result.json 与 chart_data.json 渲染为零外部依赖、断网双击即开的单文件交互式 HTML。"""
+    meta = result["meta"]
+    horizon_n = int((result.get("volatility_range") or {}).get("horizon_bars") or 15)
+    title_str = html.escape(f"{meta['name']} ({meta['symbol']}) · K线数学结构与{horizon_n}日正常波动范围终端")
+    q_status = str((result.get("quality") or {}).get("status") or "OK")
     if q_status == "UNAVAILABLE":
-        redacted_payload: dict[str, Any] = {
-            "meta": meta,
-            "quality": report.get("quality") or {},
-            "reproducibility": report.get("reproducibility") or {},
-            "series_export": {"bars": [], "pivots": []},
-            "replay_snapshots": [],
+        payload: dict[str, Any] = {
+            "result": {k: result.get(k) or {} for k in ("meta", "quality", "reproducibility")},
+            "chart": {"bars": [], "pivots": [], "replay_snapshots": []},
         }
-        safe_json = _safe_json_for_script(redacted_payload)
     else:
-        safe_json = _safe_json_for_script(report)
-    quality_banner = _render_quality_banner(report.get("quality") or {})
+        payload = {"result": result, "chart": chart}
+    safe_json = _safe_json_for_script(payload)
+    quality_banner = _render_quality_banner(result.get("quality") or {})
 
     html_doc = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -276,10 +270,9 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
 
 <div class="toolbar">
   <div class="layer-group" id="layerControls">
-    <label class="layer-pill"><input type="checkbox" data-layer="conformal" checked /> 未来{horizon_n}日保形预测扇形(50%/80%)</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="conformal" checked /> 未来{horizon_n}日正常波动范围(50%/80%)</label>
     <label class="layer-pill"><input type="checkbox" data-layer="quantiles" checked /> 分位数边界路径(q75/q50/q25)</label>
-    <label class="layer-pill"><input type="checkbox" data-layer="scenarios" checked /> 多情景路径(线宽/深浅按频率·虚线=n&lt;30)</label>
-    <label class="layer-pill"><input type="checkbox" data-layer="scenario_fan" /> 情景混合（非校准区间）</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="scenarios" checked /> 多情景路径(虚线=待触发)</label>
     <label class="layer-pill"><input type="checkbox" data-layer="barriers" checked /> Triple-Barrier 止盈止损框</label>
     <label class="layer-pill"><input type="checkbox" data-layer="structure" checked /> 核平滑与楔形/波段轨道</label>
     <label class="layer-pill"><input type="checkbox" data-layer="poc" checked /> 成交分布近似 POC</label>
@@ -313,7 +306,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       <div class="kv-grid" id="barrierGrid"></div>
     </div>
     <div class="side-card">
-      <h3>3. 多情景推演与历史条件频率 (L1/L2)</h3>
+      <h3>3. 多情景推演</h3>
       <ul class="evidence-list" id="scenarioList"></ul>
     </div>
     <div class="side-card">
@@ -332,7 +325,35 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
 <script id="report-data" type="application/json">{safe_json}</script>
 <script>
 (function() {{
-  const REPORT = JSON.parse(document.getElementById('report-data').textContent);
+  const DATA = JSON.parse(document.getElementById('report-data').textContent);
+  const RES = DATA.result || {{}};
+  const CH = DATA.chart || {{}};
+  // 过渡层（子项目 2 重做看板时删除）：把 v6 result + chart_data 映射为下方脚本沿用的旧变量结构
+  const V = RES.verdict || {{}};
+  const ST = RES.structure || {{}};
+  const VR = RES.volatility_range || {{}};
+  const SC = RES.scenarios || {{}};
+  const SCP = (CH.scenario_paths || {{}}).active || [];
+  const REPORT = {{
+    meta: RES.meta,
+    quality: RES.quality,
+    reproducibility: RES.reproducibility || {{}},
+    market_benchmark: Object.assign({{}}, RES.market_context, {{ rs_series: CH.rs_series || [] }}),
+    mathematical_indicators: Object.assign({{}}, RES.indicators, {{ structure_levels: {{ wedge_structure: ST.channel }} }}),
+    triple_barrier_plan: (RES.plan || {{}}).long,
+    multi_timeframe_score: {{ rule_score: V.rule_score }},
+    meta_labeling_decision: {{ action_cn: V.action_cn, setup_label_cn: V.setup_label_cn, anti_quant_traps: V.anti_quant_traps }},
+    future_projection_15d: Object.assign({{}}, VR, {{ base_median_q50: VR.q50, optimistic_q75: VR.q75 }}),
+    debate_and_veto: {{ risk_officer_veto: V.risk_veto, veto_reasons: V.veto_reasons || [], final_verdict_cn: V.headline_cn, bull_case: V.bull_case || [], bear_case: V.bear_case || [] }},
+    series_export: {{ bars: CH.bars || [], pivots: CH.pivots || [], background: CH.background, intraday: CH.intraday, data_note: CH.data_note }},
+    replay_snapshots: CH.replay_snapshots || [],
+    market_regime: ST.regime || {{}},
+    volume_profile: Object.assign({{}}, ST.volume_profile, {{ bins: CH.volume_profile_bins || [] }}),
+    smc_structures: ST.smc,
+    algebraic_patterns_detected: ST.patterns || [],
+    strategy_signals: V.strategy_signals || [],
+    rule_scenarios: {{ scenarios: (SC.active || []).map(function(s, i) {{ return Object.assign({{}}, s, SCP[i] || {{}}); }}) }},
+  }};
   const meta = REPORT.meta;
   if ((REPORT.quality || {{}}).status === 'UNAVAILABLE') {{
     document.getElementById('headerTitle').textContent =
@@ -428,7 +449,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     addKv(regGrid, 'BBW分位 / HV比值', (ind.volatility.bbw_percentile_120 || '--') + '% / ' + (ind.qlib_factors.hv_ratio_20_60 || '--'));
     addKv(regGrid, '成交分布 POC / VAH / VAL (近似)', fmtPrice(REPORT.volume_profile.poc_price) + ' / ' + fmtPrice(REPORT.volume_profile.vah_price) + ' / ' + fmtPrice(REPORT.volume_profile.val_price));
     const cov80 = fp.calibration_audit.nominal_80pct_empirical_coverage;
-    addKv(regGrid, '保形预测80%实测覆盖', (cov80 === null || cov80 === undefined ? '--' : (cov80 * 100).toFixed(1) + '%') +
+    addKv(regGrid, '正常波动范围80%实测覆盖', (cov80 === null || cov80 === undefined ? '--' : (cov80 * 100).toFixed(1) + '%') +
       ' (n=' + fp.calibration_audit.evaluation_samples + ', ' + fp.promotion_status + ')');
   }}
   renderRegimeGrid(null);
@@ -457,15 +478,11 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   const activeScenarios = (REPORT.rule_scenarios && REPORT.rule_scenarios.scenarios) ? REPORT.rule_scenarios.scenarios : [];
   activeScenarios.forEach(function(sc) {{
     const li = document.createElement('li');
-    const hf = sc.historical_frequency || {{}};
-    const tw = sc.time_window_bars || {{}};
     const head = document.createElement('strong');
     head.textContent = '[' + (sc.status_cn || sc.status) + '] ' + sc.name + ' → 目标 ' + fmtPrice(sc.target_price);
     const detail = document.createElement('span');
     detail.className = 'formula-code';
-    detail.textContent =
-      '触发: ' + sc.trigger + ' | 失效: ' + sc.invalidation +
-      ' | 预计用时中位数: ' + (tw.median || '--') + '日 | ' + (hf.display_cn || '');
+    detail.textContent = '触发: ' + sc.trigger + ' | 失效: ' + sc.invalidation;
     li.appendChild(head);
     li.appendChild(detail);
     scenList.appendChild(li);
@@ -480,15 +497,6 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
   (debate.bear_case || []).forEach(function(item) {{
     const li = document.createElement('li');
     li.textContent = '[空头证伪/风险] ' + item;
-    debList.appendChild(li);
-  }});
-  const conflictSignals = (REPORT.judgment_pack && REPORT.judgment_pack.conflicting_signals) ? REPORT.judgment_pack.conflicting_signals : [];
-  conflictSignals.forEach(function(c) {{
-    const li = document.createElement('li');
-    const bullIds = (c.bullish_evidence_ids || []).join(', ') || '—';
-    const bearIds = (c.bearish_evidence_ids || []).join(', ') || '—';
-    li.textContent = '[冲突信号 ' + (c.id || 'C?') + '] ' + (c.summary_cn || '') +
-      '（偏多证据：' + bullIds + '；偏空/风控证据：' + bearIds + '）';
     debList.appendChild(li);
   }});
   const aqWarnings = (dec.anti_quant_traps && dec.anti_quant_traps.warnings_cn) ? dec.anti_quant_traps.warnings_cn : [];
@@ -541,7 +549,6 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     conformal: true,
     quantiles: true,
     scenarios: true,
-    scenario_fan: false,
     barriers: true,
     structure: true,
     poc: true,
@@ -568,7 +575,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     const isLive = activeReplayIdx === replays.length;
     document.querySelectorAll('#layerControls input[type=checkbox]').forEach(function(cb) {{
       const lk = cb.getAttribute('data-layer');
-      const liveOnly = (lk === 'scenarios' || lk === 'scenario_fan' || lk === 'barriers' || lk === 'poc' || lk === 'smc');
+      const liveOnly = (lk === 'scenarios' || lk === 'barriers' || lk === 'poc' || lk === 'smc');
       if (liveOnly) {{
         cb.disabled = !isLive;
         cb.parentElement.style.opacity = isLive ? '1' : '0.45';
@@ -667,10 +674,6 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
     if (layers.conformal) {{
       activeFp.q10.forEach(function(p) {{ prices.push(p); }});
       activeFp.q90.forEach(function(p) {{ prices.push(p); }});
-    }}
-    if (layers.scenario_fan && fp.scenario_conditional_fan && activeReplayIdx === replays.length) {{
-      (fp.scenario_conditional_fan.q10 || []).forEach(function(p) {{ prices.push(p); }});
-      (fp.scenario_conditional_fan.q90 || []).forEach(function(p) {{ prices.push(p); }});
     }}
     if (layers.scenarios && activeScenarios.length > 0 && activeReplayIdx === replays.length) {{
       activeScenarios.forEach(function(sc) {{
@@ -911,38 +914,6 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       ctx.fill();
     }}
 
-    // Layer: Scenario Conditional Fan (display-only, uncalibrated)
-    if (layers.scenario_fan && fp.scenario_conditional_fan && activeReplayIdx === replays.length) {{
-      const scf = fp.scenario_conditional_fan;
-      ctx.fillStyle = 'rgba(192, 132, 252, 0.14)';
-      ctx.beginPath();
-      ctx.moveTo(startX, startY);
-      for (let i = 0; i < hBars; i++) ctx.lineTo(xOfFut(i), yOfPrice(scf.q90[i]));
-      for (let i = hBars - 1; i >= 0; i--) ctx.lineTo(xOfFut(i), yOfPrice(scf.q10[i]));
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = 'rgba(192, 132, 252, 0.24)';
-      ctx.beginPath();
-      ctx.moveTo(startX, startY);
-      for (let i = 0; i < hBars; i++) ctx.lineTo(xOfFut(i), yOfPrice(scf.q75[i]));
-      for (let i = hBars - 1; i >= 0; i--) ctx.lineTo(xOfFut(i), yOfPrice(scf.q25[i]));
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.strokeStyle = 'rgba(192, 132, 252, 0.9)';
-      ctx.lineWidth = 1.8;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(startX, startY);
-      for (let i = 0; i < hBars; i++) ctx.lineTo(xOfFut(i), yOfPrice(scf.center_q50[i]));
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = '#c084fc';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.fillText(scf.legend_label_cn || '情景混合（非校准区间）', divX + 10, padT + 34);
-    }}
-
     // Layer: 3 Quantile Scenario Paths (q75, q50, q25)
     if (layers.quantiles) {{
       function drawFutureCurve(arr, col, labelPrefix) {{
@@ -965,22 +936,19 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
       drawFutureCurve(activeFp.q25, DN_COL, '下侧q25');
     }}
 
-    // Layer: Multi-Scenario Playbook Paths (width & alpha scaled by historical_frequency, dashed if n < 30)
+    // Layer: Multi-Scenario Playbook Paths (dashed = pending trigger)
     if (layers.scenarios && activeScenarios.length > 0 && activeReplayIdx === replays.length) {{
       activeScenarios.forEach(function(sc, idxSc) {{
-        const hf = sc.historical_frequency || {{}};
-        const freq = typeof hf.target_freq === 'number' ? Math.max(0, Math.min(1, hf.target_freq)) : 0.35;
-        const nSamp = typeof hf.sample_size === 'number' ? hf.sample_size : 0;
-        const lowSample = Boolean(hf.low_sample || nSamp < 30);
-        const alpha = Math.min(1.0, (lowSample ? 0.52 : 0.68) + 0.30 * freq);
-        const lw = 1.6 + 2.4 * freq;
+        const pending = sc.status !== 'ACTIVE';
+        const alpha = 0.85;
+        const lw = 2.2;
         const rgb = sc.direction === 'BULLISH'
           ? (isCnColor ? '248, 113, 113' : '52, 211, 153')
           : (sc.direction === 'BEARISH' ? (isCnColor ? '52, 211, 153' : '248, 113, 113') : '250, 204, 21');
         ctx.save();
         ctx.strokeStyle = 'rgba(' + rgb + ', ' + alpha.toFixed(2) + ')';
         ctx.lineWidth = lw;
-        if (lowSample) ctx.setLineDash([6, 4]);
+        if (pending) ctx.setLineDash([6, 4]);
         ctx.beginPath();
         const wps = sc.waypoints_offset || [];
         wps.forEach(function(wp, wi) {{
@@ -996,9 +964,7 @@ def render_html(report: AnalysisReport, output_path: Path) -> Path:
           const endY = yOfPrice(lastWp[1]);
           ctx.fillStyle = 'rgba(' + rgb + ', ' + Math.min(1, alpha + 0.1).toFixed(2) + ')';
           ctx.font = 'bold 11px sans-serif';
-          const rawFreq = typeof hf.raw_target_freq === 'number' ? hf.raw_target_freq : freq;
-          const pctStr = nSamp > 0 ? (rawFreq * 100).toFixed(1) + '%' : ('先验' + Math.round(freq * 100) + '%');
-          const tag = sc.name + ' ' + pctStr + '(n=' + nSamp + (lowSample ? ',低样本' : '') + ')';
+          const tag = sc.name + ' ' + fmtPrice(lastWp[1]);
           ctx.fillText(tag, Math.max(divX + 6, endX - 110), endY - 6 - (idxSc % 2) * 12);
         }}
         ctx.restore();

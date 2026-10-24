@@ -44,94 +44,12 @@ def _avoid_round_number_stop(
     return st
 
 
-# 反量化规则的门禁范围（Dev 2021–2024 + Val 2025H1 的拦截归因结果，见 research/anti_quant_filter_study.py）：
+# 反量化规则的门禁范围（Dev 2021–2024 + Val 2025H1 的拦截归因结果，见 research/anti_quant_filter_study.py（research/archive 分支）：
 # 证据支持的规则才改变 setup/评级；证据相反或样本不足的规则只输出提示，不降级、不否决。
 _ANTI_QUANT_GATES: dict[str, frozenset[str]] = {
     "ignition_trap_downgrade": frozenset({"US"}),  # CN/HK 的"被拦截组"反而更好
     "algo_bleed_gate": frozenset({"CN", "US"}),  # HK Dev 拦截组反而更好
 }
-
-
-# 高置信反转计划的几何（预注册冻结项）：入场区 [-0.50, +0.25] ATR，TP1 +0.85 ATR、SL -2.20 ATR，均以入场区中点为锚
-HC_ENTRY_ZONE_ATR = (-0.50, 0.25)
-HC_TP1_ATR = 0.85
-HC_SL_ATR = 2.20
-# 暂停输出反转计划的市场与原因（docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md）：
-# 港股在开发区没有超额（D6，第 7 节）；CN、US 在留出集 H1 上未通过预注册验收（D10，第 11 节）。
-# 触发时只记录子类型，不给入场计划与任何统计数字；恢复须先通过前向 H2 验收。
-HC_PAUSE_REASONS: dict[str, tuple[str, str]] = {
-    "CN": ("PAUSED_H1_NOT_PASSED", "留出集 H1 验收未通过"),
-    "US": ("PAUSED_H1_NOT_PASSED", "留出集 H1 验收未通过"),
-    "HK": ("PAUSED_NO_DEV_EDGE", "开发区回测未显示超额，留出集 H1 也未通过"),
-}
-HC_PAUSED_MARKETS = frozenset(HC_PAUSE_REASONS)
-
-
-def detect_high_conviction_rebound(
-    market: str,
-    *,
-    close: float,
-    open_: float,
-    high: float,
-    low: float,
-    raw_close: float,
-    atr14: float,
-    ema20: float,
-    rsi14: float,
-    rsi14_prev: float | None,
-    bench_ret1: float,
-    bench_ret5: float,
-    bench_bull_bar: bool,
-) -> str | None:
-    """高置信超跌/大盘共振反转触发器（纯函数）。线上 compute_triple_barrier_plan 与 research 回测共用这一实现。
-
-    口径与开发集校准时一致：DEEP_OVERSOLD_TURN 的"拐头"指 RSI14 高于前一根；
-    CN/US 的 BENCH_SYNC_REBOUND 要求大盘当日涨幅 >= 0.3%（港股 >= 0.5%）。返回子类型，未触发返回 None。
-    """
-    if atr14 <= 0 or close <= 0 or raw_close < 2.0:
-        return None
-    min_atr_pct = 0.020 if market == "HK" else 0.012
-    if atr14 / close < min_atr_pct:
-        return None
-    rng = high - low
-    if rng <= 0 or close <= open_:
-        return None
-    body_ratio = (close - open_) / rng
-    ext_atr = (close - ema20) / atr14
-    rsi_turned_up = rsi14_prev is not None and rsi14 > rsi14_prev
-
-    if market == "HK":
-        if bench_ret5 <= -0.025 and bench_ret1 >= 0.005 and ext_atr <= -1.0 and body_ratio >= 0.32:
-            return "BENCH_SYNC_REBOUND"
-        if rsi14 <= 26.0 and rsi_turned_up and body_ratio >= 0.35 and bench_ret1 >= 0.0:
-            return "DEEP_OVERSOLD_TURN"
-        return None
-    if bench_ret5 <= -0.025 and bench_ret1 >= 0.003 and ext_atr <= -1.0 and body_ratio >= 0.32:
-        return "BENCH_SYNC_REBOUND"
-    if ((rsi14 <= 28.0 and rsi_turned_up) or ext_atr <= -1.85) and body_ratio >= 0.35 and (bench_bull_bar or bench_ret1 >= 0.0):
-        return "DEEP_OVERSOLD_TURN"
-    return None
-
-
-def high_conviction_plan_levels(
-    close: float,
-    atr14: float,
-    market: str,
-    asset_type: str,
-    as_of_day: str | None,
-    tp_atr: float = HC_TP1_ATR,
-    sl_atr: float = HC_SL_ATR,
-) -> tuple[float, float, float, float]:
-    """高置信反转计划的固定价位 (entry_low, entry_high, take_profit_1, stop_loss)，信号日确定后不随成交价移动。
-
-    tp_atr / sl_atr 只供研究回测的几何网格使用，线上一律取默认常量。
-    """
-    entry_low = round_to_tick(max(0.01, close + HC_ENTRY_ZONE_ATR[0] * atr14), market, asset_type, as_of_day)
-    entry_high = round_to_tick(close + HC_ENTRY_ZONE_ATR[1] * atr14, market, asset_type, as_of_day)
-    entry_mid = 0.5 * (entry_low + entry_high)
-    tp1 = round_to_tick(entry_mid + tp_atr * atr14, market, asset_type, as_of_day)
-    sl = round_to_tick(max(0.01, entry_mid - sl_atr * atr14), market, asset_type, as_of_day)
-    return entry_low, entry_high, tp1, sl
 
 
 def compute_triple_barrier_plan(
@@ -448,16 +366,6 @@ def compute_triple_barrier_plan(
         action = "NEUTRAL_HOLD_WAIT"
         action_cn = "观望等待突破信号"
 
-    # L2 历史条件频率守门（经验 Meta-Labeling）：若该标的自身历史上攻先到目标频率 < 30% 且显著低于失效或下探频率，将确认做多降级为观察
-    bull_hf = (projections.get("bull") or {}).get("historical_frequency") or {}
-    bear_hf = (projections.get("bear") or {}).get("historical_frequency") or {}
-    b_tgt = min(_num_or(bull_hf, "target_freq", 0.45), _num_or(bull_hf, "raw_target_freq", 0.45))
-    b_inv = max(_num_or(bull_hf, "invalidation_freq", 0.40), _num_or(bull_hf, "raw_invalidation_freq", 0.40))
-    dn_tgt = max(_num_or(bear_hf, "target_freq", 0.40), _num_or(bear_hf, "raw_target_freq", 0.40))
-    if action == "LONG_CONFIRMED" and b_tgt < 0.30 and (b_inv > b_tgt + 0.12 or dn_tgt > b_tgt + 0.12):
-        action = "WATCH_LONG_SETUP"
-        action_cn = "条件观察（待放量/收盘确认）"
-
     # Position sizing calculation
     # 每股风险按入场区上沿（区内最差成交价）计：在入场区内任意价位成交，按止损价离场的亏损都不超过风险预算
     adj_factor = float(last_bar.get("adj_factor", 1.0)) or 1.0
@@ -549,66 +457,6 @@ def compute_triple_barrier_plan(
         },
     }
 
-    # 高置信超跌/大盘共振反转层：触发条件与计划价位由共享纯函数给出，研究回测调用同一实现；目前三个市场均暂停输出计划
-    hc_subtype: str | None = None
-    if not benchmark_info.get("benchmark_missing"):
-        hc_subtype = detect_high_conviction_rebound(
-            market,
-            close=last_c,
-            open_=last_o,
-            high=last_h,
-            low=last_l,
-            raw_close=float(last_bar.get("raw_close", last_c)),
-            atr14=atr14,
-            ema20=_num_or(ind_snapshot["trend"], "ema20", last_c),
-            rsi14=rsi14,
-            rsi14_prev=ind_snapshot["momentum"].get("rsi14_prev"),
-            bench_ret1=_num_or(benchmark_info, "bench_ret1", 0.0),
-            bench_ret5=_num_or(benchmark_info, "bench_ret5", 0.0),
-            bench_bull_bar=bool(benchmark_info.get("bench_bull_bar", False)),
-        )
-
-    # 先大盘、后个股：大盘极弱（BENCHMARK_WEAK）已触发风控否决时，不得再给出反转入场计划与校准概率
-    hc_suppressed_by_veto = hc_subtype is not None and "BENCHMARK_WEAK" in veto_codes
-    hc_suppressed_subtype = hc_subtype if hc_suppressed_by_veto else None
-    if hc_suppressed_by_veto:
-        hc_subtype = None
-    hc_paused_subtype = hc_subtype if market in HC_PAUSED_MARKETS else None
-    if hc_paused_subtype is not None:
-        hc_subtype = None
-
-    hc_entry_low, hc_entry_high, hc_tp1, hc_sl = high_conviction_plan_levels(last_c, atr14, market, asset_type, as_of_day)
-    meta_decision["high_conviction_rebound"] = hc_subtype is not None
-    meta_decision["high_conviction_subtype"] = hc_subtype
-    meta_decision["high_conviction_suppressed_by_veto"] = hc_suppressed_by_veto
-    meta_decision["high_conviction_suppressed_subtype"] = hc_suppressed_subtype
-    meta_decision["high_conviction_paused_subtype"] = hc_paused_subtype
-    pause_method, pause_reason = HC_PAUSE_REASONS.get(market, ("", ""))
-    # 反转层没有任何通过留出集验收的统计量，不输出概率或命中率数字（方案 D4=b、D10=a）
-    meta_decision["decision_probability"] = {
-        "available": False,
-        "method": (
-            "SUPPRESSED_BY_BENCHMARK_VETO"
-            if hc_suppressed_by_veto
-            else pause_method
-            if hc_paused_subtype is not None
-            else "NO_VALIDATED_STATISTIC"
-            if hc_subtype is not None
-            else "NOT_TRIGGERED"
-        ),
-        "event_definition": (
-            "反转条件已触发，但大盘环境评分偏弱触发风控否决"
-            if hc_suppressed_by_veto
-            else f"反转条件已触发，但{pause_reason}，暂停输出反转计划与统计数字"
-            if hc_paused_subtype is not None
-            else "反转条件已触发，但没有通过留出集验收的统计量，不输出数字"
-            if hc_subtype is not None
-            else "未触发高置信超跌/大盘共振反转条件"
-        ),
-        "validation": "docs/superpowers/specs/2026-10-20-backtest-acceptance-revision.md 第 11 节：留出集 H1 未通过",
-        "as_of": as_of_day,
-    }
-
     retest_hold = float(projections["bull"]["retest_hold"])
     bear_target = float(projections["bear"]["target_price"])
     holder_defense = _holder_defense_plan(market, asset_type, as_of_day, p_dec, projections, stop_loss, s1, r1, bear_target)
@@ -668,28 +516,6 @@ def compute_triple_barrier_plan(
         "position_sizing": position_sizing,
         "holder_defense_plan": holder_defense,
         "short_plan": short_plan,
-        "high_conviction_plan": {
-            "triggered": hc_subtype is not None,
-            "subtype": hc_subtype,
-            "entry_zone": [hc_entry_low, hc_entry_high],
-            "take_profit_1": hc_tp1,
-            "stop_loss_barrier": hc_sl,
-            "time_barrier_bars": horizon_bars,
-            "trailing_stop": False,
-            "limit_order_sessions": 5,
-            "rule_cn": (
-                f"高置信超跌/大盘共振反转计划（{hc_subtype}）：5日内于 {hc_entry_low:.{p_dec}f}~{hc_entry_high:.{p_dec}f} 限价入场，"
-                f"均值回归修复目标 TP1 {hc_tp1:.{p_dec}f}（+{HC_TP1_ATR:.2f}*ATR），结构崩溃止损 {hc_sl:.{p_dec}f}（-{HC_SL_ATR:.2f}*ATR），时间屏障 {horizon_bars} 根K线"
-                if hc_subtype is not None
-                else (
-                    "反转条件已触发，但大盘环境评分偏弱触发风控否决，不给出反转入场计划"
-                    if hc_suppressed_by_veto
-                    else f"反转条件已触发（{hc_paused_subtype}），但{pause_reason}，暂不给出反转入场计划"
-                    if hc_paused_subtype is not None
-                    else "当前截面未触发高置信超跌/大盘共振反转条件"
-                )
-            ),
-        },
     }
 
     # Bull vs Bear structured falsification (TradingAgents style)

@@ -1,4 +1,5 @@
 {
+  "schema_version": "6.0.0",
   "symbol": "600519.SH",
   "market": "CN",
   "causal_replay_audit": {
@@ -8,8 +9,7 @@
       "structure_layer_pivots",
       "candlestick_patterns",
       "smc_structures",
-      "conformal_forecast",
-      "multi_scenarios_base_rates"
+      "conformal_forecast"
     ],
     "mismatches_count": 0,
     "mismatches": [],
@@ -166,140 +166,6 @@
         "median_forward_return_pct": -2.44,
         "up_share_pct": 29.4
       }
-    },
-    "scenario_frequency_brier": {
-      "samples": 673,
-      "brier_score": 0.2145,
-      "climatology_base_rate": 0.373,
-      "climatology_brier_score": 0.2017,
-      "pooled_climatology_brier_score": 0.2339,
-      "brier_skill_score": -0.0635,
-      "pooled_brier_skill_score": 0.0826,
-      "discriminative": false,
-      "reliability_buckets": [
-        {
-          "bucket": [
-            0.0,
-            0.2
-          ],
-          "bucket_pct": "0%~20%",
-          "count": 139,
-          "mean_predicted_freq": 0.1664,
-          "empirical_hit_rate": 0.0791,
-          "calibration_gap": -0.0873
-        },
-        {
-          "bucket": [
-            0.2,
-            0.4
-          ],
-          "bucket_pct": "20%~40%",
-          "count": 166,
-          "mean_predicted_freq": 0.3603,
-          "empirical_hit_rate": 0.4819,
-          "calibration_gap": 0.1216
-        },
-        {
-          "bucket": [
-            0.4,
-            0.6
-          ],
-          "bucket_pct": "40%~60%",
-          "count": 285,
-          "mean_predicted_freq": 0.4702,
-          "empirical_hit_rate": 0.3825,
-          "calibration_gap": -0.0877
-        },
-        {
-          "bucket": [
-            0.6,
-            0.8
-          ],
-          "bucket_pct": "60%~80%",
-          "count": 50,
-          "mean_predicted_freq": 0.6226,
-          "empirical_hit_rate": 0.48,
-          "calibration_gap": -0.1426
-        },
-        {
-          "bucket": [
-            0.8,
-            1.0
-          ],
-          "bucket_pct": "80%~100%",
-          "count": 33,
-          "mean_predicted_freq": 0.8489,
-          "empirical_hit_rate": 0.8182,
-          "calibration_gap": -0.0307
-        }
-      ],
-      "per_scenario": {
-        "APEX_BREAKOUT": {
-          "samples": 33,
-          "mean_predicted_freq": 0.8489,
-          "empirical_hit_rate": 0.8182,
-          "brier_score": 0.152,
-          "climatology_brier_score": 0.1488,
-          "brier_skill_score": -0.022
-        },
-        "BREAKDOWN_DECLINE": {
-          "samples": 86,
-          "mean_predicted_freq": 0.3868,
-          "empirical_hit_rate": 0.4186,
-          "brier_score": 0.2607,
-          "climatology_brier_score": 0.2434,
-          "brier_skill_score": -0.0711
-        },
-        "BREAKOUT_RETEST": {
-          "samples": 58,
-          "mean_predicted_freq": 0.3748,
-          "empirical_hit_rate": 0.3103,
-          "brier_score": 0.2185,
-          "climatology_brier_score": 0.214,
-          "brier_skill_score": -0.0211
-        },
-        "C_WAVE_REVERSAL": {
-          "samples": 102,
-          "mean_predicted_freq": 0.473,
-          "empirical_hit_rate": 0.4608,
-          "brier_score": 0.2758,
-          "climatology_brier_score": 0.2485,
-          "brier_skill_score": -0.1102
-        },
-        "FALSE_BREAKOUT_REVERSAL": {
-          "samples": 94,
-          "mean_predicted_freq": 0.534,
-          "empirical_hit_rate": 0.4468,
-          "brier_score": 0.2464,
-          "climatology_brier_score": 0.2472,
-          "brier_skill_score": 0.0031
-        },
-        "OVERSOLD_BOUNCE": {
-          "samples": 44,
-          "mean_predicted_freq": 0.5759,
-          "empirical_hit_rate": 0.5,
-          "brier_score": 0.2901,
-          "climatology_brier_score": 0.25,
-          "brier_skill_score": -0.1605
-        },
-        "RANGE_OSCILLATION": {
-          "samples": 142,
-          "mean_predicted_freq": 0.1671,
-          "empirical_hit_rate": 0.0775,
-          "brier_score": 0.0786,
-          "climatology_brier_score": 0.0715,
-          "brier_skill_score": -0.1002
-        },
-        "TREND_CONTINUATION": {
-          "samples": 114,
-          "mean_predicted_freq": 0.3995,
-          "empirical_hit_rate": 0.4211,
-          "brier_score": 0.2548,
-          "climatology_brier_score": 0.2438,
-          "brier_skill_score": -0.0452
-        }
-      },
-      "verdict": "样本外 Brier = 0.2145，各情景自身基准率加权 Brier = 0.2017（相对各情景基准率的技能分 BSS = -0.063 ≤ 0，尚未优于各情景自身基准率，仅作历史统计参考）"
     },
     "sample_trades": [
       {
