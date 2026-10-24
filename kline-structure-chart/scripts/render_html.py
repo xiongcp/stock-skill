@@ -334,6 +334,9 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   const VR = RES.volatility_range || {{}};
   const SC = RES.scenarios || {{}};
   const SCP = (CH.scenario_paths || {{}}).active || [];
+  // 按情景 id 对应路径点，不依赖两份列表的顺序
+  const SCP_BY_ID = {{}};
+  SCP.forEach(function(p) {{ if (p && p.id) SCP_BY_ID[p.id] = p; }});
   const REPORT = {{
     meta: RES.meta,
     quality: RES.quality,
@@ -352,7 +355,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     smc_structures: ST.smc,
     algebraic_patterns_detected: ST.patterns || [],
     strategy_signals: V.strategy_signals || [],
-    rule_scenarios: {{ scenarios: (SC.active || []).map(function(s, i) {{ return Object.assign({{}}, s, SCP[i] || {{}}); }}) }},
+    rule_scenarios: {{ scenarios: (SC.active || []).map(function(s) {{ return Object.assign({{}}, s, SCP_BY_ID[s.id] || {{}}); }}) }},
   }};
   const meta = REPORT.meta;
   if ((REPORT.quality || {{}}).status === 'UNAVAILABLE') {{

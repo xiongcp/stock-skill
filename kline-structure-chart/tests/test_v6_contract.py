@@ -165,16 +165,33 @@ def test_v6_schema_marks_stability_and_rejects_unknown_fields() -> None:
 KEYPATH_DIR = Path(__file__).resolve().parent / "fixtures" / "contract"
 
 
-def _key_paths(obj, path=""):
-    """result.json 的全部键路径：字典键用 . 连接，列表下标统一折叠为 [*]。"""
+def _key_paths(obj, path="", map_paths=frozenset()):
+    """全部键路径：字典键用 . 连接，列表下标统一折叠为 [*]；map_paths 里的字典是"代码→值"映射，其键折叠为 {*}。"""
     if isinstance(obj, dict):
         for k, v in obj.items():
-            sub = f"{path}.{k}" if path else k
+            key = "{*}" if path in map_paths else k
+            sub = f"{path}.{key}" if path else key
             yield sub
-            yield from _key_paths(v, sub)
+            yield from _key_paths(v, sub, map_paths)
     elif isinstance(obj, list):
         for v in obj:
-            yield from _key_paths(v, f"{path}[*]")
+            yield from _key_paths(v, f"{path}[*]", map_paths)
+
+
+def _assert_keypaths_match(actual: list[str], snapshot: Path, label: str) -> None:
+    """与快照比较；设置 UPDATE_V6_KEYPATHS=1 时先改写快照，再以失败结束，逼人看过 git diff 后不带该变量重跑。"""
+    import os
+
+    if os.environ.get("UPDATE_V6_KEYPATHS") == "1":
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        snapshot.write_text(json.dumps(actual, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        pytest.fail(f"[{label}] 已改写快照 {snapshot.name}：确认 git diff 是有意的契约变更后，去掉 UPDATE_V6_KEYPATHS 重跑")
+    expected = json.loads(snapshot.read_text(encoding="utf-8"))
+    added, removed = sorted(set(actual) - set(expected)), sorted(set(expected) - set(actual))
+    assert not added and not removed, (
+        f"[{label}] 键路径与快照不一致：新增 {added}；删除 {removed}。"
+        "新增或删除契约字段须同步 schema 的 x-stability 标注与 CHANGELOG\"契约变更\"，确认后再更新快照"
+    )
 
 
 # 每个配置一份快照 result_v6_keypaths_<id>.json：
@@ -198,25 +215,27 @@ KEYPATH_CONFIGS = {
 def test_v6_result_keypaths_match_snapshot(replay_recorded, tmp_path: Path, config_id: str) -> None:
     """固定录制行情下各配置 result.json 的完整键集，防止内部新字段经透传投影静默进入稳定契约。
 
-    确认是有意的契约变更后重新生成快照：
+    确认是有意的契约变更后重新生成快照（改写后测试会以失败提示检查 diff，再不带该变量重跑）：
     UPDATE_V6_KEYPATHS=1 uv run pytest -q tests/test_v6_contract.py -k keypaths_match_snapshot
     """
-    import os
-
     request, kw = KEYPATH_CONFIGS[config_id]
     rep = run_pipeline({**request, **REQ_BASE}, output_dir=tmp_path, **kw)
     result, _ = load_v6(rep)
     actual = sorted(set(_key_paths(result)))
-    snapshot = KEYPATH_DIR / f"result_v6_keypaths_{config_id}.json"
-    if os.environ.get("UPDATE_V6_KEYPATHS") == "1":
-        snapshot.parent.mkdir(parents=True, exist_ok=True)
-        snapshot.write_text(json.dumps(actual, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    expected = json.loads(snapshot.read_text(encoding="utf-8"))
-    added, removed = sorted(set(actual) - set(expected)), sorted(set(expected) - set(actual))
-    assert not added and not removed, (
-        f"[{config_id}] result.json 键路径与快照不一致：新增 {added}；删除 {removed}。"
-        "新增或删除契约字段须同步 schema 的 x-stability 标注与 CHANGELOG\"契约变更\"，确认后再更新快照"
-    )
+    _assert_keypaths_match(actual, KEYPATH_DIR / f"result_v6_keypaths_{config_id}.json", f"result.json {config_id}")
+
+
+# backtest.json 中以动作代码 / 否决代码为键的统计表，键集合随行情变化，不属于契约结构
+BACKTEST_MAP_PATHS = frozenset({"backtest.actions_seen", "backtest.veto_reason_counts", "backtest.action_forward_returns"})
+
+
+def test_v6_backtest_keypaths_match_snapshot(replay_recorded, tmp_path: Path) -> None:
+    """backtest.json 也是稳定接口：固定录制行情下的完整键集由快照守住（代码→值映射表的键折叠为 {*}）。"""
+    rep = _cn_moutai(tmp_path, run_backtest=True, backtest_step=20)
+    bt = json.loads(Path(rep["rendered_paths"]["backtest_json"]).read_text(encoding="utf-8"))
+    actual = sorted(set(_key_paths(bt, map_paths=BACKTEST_MAP_PATHS)))
+    assert "backtest.all_long_signals.win_rate_95ci_pct" in actual
+    _assert_keypaths_match(actual, KEYPATH_DIR / "backtest_v6_keypaths_600519.json", "backtest.json 600519")
 
 
 def test_cli_success_envelope(replay_recorded, tmp_path: Path, capsys) -> None:
@@ -240,7 +259,34 @@ def test_cli_insufficient_history_exit_code(replay_recorded, tmp_path: Path, cap
     env = json.loads(captured.out)
     assert env == {"status": "error", "error": {"code": "INSUFFICIENT_HISTORY", "message": env["error"]["message"]}}
     assert "历史长度不足" in env["error"]["message"] and "600519.SH" in env["error"]["message"]  # 消息带上标的代码
+    assert "部分历史" in env["error"]["message"]  # 根数不足也可能是厂商截断，提示里要写明
     assert captured.err.startswith("[INSUFFICIENT_HISTORY]")
+
+
+def test_cli_contract_violation_is_internal_error_and_writes_nothing(
+    replay_recorded, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """契约自检失败是技能自身的 bug：报 INTERNAL_ERROR / 退出码 1，而不是参数错误，且输出目录不留任何产物。"""
+    import analyze_and_forecast
+    from contract_v6 import build_result as real_build_result
+
+    def leaky_build_result(report, files):
+        result = real_build_result(report, files)
+        result["undeclared_field"] = 1
+        return result
+
+    monkeypatch.setattr(analyze_and_forecast, "build_result", leaky_build_result)
+    out_dir = tmp_path / "out"
+    rc = analyze_and_forecast.main(
+        ["--market", "CN", "--symbol", "600519.SH", "--asset-type", "equity", "--output-dir", str(out_dir)]
+    )
+    assert rc == 1
+    captured = capsys.readouterr()
+    env = json.loads(captured.out)
+    assert env["status"] == "error" and env["error"]["code"] == "INTERNAL_ERROR"
+    assert "undeclared_field" in env["error"]["message"]
+    assert captured.err.startswith("[INTERNAL_ERROR]")
+    assert list(out_dir.iterdir()) == []
 
 
 @pytest.mark.slow
@@ -298,6 +344,39 @@ def test_v6_html_reads_result_and_chart(replay_recorded, tmp_path: Path) -> None
     assert "正常波动范围" in out and "保形预测" not in out
 
 
+def test_v6_html_adapter_joins_scenario_paths_by_id(replay_recorded, tmp_path: Path) -> None:
+    """看板适配层按情景 id 合并路径点：chart_data 里的顺序被打乱时，每个情景仍拿到自己的路径。"""
+    import re
+    import shutil
+    import subprocess
+
+    from render_html import render_html
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("本机没有 node，无法执行看板脚本")
+    rep = _cn_moutai(tmp_path)
+    result, chart = load_v6(rep)
+    active = chart["scenario_paths"]["active"]
+    assert len(active) >= 2, "需要至少两个情景才能检验顺序"
+    expected = {p["id"]: p["waypoints_offset"] for p in active}
+    chart["scenario_paths"]["active"] = list(reversed(active))
+    html_text = render_html(result, chart, tmp_path / "dash.html").read_text(encoding="utf-8")
+    payload = re.search(r'<script id="report-data" type="application/json">(.*?)</script>', html_text, re.S).group(1)
+    start = html_text.index("const DATA = JSON.parse")
+    end = html_text.index("\n  };", html_text.index("rule_scenarios:", start)) + len("\n  };")
+    script = (
+        f"const document = {{ getElementById: () => ({{ textContent: {json.dumps(payload)} }}) }};\n"
+        + html_text[start:end]
+        + "\nconsole.log(JSON.stringify(REPORT.rule_scenarios.scenarios.map(s => [s.id, s.waypoints_offset])));\n"
+    )
+    out = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30, check=True).stdout
+    merged = json.loads(out)
+    assert [sid for sid, _ in merged] == [s["id"] for s in result["scenarios"]["active"]]
+    for sid, wps in merged:
+        assert wps == expected[sid], sid
+
+
 def test_v6_report_md_reads_result(replay_recorded, tmp_path: Path) -> None:
     from render_report_md import render_report_markdown
 
@@ -315,16 +394,40 @@ def test_lint_rejects_share_and_ratio_frequency_numbers_but_allows_factor_wordin
     """「上涨占比」「先到目标的比例」是频率数字，与概率同样不得对外；实体占比等因子、参数用语不受影响。"""
     from lint_response import _unvalidated_probability_hits
 
-    for bad in ("上涨占比 53.8%", "上涨占比为53.8%", "先到目标的比例为 62%", "触及止损的比例约 30%"):
+    for bad in (
+        "上涨占比 53.8%", "上涨占比为53.8%", "先到目标的比例为 62%", "触及止损的比例约 30%",
+        "上涨日占比 55%", "盈利比例 60%", "下跌比例约70%",
+    ):
         assert _unvalidated_probability_hits(bad + "。"), bad
     for ok in (
         "K线实体占比 0.35，上影线占比偏高。",
         "实体占比 35%，影线占比 20%。",
         "单笔风险比例 1%，斐波那契回撤比例 61.8%。",
         "涨跌停比例 10%，隔夜跳空占比 2%。",
+        "成交量占比 30%，仓位比例 50%。",
         "回测胜率 55.0%（n=40，95% 区间 40.0%~69.0%）。",
     ):
         assert _unvalidated_probability_hits(ok) == [], ok
+
+
+def test_lint_backtest_exemption_covers_only_win_rate() -> None:
+    """"回测 + 95% 区间"只为胜率本身放行，不能替频率、占比、概率数字背书；"95% 置信区间"的写法同样认可。"""
+    from lint_response import _unvalidated_probability_hits
+
+    for ok in (
+        "回测胜率 46.1%（n=13，95% 置信区间 23.2%~70.9%）。",
+        "回测胜率为 46.1%，95%区间 23.2%~70.9%。",
+        "回测胜率 46.1%（n=13，Wilson 95% 区间 23.2%~70.9%）。",
+    ):
+        assert _unvalidated_probability_hits(ok) == [], ok
+    for bad in (
+        "历史条件频率 55%（回测样本，95% 区间 40%~70%）。",
+        "上涨占比 53.8%（回测，95% 区间 30%~70%）。",
+        "回测概率 62%（95% 区间 50%~70%）。",
+        "回测命中率 62%（95% 区间 50%~70%）。",
+        "回测显示胜率 46.1%（13 笔，区间 23.2%~70.9%）。",
+    ):
+        assert _unvalidated_probability_hits(bad), bad
 
 
 @pytest.mark.slow

@@ -20,7 +20,14 @@ from typing import Any
 
 from analysis import analyze_bundle
 from contract_v6 import SCHEMA_VERSION, artifact_files, build_chart_data, build_result
-from contracts import AnalysisRequest, InsufficientHistoryError, sanitize_filename, validate_chart_data, validate_report
+from contracts import (
+    AnalysisRequest,
+    ContractViolationError,
+    InsufficientHistoryError,
+    sanitize_filename,
+    validate_chart_data,
+    validate_report,
+)
 from data_gateway import load_bundle
 from evaluation import run_causal_replay_audit, run_plan_backtest
 from market_rules import price_decimals, round_to_tick
@@ -31,6 +38,7 @@ from structure import compute_structure_layer
 
 MAX_RISK_PCT_LIMIT = 0.05  # 单笔风险上限 5%：更大的值几乎都是把百分数当比例传入
 
+EXIT_INTERNAL_ERROR = 1
 EXIT_INVALID_ARGUMENT = 2
 EXIT_DATA_UNAVAILABLE = 3
 EXIT_INSUFFICIENT_HISTORY = 4
@@ -91,6 +99,34 @@ def run_pipeline(
     files = artifact_files(safe_sym, has_backtest=run_backtest)
     paths = {key: output_dir / name for key, name in files.items()}
 
+    report["rendered_paths"] = {key: str(p.resolve()) for key, p in paths.items()}
+
+    bt_payload: dict[str, Any] | None = None
+    if run_backtest:
+        bt_res = run_plan_backtest(
+            bundle,
+            request,
+            horizon_bars=int(request.get("horizon_bars") or 15),
+            step=backtest_step,
+        )
+        causal_audit = run_causal_replay_audit(bundle["target"]["bars"])
+        bt_payload = {
+            "schema_version": SCHEMA_VERSION,
+            "symbol": meta["symbol"],
+            "market": meta["market"],
+            "causal_replay_audit": causal_audit,
+            "backtest": bt_res,
+        }
+
+    # 先投影并自检，通过后才写任何产物：自检失败时输出目录里不会混入一半新、一半旧的文件
+    result = build_result(report, files)
+    chart = build_chart_data(report)
+    try:
+        validate_report(result)
+        validate_chart_data(chart)
+    except ValueError as exc:
+        raise ContractViolationError(f"内部错误：输出未通过 v6 契约自检（{exc}）") from exc
+
     title = (
         f"{meta['name']} ({meta['symbol']}) · 近{request.get('display_bars', 120)}日数学结构与未来{request.get('horizon_bars', 15)}日推演"
     )
@@ -110,30 +146,8 @@ def run_pipeline(
         volume_profile=report.get("volume_profile"),
     )
     report["legacy_summary"] = legacy_summary
-    report["rendered_paths"] = {key: str(p.resolve()) for key, p in paths.items()}
-
-    bt_payload: dict[str, Any] | None = None
-    if run_backtest:
-        bt_res = run_plan_backtest(
-            bundle,
-            request,
-            horizon_bars=int(request.get("horizon_bars") or 15),
-            step=backtest_step,
-        )
-        causal_audit = run_causal_replay_audit(bundle["target"]["bars"])
-        bt_payload = {
-            "schema_version": SCHEMA_VERSION,
-            "symbol": meta["symbol"],
-            "market": meta["market"],
-            "causal_replay_audit": causal_audit,
-            "backtest": bt_res,
-        }
+    if bt_payload is not None:
         paths["backtest_json"].write_text(json.dumps(bt_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    result = build_result(report, files)
-    chart = build_chart_data(report)
-    validate_report(result)
-    validate_chart_data(chart)
     render_html(result, chart, paths["dashboard_html"])
     paths["result_json"].write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     paths["chart_data_json"].write_text(json.dumps(chart, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
@@ -213,14 +227,16 @@ def main(argv: list[str] | None = None) -> int:
             run_backtest=args.backtest,
             backtest_step=max(1, args.backtest_step),
         )
+    except ContractViolationError as exc:
+        # 技能自身的 bug，不是用户参数或行情问题；不写任何产物
+        return _fail("INTERNAL_ERROR", str(exc), EXIT_INTERNAL_ERROR)
     except InsufficientHistoryError as exc:
         return _fail("INSUFFICIENT_HISTORY", str(exc), EXIT_INSUFFICIENT_HISTORY)
     except RuntimeError as exc:
         # 真实行情取不到：数据源失败、限流、数据损坏
         return _fail("DATA_UNAVAILABLE", str(exc), EXIT_DATA_UNAVAILABLE)
     except ValueError as exc:
-        # 参数或输入不合法：代码无法识别、参数越界、本地文件格式错误。
-        # 注意：run_pipeline 内 validate_report / validate_chart_data 的契约自检失败也是 ValueError，同样落在这里（属内部错误，却报 2）
+        # 参数或输入不合法：代码无法识别、参数越界、本地文件格式错误（契约自检失败已在上面单独报告）
         return _fail("INVALID_ARGUMENT", str(exc), EXIT_INVALID_ARGUMENT)
     result = json.loads(Path(report["rendered_paths"]["result_json"]).read_text(encoding="utf-8"))
     envelope = {
