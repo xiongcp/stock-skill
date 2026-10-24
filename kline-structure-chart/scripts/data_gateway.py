@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from contracts import AnalysisRequest, MarketDataBundle, validate_bars
+from contracts import AnalysisRequest, InsufficientHistoryError, MarketDataBundle, validate_bars
 from market_rules import (
     DEFAULT_BENCHMARKS,
     KNOWN_INSTRUMENTS,
@@ -395,8 +395,10 @@ def _load_single_series(
             if src.startswith("YAHOO_"):
                 bars, placeholder_days = drop_placeholder_bars(bars)
             if len(bars) < MIN_LIVE_BARS:
-                raise RuntimeError(f"历史长度不足 ({len(bars)} < {MIN_LIVE_BARS})")
+                raise InsufficientHistoryError(f"历史长度不足 ({symbol}: {len(bars)} < {MIN_LIVE_BARS})")
             return bars, src, errors, placeholder_days
+        except InsufficientHistoryError:
+            raise  # 历史不足不是取数失败，原样上抛让命令行以退出码 4 报告
         except Exception as exc:  # noqa: BLE001 - 失败原因必须记录并向上抛出
             errors.append(f"{type(exc).__name__}: {exc}")
 
@@ -473,7 +475,9 @@ def load_bundle(
                 target_bars = [b for b in target_bars if str(b["day"]) <= str(as_of)[:10]]
             target_bars, intraday = split_incomplete_last_bar(target_bars, inst["market"], now)
             if len(target_bars) < MIN_LIVE_BARS:
-                raise RuntimeError(f"历史长度不足 ({len(target_bars)} < {MIN_LIVE_BARS})")
+                raise InsufficientHistoryError(
+                    f"历史长度不足 ({inst.get('symbol') or '输入行情包标的'}: {len(target_bars)} < {MIN_LIVE_BARS})"
+                )
             out = dict(raw_data)
             out["target"] = {**target, "bars": target_bars, "intraday": intraday or target.get("intraday")}
             benchmark = raw_data.get("benchmark")
@@ -509,7 +513,7 @@ def load_bundle(
             validate_bars(bars, "input_bars")
             bars, intraday = split_incomplete_last_bar(bars, inst["market"], now)
             if len(bars) < MIN_LIVE_BARS:
-                raise RuntimeError(f"历史长度不足 ({len(bars)} < {MIN_LIVE_BARS})")
+                raise InsufficientHistoryError(f"历史长度不足 ({inst['symbol']}: {len(bars)} < {MIN_LIVE_BARS})")
             # 本地K线数组没有公司行动数据，按原样使用并在复权状态中注明
             bars = apply_point_in_time_adjustment(bars, mode="raw", as_of_day=bars[-1]["day"])
             local_adjustment = {
@@ -520,7 +524,7 @@ def load_bundle(
                 "error": "本地文件未附带除权除息数据，按原始价格使用",
             }
             return {
-                "schema_version": "5.3.0",
+                "schema_version": "6.0.0",
                 "market": inst["market"],
                 "target": {"instrument": inst, "bars": bars, "intraday": intraday},
                 "benchmark": None,
@@ -564,7 +568,7 @@ def load_bundle(
     # 未收盘K线不得当作已收盘参与指标/预测计算（即使传入 --as-of 为当天或未来日期，也必须拆出尚未收盘的当日K线）
     target_bars, intraday = split_incomplete_last_bar(target_bars, market, now)
     if len(target_bars) < MIN_LIVE_BARS:
-        raise RuntimeError(f"历史长度不足 ({len(target_bars)} < {MIN_LIVE_BARS})")
+        raise InsufficientHistoryError(f"历史长度不足 ({inst['symbol']}: {len(target_bars)} < {MIN_LIVE_BARS})")
     missing_session = None
     latest_closed = latest_closed_session(market, now)
     if not as_of or str(as_of)[:10] >= latest_closed:
@@ -604,7 +608,7 @@ def load_bundle(
         vix_value, vix_source = _fetch_vix(as_of or target_bars[-1]["day"], allow_network)
 
     return {
-        "schema_version": "5.3.0",
+        "schema_version": "6.0.0",
         "market": market,
         "target": {
             "instrument": inst,

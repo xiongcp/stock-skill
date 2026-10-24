@@ -44,7 +44,7 @@ def test_skill_md_references_existing_files() -> None:
 
 def test_skill_md_keeps_runtime_contract_self_contained() -> None:
     text = SKILL.read_text(encoding="utf-8")
-    for must in ("DATA_UNAVAILABLE", "INVALID_ARGUMENT", "quality.status", "rule_score", "calibration_audit", "risk_officer_veto", "禁止合成数据"):
+    for must in ("DATA_UNAVAILABLE", "INVALID_ARGUMENT", "quality.status", "rule_score", "calibration_audit", "risk_veto", "禁止合成数据"):
         assert must in text, f"SKILL.md 缺少运行期规则关键字 {must}"
 
 
@@ -96,10 +96,12 @@ def test_readme_cli_parameters_and_outputs_match_code() -> None:
     actual = set(re.findall(r'add_argument\(\s*"(--[\w-]+)"', cli))
     assert documented == actual, f"README 参数表与 CLI 不同步：多列 {documented - actual}，漏列 {actual - documented}"
     for label in set(re.findall(r"\[([A-Z_]{5,})\]", text)):
-        assert f"[{label}]" in cli, f"README 提到的错误前缀 [{label}] 在 CLI 中不存在"
+        # CLI 以 _fail("CODE", ...) 统一拼出 stderr 的 [CODE] 前缀，源码里只有带引号的错误码
+        assert f'"{label}"' in cli, f"README 提到的错误前缀 [{label}] 在 CLI 中不存在"
     outputs = text.split("## 6.", 1)[1].split("## 7.", 1)[0]
     documented_files = set(re.findall(r"`\*(_\w+\.\w+)`", outputs))
-    actual_files = set(re.findall(r'f"\{safe_sym\}(_\w+\.\w+)"', cli))
+    contract_py = (SKILL_DIR / "scripts" / "contract_v6.py").read_text(encoding="utf-8")
+    actual_files = set(re.findall(r'f"\{safe_sym\}(_\w+\.\w+)"', contract_py))
     assert documented_files == actual_files, f"README 产物表与 CLI 不同步：{documented_files ^ actual_files}"
 
 
@@ -183,9 +185,22 @@ def test_versions_are_in_sync() -> None:
     assert fields["metadata"]["version"] == version  # type: ignore[index]
     schema = json.loads((SKILL_DIR / "assets" / "analysis.schema.json").read_text(encoding="utf-8"))
     assert schema["properties"]["schema_version"]["enum"] == [version]
-    analysis_py = (SKILL_DIR / "scripts" / "analysis.py").read_text(encoding="utf-8")
-    assert f'"schema_version": "{version}"' in analysis_py
-    assert f'"engine_version": "{version}"' in analysis_py
+    contract_py = (SKILL_DIR / "scripts" / "contract_v6.py").read_text(encoding="utf-8")
+    assert f'SCHEMA_VERSION = "{version}"' in contract_py
+    marketplace = json.loads((REPO_DIR / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+
+    def _versions(obj):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if k == "version":
+                    yield v
+                yield from _versions(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                yield from _versions(v)
+
+    found = list(_versions(marketplace))
+    assert found and all(v == version for v in found), found
 
 
 # 已核实未实现或已移除的能力，任何文档、注释与界面文案都不得再宣称
@@ -219,6 +234,21 @@ def test_docs_have_no_placeholders() -> None:
     docs = DOCS + [p for p in (AGENTS, README) if p.exists()]
     hits = [f"{d.name}: {m.group(0)}" for d in docs for m in PLACEHOLDER.finditer(d.read_text(encoding="utf-8"))]
     assert not hits, f"文档残留占位符: {hits}"
+
+
+def test_docs_have_no_probability_channels_after_v6() -> None:
+    banned = ("历史条件频率", "主观研判", "judgment_pack", "validate_judgment", "score_judgments",
+              "情景混合", "高置信反转", "校准先验", "future_projection_15d", "triple_barrier_plan",
+              "debate_and_veto", "rule_scenarios", "meta_labeling_decision")
+    docs = [SKILL, *(SKILL_DIR / "references").glob("*.md")]
+    hits = [f"{d.name}: {w}" for d in docs for w in banned if w in d.read_text(encoding="utf-8")]
+    assert not hits, f"文档仍引用已删除的概率通道或 v5 字段: {hits}"
+
+
+def test_skill_md_documents_cli_contract() -> None:
+    text = SKILL.read_text(encoding="utf-8")
+    for token in ('"status": "ok"', "INVALID_ARGUMENT", "DATA_UNAVAILABLE", "INSUFFICIENT_HISTORY", "退出码", "chart_data.json"):
+        assert token in text, token
 
 
 def test_output_fields_dictionary_covers_schema_top_level() -> None:

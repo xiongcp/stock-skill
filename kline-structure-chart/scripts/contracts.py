@@ -111,7 +111,6 @@ class AnalysisReport(TypedDict, total=False):
     rule_scenarios: dict[str, Any]
     future_projection_15d: dict[str, Any]
     debate_and_veto: dict[str, Any]
-    judgment_pack: dict[str, Any]
     replay_snapshots: list[dict[str, Any]]
     series_export: dict[str, Any]
     legacy_summary: dict[str, Any]
@@ -174,73 +173,72 @@ def load_report_schema() -> dict[str, Any]:
     return json.loads(REPORT_SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
-def _check_schema_contract(report: AnalysisReport) -> None:
-    """按 assets/analysis.schema.json 校验顶层必填键、schema_version 与 meta 字段（必填、类型、枚举）。
-
-    schema 是唯一信息源：这里不再另写一份必填键清单。只实现该 schema 用到的关键字（required / enum / type / minLength）。
-    """
-    schema = load_report_schema()
-    for key in schema["required"]:
-        if key not in report:
-            raise ValueError(f"Missing required report key: {key}")
-    props = schema["properties"]
-    version_enum = props["schema_version"].get("enum")
-    if version_enum and report["schema_version"] not in version_enum:
-        raise ValueError(f"Unsupported schema_version: {report['schema_version']}")
-    meta_schema = props["meta"]
-    meta = report["meta"]
-    for key in meta_schema.get("required", []):
-        if key not in meta:
-            raise ValueError(f"Missing required meta key: {key}")
-    for key, rule in meta_schema.get("properties", {}).items():
-        if key not in meta:
-            continue
-        value = meta[key]
-        if rule.get("type") == "string" and not isinstance(value, str):
-            raise ValueError(f"Invalid meta.{key}: expected string, got {type(value).__name__}")
-        if "enum" in rule and value not in rule["enum"]:
-            raise ValueError(f"Invalid meta.{key}: {value!r} not in {rule['enum']}")
-        if "minLength" in rule and len(str(value)) < rule["minLength"]:
-            raise ValueError(f"Invalid meta.{key}: shorter than {rule['minLength']}")
-    for section_key, section_schema in props.items():
-        if section_key in ("schema_version", "meta") or section_key not in report:
-            continue
-        sec_val = report[section_key]
-        if section_schema.get("type") == "object" and isinstance(sec_val, dict):
-            for req_k in section_schema.get("required", []):
-                if req_k not in sec_val:
-                    raise ValueError(f"Missing required {section_key} key: {req_k}")
+class InsufficientHistoryError(RuntimeError):
+    """已收盘K线不足以计算（上市太短或 --as-of 太早）；属于数据不可用的一种，命令行单独以退出码 4 报告。"""
 
 
-def validate_report(report: AnalysisReport) -> None:
-    _check_finite_numbers(report)
-    _check_schema_contract(report)
+_JSON_TYPES: dict[str, type | tuple[type, ...]] = {
+    "object": dict, "array": list, "string": str, "boolean": bool, "null": type(None),
+}
 
-    fp = report["future_projection_15d"]
-    horizon_dates = fp.get("horizon_dates", [])
-    h_len = len(horizon_dates)
+
+def _type_ok(value: Any, json_type: str) -> bool:
+    if json_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if json_type == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, _JSON_TYPES[json_type])
+
+
+def schema_errors(value: Any, schema: dict[str, Any], path: str = "$") -> list[str]:
+    """按 schema 的 type / enum / minLength / required / properties / additionalProperties:false / items 校验，返回错误列表。"""
+    types = schema.get("type")
+    if types is not None:
+        tlist = types if isinstance(types, list) else [types]
+        if not any(_type_ok(value, t) for t in tlist):
+            return [f"{path}: 期望 {'/'.join(tlist)}，实际 {type(value).__name__}"]
+    errs: list[str] = []
+    if "enum" in schema and value not in schema["enum"]:
+        errs.append(f"{path}: {value!r} 不在 {schema['enum']} 中")
+    if isinstance(value, str) and len(value) < int(schema.get("minLength", 0)):
+        errs.append(f"{path}: 长度小于 {schema['minLength']}")
+    if isinstance(value, dict):
+        errs += [f"{path}: 缺少必填字段 {k}" for k in schema.get("required", []) if k not in value]
+        props = schema.get("properties", {})
+        if schema.get("additionalProperties") is False:
+            errs += [f"{path}: 未声明的字段 {k}" for k in value if k not in props]
+        for k, sub in props.items():
+            if k in value:
+                errs += schema_errors(value[k], sub, f"{path}.{k}")
+    if isinstance(value, list) and "items" in schema:
+        for i, item in enumerate(value):
+            errs += schema_errors(item, schema["items"], f"{path}[{i}]")
+    return errs
+
+
+def validate_report(result: dict[str, Any]) -> None:
+    """校验 v6 result.json：无 NaN/Infinity、符合 assets/analysis.schema.json、正常波动范围分位单调且为正。"""
+    _check_finite_numbers(result)
+    errors = schema_errors(result, load_report_schema())
+    if errors:
+        raise ValueError("result.json 不符合 v6 契约：" + "；".join(errors[:10]))
+    vr = result["volatility_range"]
+    h_len = len(vr["horizon_dates"])
     if h_len <= 0:
-        raise ValueError("future_projection_15d.horizon_dates must not be empty")
-    for q_key in ("q10", "q25", "base_median_q50", "optimistic_q75", "q90"):
-        arr = fp.get(q_key, [])
-        if len(arr) != h_len:
-            raise ValueError(f"future_projection_15d.{q_key} length {len(arr)} != {h_len}")
-        if any(float(v) <= 0 for v in arr):
-            raise ValueError(f"future_projection_15d.{q_key} contains non-positive price")
+        raise ValueError("volatility_range.horizon_dates must not be empty")
+    keys = ("q10", "q25", "q50", "q75", "q90")
+    for key in keys:
+        if len(vr[key]) != h_len:
+            raise ValueError(f"volatility_range.{key} length {len(vr[key])} != {h_len}")
+        if any(float(v) <= 0 for v in vr[key]):
+            raise ValueError(f"volatility_range.{key} contains non-positive price")
+    for step in range(h_len):
+        q = [float(vr[k][step]) for k in keys]
+        if any(q[i] > q[i + 1] + 1e-6 for i in range(4)):
+            raise ValueError(f"Quantile crossing at step {step}: {dict(zip(keys, q))}")
 
-    for step_idx in range(h_len):
-        q10 = float(fp["q10"][step_idx])
-        q25 = float(fp["q25"][step_idx])
-        q50 = float(fp["base_median_q50"][step_idx])
-        q75 = float(fp["optimistic_q75"][step_idx])
-        q90 = float(fp["q90"][step_idx])
-        if not (q10 <= q25 + 1e-6 and q25 <= q50 + 1e-6 and q50 <= q75 + 1e-6 and q75 <= q90 + 1e-6):
-            raise ValueError(
-                f"Quantile crossing at step {step_idx}: q10={q10}, q25={q25}, q50={q50}, q75={q75}, q90={q90}"
-            )
 
-    series = report.get("series_export", {})
-    bars = series.get("bars", [])
-    if bars:
-        validate_bars(bars, "series_export.bars")
-
+def validate_chart_data(chart: dict[str, Any]) -> None:
+    _check_finite_numbers(chart)
+    if chart.get("bars"):
+        validate_bars(chart["bars"], "chart_data.bars")

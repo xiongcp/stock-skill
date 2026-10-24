@@ -1,7 +1,7 @@
-"""把 AnalysisReport（及可选回测结果）确定性地渲染为中文 Markdown 分析报告 `*_report.md`。
+"""把 v6 result.json（及可选回测结果）确定性地渲染为中文 Markdown 分析报告 `*_report.md`。
 
 报告按 SKILL.md「回复契约」的顺序组织，agent 可直接据此回答用户：
-- 所有数字原样取自 report / backtest，不做任何再计算；价格按品种最小价位位数格式化。
+- 所有数字原样取自 v6 result / backtest，不做任何再计算；价格按品种最小价位位数格式化。
 - 数据质量为 UNAVAILABLE 时只输出告警，不输出任何价位与结论。
 - 规则分、区间、回测统计都附带口径说明，避免被误读为胜率或方向预测。
 """
@@ -38,17 +38,21 @@ def _num(value: Any, digits: int = 2) -> str:
 
 
 def render_report_markdown(
-    report: dict[str, Any],
+    result: dict[str, Any],
     backtest: dict[str, Any] | None = None,
-    judgment: dict[str, Any] | None = None,
-    judgment_score_summary: dict[str, Any] | None = None,
 ) -> str:
-    meta = report["meta"]
-    quality = report["quality"]
+    meta = result["meta"]
+    quality = result["quality"]
     market = meta["market"]
     asset_type = meta["asset_type"]
-    bars = report.get("series_export", {}).get("bars") or []
-    last_close = float(bars[-1]["close"]) if bars else 0.0
+    verdict = result.get("verdict") or {}
+    ctx = result.get("market_context") or {}
+    st = result.get("structure") or {}
+    plan_all = result.get("plan") or {}
+    plan = plan_all.get("long") or {}
+    vr = result.get("volatility_range") or {}
+    sc = result.get("scenarios") or {}
+    last_close = float(st.get("last_close") or 0.0)
     decimals = price_decimals(last_close, market, asset_type, meta["as_of"])
 
     def price(value: Any) -> str:
@@ -79,48 +83,43 @@ def render_report_markdown(
     if quality.get("notes"):
         lines += ["**数据备注**", ""] + [f"- {n}" for n in quality["notes"]] + [""]
 
-    debate = report["debate_and_veto"]
-    decision = report["meta_labeling_decision"]
-    mtf = report["multi_timeframe_score"]
-    if debate.get("risk_officer_veto"):
+    if verdict.get("risk_veto"):
         lines += ["> **风控否决**：以下条件触发否决，本报告不构成任何做多建议。", ">"]
-        lines += [f"> - {r}" for r in debate.get("veto_reasons", [])]
+        lines += [f"> - {r}" for r in verdict.get("veto_reasons", [])]
         lines += [""]
 
     # 1. 结论速览
-    bench = report["market_benchmark"]
-    plan = report["triple_barrier_plan"]
-    fp = report["future_projection_15d"]
+    bench = ctx
     partial_prefix = (
         f"【数据说明（PARTIAL）：{'；'.join(quality.get('warnings') or ['缺少大盘基准或来源待核验'])}】"
         if quality.get("status") == "PARTIAL"
         else ""
     )
     veto_prefix = (
-        f"【风控否决：{'；'.join(debate.get('veto_reasons') or [])}，以下点位仅用于观察，不构成做多建议】"
-        if debate.get("risk_officer_veto")
+        f"【风控否决：{'；'.join(verdict.get('veto_reasons') or [])}，以下点位仅用于观察，不构成做多建议】"
+        if verdict.get("risk_veto")
         else ""
     )
-    plan_zone_label = "观察区（风控已否决）" if debate.get("risk_officer_veto") else "入场区"
-    mr_adj = mtf.get("regime_adjustment") or {}
+    plan_zone_label = "观察区（风控已否决）" if verdict.get("risk_veto") else "入场区"
+    mr_adj = (verdict.get("rule_detail") or {}).get("regime_adjustment") or {}
     mr_note = f"{mr_adj['note_cn']}。" if mr_adj.get("applied") else ""
     flash_digest = (
         f"{partial_prefix}{veto_prefix}数据截至 {meta['as_of']}（数据源 {meta['data_source']}，{ADJUSTMENT_CN.get(meta.get('adjustment'), meta.get('adjustment'))}，质量 {quality['status']}）。"
         f"基准 {bench['index_name']}（{bench['index_symbol']}）处于{bench['regime_label_cn']}（状态分 {bench['regime_score']:.1f}/100）。"
-        f"本标的规则分 {mtf['rule_score']:.1f}/100（{mtf['rating_cn']}，确定性规则加权分，不是胜率或上涨概率），{mr_note}"
-        f"当前评级为「{decision['action_cn']}」（{decision['setup_label_cn']}），最新收盘 {price(last_close)}，"
+        f"本标的规则分 {verdict['rule_score']:.1f}/100（{verdict['rating_cn']}，确定性规则加权分，不是胜率或上涨概率），{mr_note}"
+        f"当前评级为「{verdict['action_cn']}」（{verdict['setup_label_cn']}），最新收盘 {price(last_close)}，"
         f"三重屏障计划{plan_zone_label} {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])}、止损 {price(plan['stop_loss_barrier'])}、"
         f"TP1 {price(plan['take_profit_1'])}（扣费后净盈亏比 {plan['risk_reward_ratio']:.2f}）；"
-        f"未来 {fp['horizon_bars']} 日 80% 保形区间为 {price(fp['q10'][-1])} ~ {price(fp['q90'][-1])}（中枢 q50 = {price(fp['base_median_q50'][-1])}，只描述波动幅度，不含方向预测）。"
+        f"未来 {vr['horizon_bars']} 日 80% 正常波动范围为 {price(vr['q10'][-1])} ~ {price(vr['q90'][-1])}（中枢 q50 = {price(vr['q50'][-1])}，只描述波动幅度，不含方向预测）。"
     )
     lines += [
         "## 1. 结论速览",
         "",
         f"- 直出摘要（供 Agent / Flash 模型首段原样引用）：{flash_digest}",
-        f"- 结论：{debate['final_verdict_cn']}",
-        f"- 规则分：**{mtf['rule_score']:.1f} / 100**（{mtf['rating_cn']}）。这是确定性规则加权分，不是胜率，也不是上涨概率。"
+        f"- 结论：{verdict['headline_cn']}",
+        f"- 规则分：**{verdict['rule_score']:.1f} / 100**（{verdict['rating_cn']}）。这是确定性规则加权分，不是胜率，也不是上涨概率。"
         + (f"{mr_note}" if mr_note else ""),
-        f"- 最新收盘：{price(last_close)}；计划类型：{decision['setup_label_cn']}。",
+        f"- 最新收盘：{price(last_close)}；计划类型：{verdict['setup_label_cn']}。",
         "",
     ]
 
@@ -151,71 +150,47 @@ def render_report_markdown(
         ]
 
     # 3. 结构与条件推演
-    levels = report["mathematical_indicators"]["structure_levels"]
-    wedge = levels["wedge_structure"]
-    sc = report["rule_scenarios"]
-    bull_hf = (sc["bull"].get("historical_frequency") or {}).get("display_cn") or "—"
-    neut_hf = (sc["neutral"].get("historical_frequency") or {}).get("display_cn") or "—"
-    bear_hf = (sc["bear"].get("historical_frequency") or {}).get("display_cn") or "—"
+    wedge = st["channel"]
+    sp = sc["paths"]
     lines += [
         "## 3. 结构与条件推演（触发 → 目标 → 失效）",
         "",
         f"- 当前结构（近 120 日）：{wedge['pattern']}，{wedge['status_text']}。",
         "",
-        "| 路径 | 触发条件 | 目标位（来源） | 失效条件 | 历史条件频率 |",
-        "| --- | --- | --- | --- | --- |",
-        f"| 上攻 | {_cell(sc['bull']['trigger'])} | {price(sc['bull']['target_price'])}（{_cell(sc['bull']['target_source'])}） "
-        f"| {_cell(sc['bull']['invalidation'])} | {_cell(bull_hf)} |",
-        f"| 震荡 | {_cell(sc['neutral']['condition'])} | 区间 {price(sc['neutral']['range'][0])} ~ {price(sc['neutral']['range'][1])} | — | {_cell(neut_hf)} |",
-        f"| 下探 | {_cell(sc['bear']['trigger'])} | {price(sc['bear']['target_price'])}（{_cell(sc['bear']['target_source'])}） "
-        f"| {_cell(sc['bear']['invalidation'])} | {_cell(bear_hf)} |",
+        "| 路径 | 触发条件 | 目标位（来源） | 失效条件 |",
+        "| --- | --- | --- | --- |",
+        f"| 上攻 | {_cell(sp['bull']['trigger'])} | {price(sp['bull']['target_price'])}（{_cell(sp['bull']['target_source'])}） "
+        f"| {_cell(sp['bull']['invalidation'])} |",
+        f"| 震荡 | {_cell(sp['neutral']['condition'])} | 区间 {price(sp['neutral']['range'][0])} ~ {price(sp['neutral']['range'][1])} | — |",
+        f"| 下探 | {_cell(sp['bear']['trigger'])} | {price(sp['bear']['target_price'])}（{_cell(sp['bear']['target_source'])}） "
+        f"| {_cell(sp['bear']['invalidation'])} |",
         "",
     ]
-    multi_scenarios = sc.get("scenarios") or []
+    multi_scenarios = sc.get("active") or []
     if multi_scenarios:
         lines += [
-            "**多情景推演与无前视历史条件频率**",
+            "**多情景推演**",
             "",
-            "| 情景 | 状态 | 触发条件 | 目标位（来源） | 失效条件 | 预计用时（中位数） | 历史条件频率（先到目标） |",
-            "| --- | --- | --- | --- | --- | --- | --- |",
+            "| 情景 | 状态 | 触发条件 | 目标位（来源） | 失效条件 |",
+            "| --- | --- | --- | --- | --- |",
         ]
         for item in multi_scenarios:
-            tw = item.get("time_window_bars") or {}
-            hf_item = item.get("historical_frequency") or {}
-            tw_txt = f"{tw.get('median', '—')} 日（四分位 {tw.get('q25', '—')}~{tw.get('q75', '—')} 日）"
             lines += [
                 f"| {_cell(item['name'])} | {_cell(item.get('status_cn', item.get('status')))} "
                 f"| {_cell(item['trigger'])} | {price(item['target_price'])}（{_cell(item['target_source'])}） "
-                f"| {_cell(item['invalidation'])} | {tw_txt} | {_cell(hf_item.get('display_cn', '—'))} |"
+                f"| {_cell(item['invalidation'])} |"
             ]
-        lines += [
-            "",
-            "- 口径说明：历史条件频率是在本标的自身历史上逐日无前视统计的实际观测频率（只消费当时已成熟的样本，与括号内 Wilson 95% 区间同口径）。"
-            "它统计的是以触发日 ATR 为单位的**标准化屏障事件**（如「15 根K线内先触及 +1.55×ATR 而非 −1.05×ATR」，各情景定义见 `historical_frequency.event_definition_cn`），"
-            "**不是表中目标价的到达频率**；同一情景相邻触发日只间隔 2 根K线，结果期互相重叠，n 高估了独立样本数。"
-            "括号内的「收缩后估计」是低样本（n < 30）时向市场基准做 Beta-Binomial 修正后的模型估计（风控守门与研判锚点使用该值），不是观测频率。"
-            "该数字不是交易胜率，也不是未来上涨概率。",
-            "",
-        ]
+        lines += [""]
     imp = sc.get("impulse_wave")
     if imp:
         lines += [f"- 推动浪识别：{imp['label']}（{imp['invalidation_text']}；1.618×浪1 测算位 {price(imp['wave3_1618_target'])}）。"]
-    horizon_sc = sc.get("horizon_bars")
-    for key, label in (("bull", "上攻"), ("bear", "下探")):
-        eta = sc[key].get("eta_bars")
-        if eta and horizon_sc:
-            reach = f"在 {horizon_sc} 日预测期内" if sc[key].get("target_within_horizon") else f"超出 {horizon_sc} 日预测期"
-            lines += [
-                f"- {label}路径时间尺度：按近 60 日日波动 {sc['sigma_1d_pct']:.2f}% 的随机游走扩散尺度估算，走到触发位约 {max(1.0, eta['trigger']):.0f} 个交易日、"
-                f"走到目标位约 {max(1.0, eta['target']):.0f} 个交易日，{reach}（只是时间量级，不是方向预测）。"
-            ]
     contested = sc.get("contested_levels") or []
     if contested:
         items = "；".join(f"{price(c['price'])}（{'/'.join(c['sources'])}）" for c in contested)
         lines += [
             f"- 现价 {sc['min_trigger_distance_atr']} 个 ATR 以内正在争夺的价位：{items}。这些价位落在日常波动范围内，不作触发条件。"
         ]
-    counts = levels.get("wave_counts") or []
+    counts = st.get("wave_counts") or []
     if counts:
         lines += ["", "| 浪型计数 | A 浪 | B 浪终点 | C 浪进度 | 1.0 倍测算位 | 否定条件 |", "| --- | --- | --- | --- | --- | --- |"]
         for wc in counts:
@@ -228,7 +203,7 @@ def render_report_markdown(
             ]
         lines += ["", "- 浪型计数是对同一段走势的不同数法，备选计数用于提示主计数可能错在哪里，不代表可能性大小。"]
     lines += [""]
-    ladder = levels.get("key_levels") or {}
+    ladder = st.get("key_levels") or {}
     res = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("resistances") or [])[:3]]
     sup = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("supports") or [])[:3]]
     lines += [
@@ -238,7 +213,6 @@ def render_report_markdown(
     ]
 
     # 4. 风控计划
-    plan = report["triple_barrier_plan"]
     rules = plan["market_microstructure"]
     sizing = plan["position_sizing"]
     lines += [
@@ -246,7 +220,7 @@ def render_report_markdown(
         "",
         f"| 计划类型 | {plan_zone_label} | 止损 | TP1 | TP2 | 时间屏障 | 扣费后盈亏比 |",
         "| --- | --- | --- | --- | --- | --- | --- |",
-        f"| {decision['setup_label_cn']} | {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])} "
+        f"| {verdict['setup_label_cn']} | {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])} "
         f"| {price(plan['stop_loss_barrier'])} | {price(plan['take_profit_1'])} | {price(plan['take_profit_2'])} "
         f"| {plan['time_barrier_bars']} 根 K 线 | {plan['risk_reward_ratio']:.2f} |",
         "",
@@ -287,20 +261,20 @@ def render_report_markdown(
         ]
     elif sizing.get("reason"):
         lines += [f"- 仓位：{sizing['reason']}"]
-    if debate.get("risk_officer_veto"):
+    if verdict.get("risk_veto"):
         lines += ["- 风控已否决：以上点位只用于观察与复核，不构成做多建议。"]
-    elif decision.get("action") not in ("LONG_CONFIRMED", "WATCH_LONG_SETUP"):
+    elif verdict.get("action") not in ("LONG_CONFIRMED", "WATCH_LONG_SETUP"):
         lines += ["- 非做多评级提示：当前未触发做多确认，以下点位仅作结构观察与条件触发参考，当前不构成买入建议。"]
-    aq_traps = decision.get("anti_quant_traps") or {}
+    aq_traps = verdict.get("anti_quant_traps") or {}
     for aq_w in aq_traps.get("warnings_cn") or []:
         lines += [f"- 反量化收割风险提示：{aq_w}。"]
-    defense = plan.get("holder_defense_plan") or {}
+    defense = plan_all.get("holder_defense") or {}
     if defense.get("available"):
         lines += ["", "**持仓防守计划**（已持有该标的时参考）", ""] + [f"- {r}" for r in defense["rules"]]
         lines += [f"- 下方参考位：{price(defense['downside_reference']['price'])}（{_cell(defense['downside_reference']['source'])}）。"]
         if defense.get("note"):
             lines += [f"- {defense['note']}。"]
-    short = plan.get("short_plan") or {}
+    short = plan_all.get("short") or {}
     if short.get("available"):
         lines += [
             "",
@@ -322,30 +296,29 @@ def render_report_markdown(
 
     # 5. 形态与信号证据
     lines += ["## 5. 形态与信号证据（公式可复核）", ""]
-    patterns = report.get("algebraic_patterns_detected") or []
+    patterns = st.get("patterns") or []
     for p in patterns[:6]:
         lines += [
             f"- {p['name_cn']}（{DIRECTION_CN.get(p['direction'], p['direction'])}，{p.get('confirmed_at') or p.get('observed_at')}）："
             f"`{p['formula_verified']}`"
         ]
-    for s in report.get("strategy_signals") or []:
+    for s in verdict.get("strategy_signals") or []:
         if s.get("direction") != "NEUTRAL":
             lines += [f"- 策略 {s['name_cn']} → {s['state']}：`{s['formula_verified']}`"]
-    breaks = (report.get("smc_structures") or {}).get("structure_breaks") or []
+    breaks = (st.get("smc") or {}).get("structure_breaks") or []
     if breaks:
         last_break = breaks[-1]
         lines += [f"- 最近一次结构破位：{last_break['type']}（{last_break['day']}，破位价 {price(last_break['broken_level'])}）"]
-    if not patterns and not breaks and not any(s.get("direction") != "NEUTRAL" for s in report.get("strategy_signals") or []):
+    if not patterns and not breaks and not any(s.get("direction") != "NEUTRAL" for s in verdict.get("strategy_signals") or []):
         lines += ["- 当前窗口未触发蜡烛形态、背离或策略信号。"]
     lines += [""]
 
     # 6. 未来区间
-    fp = report["future_projection_15d"]
-    audit = fp["calibration_audit"]
-    horizon = int(fp["horizon_bars"])
+    audit = vr["calibration_audit"]
+    horizon = int(vr["horizon_bars"])
     steps = sorted({h for h in (1, 5, 10, horizon) if 1 <= h <= horizon})
     lines += [
-        f"## 6. 未来 {horizon} 个交易日价格区间（只描述波动幅度，不含方向判断）",
+        f"## 6. 未来 {horizon} 个交易日正常波动范围（只描述波动幅度，不含方向判断）",
         "",
         "| 日期 | 第几日 | 80% 下沿 q10 | 50% 下沿 q25 | 中枢 q50 | 50% 上沿 q75 | 80% 上沿 q90 |",
         "| --- | --- | --- | --- | --- | --- | --- |",
@@ -353,10 +326,10 @@ def render_report_markdown(
     for h in steps:
         i = h - 1
         lines += [
-            f"| {fp['horizon_dates'][i]} | {h} | {price(fp['q10'][i])} | {price(fp['q25'][i])} | {price(fp['base_median_q50'][i])} "
-            f"| {price(fp['optimistic_q75'][i])} | {price(fp['q90'][i])} |"
+            f"| {vr['horizon_dates'][i]} | {h} | {price(vr['q10'][i])} | {price(vr['q25'][i])} | {price(vr['q50'][i])} "
+            f"| {price(vr['q75'][i])} | {price(vr['q90'][i])} |"
         ]
-    promoted = "已达标" if fp["promotion_status"] == "PROMOTED" else "校准观察期"
+    promoted = "已达标" if vr["promotion_status"] == "PROMOTED" else "校准观察期"
     lines += [
         "",
         "- 中枢 q50 就是最新收盘价（不加任何漂移），区间宽度来自历史波动的分期限校准。",
@@ -372,16 +345,9 @@ def render_report_markdown(
     ]
     if audit.get("uncalibrated_overlays"):
         lines += [f"- 未经历史校准的放大项：{'；'.join(audit['uncalibrated_overlays'])}。"]
-    cal = fp.get("calendar_coverage") or {}
+    cal = vr.get("calendar_coverage") or {}
     if cal and not cal.get("covered", True):
         lines += [f"- {len(cal['estimated_dates'])} 个未来日期超出休市表覆盖范围（至 {cal['coverage_end']}），按工作日估算。"]
-    scf = fp.get("scenario_conditional_fan") or {}
-    if scf and scf.get("center_q50"):
-        lines += [
-            f"- 附：{scf.get('legend_label_cn', '情景混合（非校准区间）')}（仅供展示，不替代上方默认保形区间）："
-            f"按各情景历史条件频率加权混合，第 {horizon} 日混合中枢 {price(scf['center_q50'][-1])}，"
-            f"80% 混合带 {price(scf['q10'][-1])} ~ {price(scf['q90'][-1])}。"
-        ]
     lines += ["- 这是逐日的边际区间，不代表整条价格路径的联合概率。", ""]
 
     # 7. 回测
@@ -423,27 +389,7 @@ def render_report_markdown(
                 f"- 规则分与未来 {ic['forward_horizon_bars']} 日收益的秩相关 IC = {ic_text}"
                 f"（{ic['decisions']} 个决策日，约 {ic['effective_independent_samples']} 个独立样本）：{ic['verdict']}。"
             ]
-        afr = bt.get("action_forward_returns") or {}
-        if any(row.get("decisions") for row in afr.values()):
-            lines += [
-                "",
-                f"| 决策日动作 | 次数 | 未来 {ic.get('forward_horizon_bars', horizon)} 日平均收益 | 中位数 | 上涨占比 |",
-                "| --- | --- | --- | --- | --- |",
-            ]
-            action_cn = {
-                "LONG_CONFIRMED": "确认做多",
-                "WATCH_LONG_SETUP": "观察做多",
-                "NEUTRAL_HOLD_WAIT": "观望",
-                "DEFENSIVE_AVOID": "防守回避",
-            }
-            for action, row in afr.items():
-                if not row.get("decisions"):
-                    continue
-                lines += [
-                    f"| {action_cn.get(action, action)} | {row['decisions']} | {row['mean_forward_return_pct']:.2f}% "
-                    f"| {row['median_forward_return_pct']:.2f}% | {row['up_share_pct']:.1f}% |"
-                ]
-            lines += ["", "- 上表是每个决策日之后的实际涨跌，用于检验动作标签是否与后续走势一致，不是交易收益。"]
+        # action_forward_returns / rule_score_buckets 含「上涨占比」频率数字，属于维护者诊断字段，不进入面向用户的报告
         veto_counts = bt.get("veto_reason_counts") or {}
         if veto_counts:
             veto_cn = {
@@ -456,29 +402,6 @@ def render_report_markdown(
                 "BREAKOUT_LOW_VOLUME": "突破缺量",
             }
             lines += ["- 风控否决原因统计：" + "；".join(f"{veto_cn.get(k, k)} {v} 次" for k, v in veto_counts.items()) + "。"]
-        sfb = bt.get("scenario_frequency_brier") or {}
-        sfb_n = sfb.get("samples") or sfb.get("evaluated_events") or 0
-        if sfb and sfb_n > 0:
-            bss = sfb.get("brier_skill_score")
-            bss_txt = "—" if bss is None else f"{bss:+.4f}"
-            lines += [
-                f"- 历史条件频率样本外检验（共 {sfb_n} 次情景事件）："
-                f"Brier 分数 = {sfb['brier_score']:.4f}，各情景自身基准率加权 "
-                f"Brier 分数 = {sfb['climatology_brier_score']:.4f}，技能分 BSS = {bss_txt}（{sfb.get('verdict')}）。"
-            ]
-            non_empty_buckets = [b for b in (sfb.get("reliability_buckets") or []) if b.get("count", 0) > 0]
-            if non_empty_buckets:
-                lines += [
-                    "",
-                    "| 预测历史频率分桶 | 事件数 | 平均预测频率 | 实际先到目标占比 |",
-                    "| --- | --- | --- | --- |",
-                ]
-                for b in non_empty_buckets:
-                    b_label = b.get("bucket_pct") or b["bucket"]
-                    lines += [
-                        f"| {b_label} | {b['count']} | {_pct(b['mean_predicted_freq'])} | {_pct(b['empirical_hit_rate'])} |"
-                    ]
-                lines += [""]
         if audit_bt:
             lines += [
                 f"- 无前视审计：{'通过' if audit_bt.get('passed') else '未通过'}"
@@ -486,101 +409,19 @@ def render_report_markdown(
             ]
         lines += [""]
 
-    # 8. LLM 情景研判（主观判断，已记录待检验）— 与上方确定性计算部分明确分开
-    active_judgment = judgment or report.get("llm_judgment")
-    jpack = report.get("judgment_pack") or {}
-    if active_judgment:
-        from judgment import AUTO_INIT_GENERATOR, judgment_origin
-
-        if judgment_origin(active_judgment, report) == AUTO_INIT_GENERATOR:
-            lines += [
-                "## 8. 情景研判模板（脚本预填，未经 Agent 主观研判）",
-                "",
-                "> **模板声明**：本节由 `validate_judgment.py --auto-init` 按偏多/偏空证据条数机械预填（每情景调整不超过 ±4 个百分点），"
-                "不是 Agent 的主观研判；对外转述时只能称「脚本预填模板」，不得称为主观研判概率。日志中单独标注来源，不计入 LLM 技能分。",
-                "",
-            ]
-        else:
-            lines += [
-                "## 8. LLM 情景研判（主观判断，已记录待检验）",
-                "",
-                "> **主观研判声明**：本节为锚定 L2 历史条件频率的受约束主观研判（非确定性公式计算），调整幅度受样本量上限约束，且已记入日志待到期按 Brier 分数与技能分 BSS 检验。",
-                "",
-            ]
-        lines += [
-            f"- 研判综述：{active_judgment.get('summary_cn', '')}",
-            "",
-            "| 情景 | L2 历史条件频率 | 基准概率（调整前） | 主观研判概率（调整后） | 调整幅度（上限） | 支持证据 | 反对/约束证据 | 调整理由 |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- |",
-        ]
-        for sj in active_judgment.get("scenario_judgments") or []:
-            sup_txt = ", ".join(sj.get("supporting_evidence_ids") or []) or "—"
-            opp_txt = ", ".join(sj.get("opposing_evidence_ids") or []) or "—"
-            l2_disp = sj.get("l2_display_cn") or (
-                f"{sj['l2_historical_frequency_pct']:.1f}%" if sj.get("l2_historical_frequency_pct") is not None else "—"
-            )
-            max_adj = sj.get("max_adjustment_pct", 10.0 if sj.get("low_sample") else 15.0)
-            lines += [
-                f"| {_cell(sj['scenario_name'])} | {_cell(l2_disp)} | {sj['baseline_probability_pct']:.2f}% "
-                f"| **{sj['subjective_probability_pct']:.2f}%** | {sj['adjustment_pct']:+.2f}%（±{max_adj:.0f}%） "
-                f"| {_cell(sup_txt)} | {_cell(opp_txt)} | {_cell(sj.get('rationale_cn', ''))} |"
-            ]
-        lines += [""]
-        kls = active_judgment.get("key_levels_to_watch") or []
-        if kls:
-            kl_bits = [f"{_cell(k['label'])} {price(k['price'])}" for k in kls]
-            lines += [f"- 关键观察价位（均取自 JSON 白名单）：{'；'.join(kl_bits)}。"]
-        if active_judgment.get("falsification_condition"):
-            lines += [f"- 证伪条件（什么情况说明判断错了）：{active_judgment['falsification_condition']}"]
-        for c in jpack.get("conflicting_signals") or []:
-            bull_ids = ", ".join(str(x) for x in (c.get("bullish_evidence_ids") or []))
-            bear_ids = ", ".join(str(x) for x in (c.get("bearish_evidence_ids") or []))
-            lines += [
-                f"- 冲突信号 **{c.get('id', 'C?')}**：{c.get('summary_cn', '')}"
-                f"（偏多证据：{bull_ids or '—'}；偏空/风控证据：{bear_ids or '—'}）"
-            ]
-        score_sum = judgment_score_summary or active_judgment.get("historical_score_summary")
-        if isinstance(score_sum, dict) and score_sum.get("matured_judgments", 0) >= 30:
-            bss_val = float(score_sum.get("brier_skill_score") or 0.0)
-            n_mat = int(score_sum["matured_judgments"])
-            if bss_val > 0.0:
-                lines += [f"- 历史研判评估：LLM 调整相对历史频率的技能分为 {bss_val:+.4f}（n = {n_mat}）。"]
-            else:
-                lines += [f"- 历史研判评估：LLM 调整尚未显示增益（技能分 BSS = {bss_val:+.4f} ≤ 0，n = {n_mat}）。"]
-        lines += [""]
-    elif jpack.get("evidence_items"):
-        evs = jpack["evidence_items"]
-        confs = jpack.get("conflicting_signals") or []
-        lines += [
-            "## 8. LLM 情景研判证据包（供受约束主观研判使用）",
-            "",
-            f"- 已生成结构化证据包（共 {len(evs)} 条可溯源证据 `E1..E{len(evs)}`、{len(confs)} 组冲突信号），"
-            "Agent 按 `references/llm-judgment-protocol.md` 完成 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验后，将在此展示调整前后的主观研判概率。",
-            "",
-        ]
-        for c in confs:
-            bull_ids = ", ".join(str(x) for x in (c.get("bullish_evidence_ids") or []))
-            bear_ids = ", ".join(str(x) for x in (c.get("bearish_evidence_ids") or []))
-            lines += [
-                f"- 冲突信号 **{c.get('id', 'C?')}**：{c.get('summary_cn', '')}"
-                f"（偏多证据：{bull_ids or '—'}；偏空/风控证据：{bear_ids or '—'}）"
-            ]
-        lines += [""]
-
-    # 9. 文件
-    paths = report.get("rendered_paths") or {}
+    # 8. 文件
+    paths = result.get("files") or {}
     file_labels = (
         ("report_md", "本报告"),
         ("result_json", "完整计算结果 JSON"),
-        ("judgment_pack_json", "L3 研判证据包 JSON"),
-        ("judgment_json", "L3 主观研判 JSON"),
+        ("chart_data_json", "渲染数据 JSON（非稳定接口）"),
         ("dashboard_html", "离线交互看板 HTML"),
         ("preview_png", "结构推演图 PNG"),
         ("backtest_json", "回测明细 JSON"),
     )
     listed = [(label, paths[key]) for key, label in file_labels if paths.get(key)]
     if listed:
-        sec_hdr = "## 9. 产物文件" if (active_judgment or jpack.get("evidence_items")) else "## 8. 产物文件"
+        sec_hdr = "## 8. 产物文件"
         lines += [sec_hdr, ""] + [f"- {label}：`{path}`" for label, path in listed] + [""]
 
     lines += ["---", f"*{DISCLAIMER}*", ""]

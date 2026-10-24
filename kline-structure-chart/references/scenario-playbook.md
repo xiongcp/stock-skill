@@ -1,6 +1,6 @@
 # 多情景推演手册（Scenario Playbook）
 
-本文件定义 `kline-structure-chart` L1 多情景结构引擎与 L2 经验概率层的 8 个标准情景，与 `scripts/scenarios.py` 中的 `SCENARIO_PLAYBOOK` 严格一一对应（由自动化测试守护）。
+本文件定义 `kline-structure-chart` 多情景结构引擎的 8 个标准情景，与 `scripts/scenarios.py` 中的 `SCENARIO_PLAYBOOK` 严格一一对应（由自动化测试守护）。
 
 ---
 
@@ -19,7 +19,7 @@
 
 ---
 
-## 2. 筛选、触发与时间窗规则
+## 2. 筛选与触发规则
 
 1. **按截面状态动态筛选（2~5 个情景）**：
    - 脚本优先输出当前截面满足适用前提（`precondition_met = true`）的情景（最多 5 个）；若满足前提的情景不足 2 个，仅补充 1 个待触发条件备选情景以供对比，且必须保留 `precondition_met = false`、`selection_role = "CONDITIONAL_FALLBACK"` 与 `status_cn = "待触发（前提未成立，条件备选）"`，严禁将前提未成立的情景标为 `precondition_met = true`。
@@ -27,29 +27,5 @@
 2. **触发位最小噪声距离与状态区分**：
    - 待触发条件（`status = "PENDING_TRIGGER"`）的触发价必须与最新已收盘价至少相距 `0.5` 个 ATR。
    - 若前提已满足且触发位距最新收盘价不足 `0.5` 个 ATR，该情景归为**「已在进行中」**（`status = "ACTIVE"`），不再作为待触发条件列出。
-3. **时间窗（历史到达用时分位数）**：
-   - 每个情景的时间窗 `time_window_bars` 取该标的自身历史上触发同一情景后「到达目标用时」（`bars_to_target`）的中位数（`median`）与四分位数（`q25`、`q75`），并截断在预测期 `horizon_bars` 以内。
-   - 当历史先到目标样本为 0 时，回退到全部成熟样本用时或随机游走扩散尺度 $t \approx (|\Delta P / P| / \sigma)^2$。
-
----
-
-## 3. 历史条件频率（L2 经验概率层）与对外表述契约
-
-1. **逐点无前视事件研究（`scripts/base_rates.py`）**：
-   - 在固定历史窗口上逐日重放，只使用当日 `t` 及之前的已收盘 K 线判定某情景是否触发。
-   - 仅统计结果期已完全成熟的触发日（`t + horizon_bars <= cur_idx`），在未来 `H` 根 K 线内用三重屏障标定三种互斥结果：
-     - **先到目标（`HIT_TARGET`）**
-     - **先到失效位（`HIT_INVALIDATION`）**（同根 K 线同时触及目标与失效时，按保守原则判先到失效）
-     - **到期未触及任一屏障（`EXPIRED`）**
-2. **标准化屏障事件（不是情景目标价）**：
-   - 事件研究的触发判定（`base_rates._scenario_triggered_at`）是上表前提的简化因果近似，结果标定以触发日 ATR 为单位：目标 / 失效距离取 `SCENARIO_BARRIER_ATR`（如突破回踩 `+1.55×ATR` / `−1.05×ATR`，区间震荡为收盘不越出 `±1.45×ATR`），每个情景的定义写入 `historical_frequency.event_definition_cn`。
-   - 因此历史条件频率回答的是「同类状态触发后，15 根K线内先走出标准化目标距离的比例」，**不是**本次报告中该情景目标价 / 失效价的到达频率，转述时不得说成"到达 X 价位的概率"。
-   - 同一情景相邻触发日至少间隔 `MIN_TRIGGER_GAP = 2` 根K线，结果期互相重叠，样本数 n 高估了独立样本数，Wilson 区间偏窄。
-3. **95% Wilson 置信区间与小样本 Beta-Binomial 收缩**：
-   - 所有频率均附带样本数 `sample_size`（`n`）与 95% Wilson 置信区间 `target_ci_95`。
-   - 当 `n < 30` 时，`low_sample = true`，脚本使用 Beta-Binomial（等效先验强度 $M = 20$）向市场基准指数同一情景的历史频率收缩（`estimate_method = BETA_BINOMIAL_SHRINKAGE`），同时输出原始频率 `raw_target_freq` 与收缩后频率 `shrunk_target_freq`。
-   - 当 `n >= 30` 时，`target_freq` 直接取实际观测频率 `raw_target_freq = k / n`（`estimate_method = RAW`）。
-   - `display_cn` 的「历史条件频率」数字一律是实际观测频率 `raw_target_freq`，与 Wilson 区间同口径；低样本时收缩值在括号内标为「收缩后估计」。
-4. **对外表述铁律**：
-   - 写入 `rule_scenarios.scenarios[*].historical_frequency`（及 `rule_scenarios.{bull,neutral,bear}.historical_frequency`）。
-   - 对外统一表述为**「历史条件频率 X%（n = …，95% 区间 a%~b%）」**（X 为观测频率），低样本时必须同时注明「n < 30 低样本，已向市场基准做 Beta-Binomial 收缩，收缩后估计 Y%」，**严禁称为胜率或未来上涨概率**。
+3. **折点时间（只用于画路径）**：
+   - 情景路径的折点时间按随机游走扩散尺度 $t \approx (|\Delta P / P| / \sigma)^2$ 估计（$\sigma$ 为日波动），并截断在预测期 `horizon_bars` 以内；它只决定路径折点的横向位置，不是到达目标位的时间预测。

@@ -469,7 +469,7 @@ def compute_all_indicators(bars: list[dict[str, Any]]) -> dict[str, Any]:
             },
             "momentum": {
                 "rsi14": _last(rsi14),
-                # 前一根 RSI14：高置信反转层按"RSI 拐头"判定（与研究回测校准口径一致）
+                # 前一根 RSI14：普通指标，供读取方判断 RSI 是否拐头（rsi14 > rsi14_prev）
                 "rsi14_prev": round(float(rsi14[-2]), 2) if len(rsi14) >= 2 and rsi14[-2] is not None else None,
                 "macd_dif": _last(macd_res["macd"], px + 1),
                 "macd_dea": _last(macd_res["signal"], px + 1),

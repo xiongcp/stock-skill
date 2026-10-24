@@ -31,7 +31,7 @@ wheels = [
 
 [[package]]
 name = "kline-structure-chart"
-version = "5.3.0"
+version = "6.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "pillow" },
