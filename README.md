@@ -1,8 +1,6 @@
-# kline-structure-chart：A股 / 港股 / 美股 K 线数学结构、三重屏障风控与保形预测技能包
+# kline-structure-chart：A股 / 港股 / 美股 K 线数学结构、三重屏障风控与正常波动范围技能包
 
-`kline-structure-chart` 是一个符合 [Agent Skills 开放规范](https://agentskills.io/specification) 的金融量化与 K 线数学结构分析技能包。装进 Claude Code、Codex、Hermes Agent、Cursor、Gemini CLI、OpenCode 等 AI 助手之后，你只需用自然语言提问（例如："帮我看看贵州茅台的 K 线结构和支撑压力，账户 50 万，带回测"），助手就会自动完成从**真实行情拉取 → 确定性数学结构识别 → 历史条件频率统计 → 三重屏障风控与保形预测 → 离线交互看板与高清图生成 → 受约束研判校验**的完整投研闭环。
-
-![kline-structure-chart 架构与三层分析流水线总览](examples/architecture_overview.png)
+`kline-structure-chart` 是一个符合 [Agent Skills 开放规范](https://agentskills.io/specification) 的金融量化与 K 线数学结构分析技能包。装进 Claude Code、Codex、Hermes Agent、Cursor、Gemini CLI、OpenCode 等 AI 助手之后，你只需用自然语言提问（例如："帮我看看贵州茅台的 K 线结构和支撑压力，账户 50 万，带回测"），助手就会自动完成从**真实行情拉取 → 确定性数学结构识别 → 三重屏障风控与正常波动范围 → 离线交互看板与高清图生成 → 回复契约校验**的完整投研闭环。
 
 ---
 
@@ -15,31 +13,30 @@
 3. **把主观打分伪装成"上涨概率"**：许多工具将几个指标的简单加权分直接宣称为"上涨概率 75%"，既无历史样本支撑，也未经样本外校准检验。
 4. **忽视大盘环境与微观交易制度**：在大盘空头崩跌时仍激进推荐个股突破追高；或忽略 A 股 T+1、科创/创业板及双创 ETF ±20% 涨跌幅、港股动态价位表与双边印花税、美股盘前盘后与 VIX 波动放大等真实交易约束。
 
-为此，`kline-structure-chart` 建立了**六大工程铁律（Hard Invariants）**与**三层渐进式量化架构（L1 → L2 → L3）**：
+为此，`kline-structure-chart` 建立了**六大工程铁律（Hard Invariants）**与**确定性结构 + 风控两层架构**：
 
 ```mermaid
 flowchart TD
     A["用户自然语言提问 / CLI 调用<br/>（如：分析茅台 / 00700.HK / NVDA.US）"] --> B["0. 名称解析与多市场真实行情网关<br/>resolve_symbol.py · data_gateway.py"]
     B --> C["盘中未收盘K线剥离 + 点位时间前复权(PIT) + 大盘基准配对<br/>market_rules.py（A股沪深300 / 港股恒指 / 美股SPY）"]
-    C --> D["L1 确定性数学结构与多周期策略层<br/>单边因果NW核平滑 · 因果ZigZag · 轨道候选打分拟合<br/>主+备选ABC浪型 · 推动5浪硬规则 · 8类标准情景筛选<br/>蜡烛/双底双顶/RSI背离 · SMC(FVG/OB/BOS) · Volume Profile"]
-    D --> E["L2 逐点无前视历史条件频率层<br/>base_rates.py：标准化ATR三重屏障事件研究<br/>观测频率 k/n + 95% Wilson区间 + n&lt;30 Beta-Binomial向基准收缩"]
-    D --> F["Triple-Barrier 风控与 Split-Conformal 保形区间层<br/>risk.py · forecast.py · evaluation.py<br/>左右侧入场区/盘中硬止损/+0.90R移动保本/持仓防守/港美做空<br/>鞅中心15日50%&amp;80%保形扇形 + 线上计划逐日无前视回测"]
-    E --> G["同源核心数据契约：*_result.json + *_judgment_pack.json<br/>（通过 assets/analysis.schema.json 严苛校验）"]
+    C --> D["确定性数学结构与多周期规则层<br/>单边因果NW核平滑 · 因果ZigZag · 轨道候选打分拟合<br/>主+备选ABC浪型 · 推动5浪硬规则 · 8类标准情景筛选<br/>蜡烛/双底双顶/RSI背离 · SMC(FVG/OB/BOS) · Volume Profile"]
+    D --> F["Triple-Barrier 风控与正常波动范围<br/>risk.py · forecast.py · evaluation.py<br/>左右侧入场区/盘中硬止损/+0.90R移动保本/持仓防守/港美做空<br/>鞅中心15日50%&amp;80%区间 + 线上计划逐日无前视回测"]
+    D --> G["v6 稳定契约：*_result.json<br/>（contract_v6.py 投影，assets/analysis.schema.json 全量校验）"]
     F --> G
-    G --> H1["*_preview.png<br/>1920×1160 2×SSAA高清结构图"]
-    G --> H2["*_dashboard.html<br/>零依赖9图层离线交互终端"]
-    G --> H3["*_report.md<br/>零失误中文投研报告"]
-    G --> H4["L3 受约束主观研判闭环<br/>validate_judgment.py 校验<br/>score_judgments.py 到期打分<br/>lint_response.py 回复守门"]
+    G --> H1["*_preview.png<br/>1920×1160 高清结构图"]
+    G --> H2["*_dashboard.html<br/>离线交互看板（另读 *_chart_data.json）"]
+    G --> H3["*_report.md<br/>中文报告"]
+    G --> H4["lint_response.py<br/>回复守门"]
 ```
 
 ### 核心架构与六大不可变铁律
 
-1. **数据真实性（Data Authenticity）优先于一切**：只使用新浪、Yahoo、腾讯实时/录制真实行情或用户提供的本地真实行情文件。取不到行情时立即以 `[DATA_UNAVAILABLE]` 非零退出，**严禁回退、估算、补数或生成任何合成行情**。当日未收盘 K 线（按交易所时区与半日市/提前收市规则判定）严格拆出，绝不混入已收盘序列。
-2. **100% 算图分离（Compute-Render Separation）**：所有均线、指标、拐点、轨道、ABC 浪型、SMC、Volume Profile、三重屏障点位、15 日保形分位区间全部由 Python 从 OHLCV 序列计算一次并写入 JSON；PNG 与 HTML 渲染器只读取同一份计算结果，**严禁调用视觉模型看图猜数或调用图像生成模型画 K 线**。
-3. **先大盘、后个股（Market-First Hierarchy）**：分析任何个股或 ETF 前必须同步加载对应市场大盘基准（A 股 `000300.SH`、港股 `HSI.HK`、美股 `SPY.US`），计算大盘状态分与 20 日相对强弱（RS Line）。大盘极弱（状态分 `< 35`）或缺失基准时，独立风控官自动触发一票否决（`risk_officer_veto = true`）。
+1. **数据真实性（Data Authenticity）优先于一切**：只使用新浪、Yahoo、腾讯实时/录制真实行情或用户提供的本地真实行情文件。取不到行情时立即以 `[DATA_UNAVAILABLE]` 非零退出（退出码 3），**严禁回退、估算、补数或生成任何合成行情**。当日未收盘 K 线（按交易所时区与半日市/提前收市规则判定）严格拆出，绝不混入已收盘序列。
+2. **100% 算图分离（Compute-Render Separation）**：所有均线、指标、拐点、轨道、ABC 浪型、SMC、Volume Profile、三重屏障点位、15 日正常波动范围全部由 Python 从 OHLCV 序列计算一次并写入 JSON；PNG 与 HTML 渲染器只读取同一份计算结果，**严禁调用视觉模型看图猜数或调用图像生成模型画 K 线**。
+3. **先大盘、后个股（Market-First Hierarchy）**：分析任何个股或 ETF 前必须同步加载对应市场大盘基准（A 股 `000300.SH`、港股 `HSI.HK`、美股 `SPY.US`），计算大盘状态分与 20 日相对强弱（RS Line）。大盘极弱（状态分 `< 35`）或缺失基准时，独立风控官自动触发一票否决（`verdict.risk_veto = true`）。
 4. **严格单边因果与零前视泄漏（Zero Lookahead Bias）**：核平滑采用单边因果 Nadaraya-Watson；每个波段拐点同时记录极值发生日 `day` 与反向达标确认日 `confirmed_at_day`；点位复权（PIT）只消费截至当时已生效的分红送转；回测与历史回放截面按当时截止日重算大盘状态与复权，并经追加 5 倍极端未来价格冲击的因果回放审计验证零泄漏。
 5. **跨展示窗口不变性（Cross-Window Invariance）**：`--days N`（60~500）只改变主图展示根数，底层取数固定 760 根、指标在固定 420 根历史上预热、结构在固定 120 根窗口上识别，切换展示天数绝不改变任何指标数值、结构分类或交易点位。
-6. **概率与术语边界铁律**：规则分（`rule_score`）是确定性条件加权分，绝不称为"胜率"或"上涨概率"；对外只允许两类受检验的概率数字——**(1) L2 历史条件频率**（附样本数 `n`、95% Wilson 区间与低样本收缩说明）与 **(2) L3 受约束主观研判概率**（锚定 L2、引用 `E1…En` 证据编号、受调整上限约束并记入日志待到期按 Brier 分数检验）。
+6. **概率与术语边界铁律**：规则分（`rule_score`）是确定性条件加权分，绝不称为"胜率"或"上涨概率"；**不输出任何概率、胜率或频率数字**，唯一例外是回测成交胜率（附 Wilson 95% 区间与样本量），它只是已发生成交的统计，不是未来上涨概率。
 
 > 本技能只做规则化技术分析与量化研究验证，不构成任何投资建议，也不会替你下单。
 
@@ -59,7 +56,7 @@ flowchart TD
 
 以下三张 `1920×1160` 结构图全部由本技能脚本基于真实行情自动生成（数据截至 2026-10-15，完整报告、JSON 与离线交互看板见 [examples/](examples/README.md)）：
 
-#### (1) A 股示例：贵州茅台（`600519.SH` · 红涨绿跌 · 扩散喇叭形 + 三情景推演 + 15 日保形扇形）
+#### (1) A 股示例：贵州茅台（`600519.SH` · 红涨绿跌 · 扩散喇叭形 + 三情景推演 + 15 日正常波动范围）
 
 ![贵州茅台 600519.SH 结构推演图](examples/600519.SH/600519.SH_preview.png)
 
@@ -239,7 +236,7 @@ uv run --directory kline-structure-chart pytest -q
 uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py --market CN --symbol 600519.SH --output-dir artifacts/smoke
 ```
 
-失败时脚本以非零码退出：`[DATA_UNAVAILABLE]` 表示取不到真实行情，`[INVALID_ARGUMENT]` 表示代码或参数有误（见第 8 节）。成功时退出码为 0，`kline-structure-chart/artifacts/smoke/` 下会出现 `600519.SH_report.md`、`600519.SH_result.json`、`600519.SH_preview.png`、`600519.SH_dashboard.html` 四个文件。
+失败时脚本以非零码退出：`[DATA_UNAVAILABLE]` 表示取不到真实行情，`[INVALID_ARGUMENT]` 表示代码或参数有误，`[INSUFFICIENT_HISTORY]`（退出码 4）表示已收盘K线不足（见第 8 节）。成功时退出码为 0，`kline-structure-chart/artifacts/smoke/` 下会出现 `600519.SH_report.md`、`600519.SH_result.json`、`600519.SH_chart_data.json`、`600519.SH_preview.png`、`600519.SH_dashboard.html` 五个文件。
 
 ---
 
@@ -257,7 +254,7 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
 1. 只说了名称时，先用 `scripts/resolve_symbol.py` 通过腾讯证券搜索查代码；匹配到多个证券（比如"腾讯"）时会请你选择，不会凭记忆猜。
 2. 按问题类型选择参数并运行脚本（比如给了账户净值才计算股数，问回测才加 `--backtest`）。
 3. 先检查数据质量：`UNAVAILABLE` 不给任何价位；`PARTIAL` 把告警放在回答最前面。
-4. 以生成的 `*_report.md` 为骨架回答，顺序为：大盘 → 结构与条件推演 → 风控计划 → 未来区间 → 回测 → 文件路径 → 免责声明。报告中的数字不得改动。
+4. 以生成的 `*_report.md` 为骨架回答，顺序为：大盘 → 结构与条件推演 → 风控计划 → 未来正常波动范围 → 回测 → 文件路径 → 免责声明。报告中的数字不得改动。
 5. 风控否决了做多时，否决原因放在最前面。不会给出"上涨概率"之类的数字。
 
 完整示例（真实行情生成的报告、图和标准回复）见 [examples/](examples/README.md)。
@@ -337,28 +334,37 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 
 | 文件 | 内容 |
 | --- | --- |
-| `*_report.md` | 中文分析报告，依次为：数据说明、风控否决、结论、大盘、结构与条件推演、风控计划、形态证据、未来区间、回测、文件路径、免责声明。数字全部取自 `*_result.json` |
-| `*_result.json` | 全部计算结果（通过 `assets/analysis.schema.json` 契约校验） |
-| `*_judgment_pack.json` | L3 受约束研判证据包（含可溯源证据编号 `E1…En`、冲突信号 `C1…Cm`、L2 情景基准频率与价格白名单） |
+| `*_report.md` | 中文分析报告，依次为：数据说明、风控否决、结论、大盘、结构与条件推演、风控计划、形态证据、未来正常波动范围、回测、文件路径、免责声明。数字全部取自 `*_result.json` |
+| `*_result.json` | v6 稳定契约（通过 `assets/analysis.schema.json` 全量校验） |
+| `*_chart_data.json` | K 线序列、回放快照等渲染数据；不是稳定接口 |
 | `*_preview.png` | 1920×1160 结构推演图；数据有问题时带红色告警和水印 |
-| `*_dashboard.html` | 离线交互看板：9 个图层开关、悬停查看数值、相对强弱视图、历史回放滑块、导出 PNG |
+| `*_dashboard.html` | 离线交互看板：8 个图层开关、悬停查看数值、相对强弱视图、历史回放滑块、导出 PNG |
 | `*_backtest.json` | 历史计划回放回测与无前视审计（传 `--backtest` 时生成） |
 
-每个字段的含义、单位和能否为空见 [references/output-fields.md](kline-structure-chart/references/output-fields.md)。完整产物示例见 [examples/](examples/README.md)。
+命令行的标准输出是一个 JSON 信封，失败时退出码区分错误类型：
 
-![产物视觉导读：PNG 五大分区与 HTML 九大图层](examples/chart_reading_guide.png)
+| 退出码 | 标准输出 | 含义 |
+| --- | --- | --- |
+| 0 | `{"status": "ok", "schema_version", "verdict", "quality", "files"}` | 成功；`files` 是相对 `--output-dir` 的产物文件名 |
+| 1 | 无 JSON 信封（stderr 为 Python traceback） | 内部错误（包括契约自检失败以外的未预期异常） |
+| 2 | `{"status": "error", "error": {"code": "INVALID_ARGUMENT", "message"}}` | 代码或参数有误（argparse 自身的参数错误也是 2，但不输出 JSON） |
+| 3 | 同上，`code = DATA_UNAVAILABLE` | 真实行情取不到 |
+| 4 | 同上，`code = INSUFFICIENT_HISTORY` | 上市太短或 `--as-of` 太早，已收盘K线不足 |
+
+stderr 同时打印 `[CODE] message`。
+
+每个字段的含义、单位、能否为空和稳定级别见 [references/output-fields.md](kline-structure-chart/references/output-fields.md)（6.x 内只新增字段，不删除、不改名、不改语义）。完整产物示例见 [examples/](examples/README.md)。
 
 ---
 
 ## 7. 怎么读结果
 
-### 7.1 三层量化输出体系（L1 结构 → L2 历史条件频率 → L3 受约束研判）
+### 7.1 两层输出（结构 → 风控计划）
 
 | 层级 | 核心产出 | 统计口径与对外表述规范 |
 | --- | --- | --- |
-| **L1 确定性数学结构层** | 轨道拟合形态、主+备选 ABC 浪型、推动 5 浪、8 类标准情景（选 2~5 个活跃情景）、蜡烛/双底双顶/RSI 背离、SMC（FVG/订单块/BOS）、24 桶成交分布（POC/VAH/VAL）、多周期规则分（0~100） | 规则分是确定性条件加权分（均值回归体制下按反转规则调整），**严禁称为胜率或上涨概率**；Volume Profile 是 OHLCV 成交分布近似，不等于真实持仓筹码 |
-| **L2 逐点无前视历史条件频率层** | 在标的自身历史上逐日无前视统计各情景触发后 `horizon_bars` 日内先触及标准化目标屏障（如 `+1.55×ATR`）而非失效屏障（如 `-1.05×ATR`）的实际观测频率 `k/n`、95% Wilson 置信区间与到达用时分位数 | 必须称**"历史条件频率"**并附样本数 `n` 与 95% 区间；当 `n < 30` 时标注"低样本"并通过 Beta-Binomial 向市场基准同情景频率收缩；统计的是 ATR 标准化事件而非图中目标价的到达概率 |
-| **L3 受约束主观研判层** | 基于 `*_judgment_pack.json`（含 `E1…En` 证据溯源、`C1…Cm` 冲突信号与价格白名单），以 L2 归一化频率为锚点做有界调整（`n>=30` 最多 ±15%，`n<30` 最多 ±10%，互斥情景概率和 = 100%） | 必须通过 `validate_judgment.py` 校验并标注**"主观研判，已记录待检验"**；未改写的 `--auto-init` 预填模板标记为 `AUTO_INIT_TEMPLATE`，不计入 LLM 技能分 |
+| **确定性数学结构层** | 轨道拟合形态、主+备选 ABC 浪型、推动 5 浪、8 类标准情景（选 2~5 个活跃情景）、蜡烛/双底双顶/RSI 背离、SMC（FVG/订单块/BOS）、24 桶成交分布（POC/VAH/VAL）、多周期规则分（0~100） | 规则分是确定性条件加权分（均值回归体制下按反转规则调整），**严禁称为胜率或上涨概率**；Volume Profile 是 OHLCV 成交分布近似，不等于真实持仓筹码；情景只写"触发条件 → 目标位 → 失效条件"，不附概率 |
+| **风控与正常波动范围层** | 入场区、止损、TP1/TP2、移动保本、仓位、持仓防守、港美股做空计划，以及以最新收盘为中心的 15 日正常波动范围（50%、80%） | 区间只描述波动幅度、不含方向；必须同时给出样本外覆盖率与独立样本数；风控否决时入场区称"观察区" |
 
 ### 7.2 8 类标准情景库速查（见 [references/scenario-playbook.md](kline-structure-chart/references/scenario-playbook.md)）
 
@@ -373,19 +379,10 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 7. `OVERSOLD_BOUNCE`（超跌反弹）：`RSI14 < 30` 或收盘偏离 `MA20` 超过 `2.0×ATR`；
 8. `APEX_BREAKOUT`（收敛末端变盘）：收敛三角形/楔形距顶点剩余 `0~10` 根 K 线以内且未过期。
 
-### 7.3 L3 受约束主观研判、到期打分与回复校验命令
+### 7.3 回复校验命令
 
 ```bash
-# 1. 生成预填研判模板（供 Agent 在此基础上结合 E1..En 证据改写概率与理由）
-uv run --directory kline-structure-chart python scripts/validate_judgment.py --result artifacts/smoke/600519.SH_result.json --judgment artifacts/smoke/600519.SH_judgment.json --auto-init
-
-# 2. 校验 Agent 改写后的主观研判 JSON，通过后自动合入 result.json / report.md 并追加至 judgment_log.jsonl
-uv run --directory kline-structure-chart python scripts/validate_judgment.py --result artifacts/smoke/600519.SH_result.json --judgment artifacts/smoke/600519.SH_judgment.json
-
-# 3. 对历史已到期（满 horizon_bars 根 K 线）的主观研判进行真实行情回放打分（输出 Brier 分数与技能分 BSS）
-uv run --directory kline-structure-chart python scripts/score_judgments.py --log artifacts/judgment_log.jsonl --bars-dir tests/fixtures/recorded/sina_daily
-
-# 4. 对 Agent 最终输出的自然语言回复执行契约守门校验（拦截捏造价格、违规概率术语、漏报否决/免责声明）
+# 对 Agent 最终输出的自然语言回复执行契约守门校验（拦截捏造价格、违规概率术语、漏报否决/免责声明）
 uv run --directory kline-structure-chart python scripts/lint_response.py --result examples/600519.SH/600519.SH_result.json --response examples/600519.SH/reply.md
 ```
 
@@ -399,11 +396,11 @@ uv run --directory kline-structure-chart python scripts/lint_response.py --resul
   - 收盘后不久运行时，数据源可能还没入库当天日线（实测北京时间 15:19 新浪仍只到前一交易日）。报告会注明"数据只到某日"，稍后重跑即可；脚本不会用其他来源补数。
 - **风控否决优先**：出现"风控否决"时，所有点位只用于观察，不构成做多建议。
 - **规则分（0~100）不是胜率**：它是多个技术条件的加权打分，不代表上涨概率。
-- **未来区间只描述波动幅度，不判断方向**：
+- **未来正常波动范围只描述波动幅度，不判断方向**：
   - 中枢（q50）就是最新收盘价。
-  - 50%、80% 区间宽度来自历史波动的分期限校准。
+  - 50%、80% 范围宽度来自历史波动的分期限校准。
   - 报告同时给出历史样本外覆盖率和约等于多少个独立样本。独立样本很少时，覆盖率本身也不稳定。
-  - 只有约 20 个以上独立样本且覆盖率接近名义值时，状态才是"已达标"，否则是"校准观察期"。审计覆盖全部已取到的历史，默认 15 日区间约有 24～42 个独立样本（视历史长度而定），能否达标取决于覆盖率是否接近名义值。
+  - 只有约 20 个以上独立样本且覆盖率接近名义值时，状态才是"已达标"，否则是"校准观察期"。审计覆盖全部已取到的历史，默认 15 日范围约有 24～42 个独立样本（视历史长度而定），能否达标取决于覆盖率是否接近名义值。
 - **回测看样本量**：成交少于 30 笔时，胜率和收益统计参考价值很低，报告会明确提示。胜率后面括号里是 Wilson 95% 区间，样本越少区间越宽（例如 3 笔全亏时为 0%~56%）。
 - 形态、浪型、市场状态的解读要点与常见误读见 [references/interpretation-guide.md](kline-structure-chart/references/interpretation-guide.md)。
 
@@ -419,7 +416,7 @@ uv run --directory kline-structure-chart python scripts/lint_response.py --resul
 | `[INVALID_ARGUMENT] Cannot resolve market` | 代码没有后缀，加上 `.SH` / `.SZ` / `.HK` / `.US` 或传 `--market` |
 | `[INVALID_ARGUMENT] Ambiguous symbol '000001'` | 需要明确是 `000001.SH`（上证指数）还是 `000001.SZ`（平安银行） |
 | `[INVALID_ARGUMENT] --days must be between 60 and 500` | `--days` 超出范围；`--horizon-bars` 同理（1~60） |
-| `[DATA_UNAVAILABLE] ... 历史长度不足` | 上市时间太短，或 `--as-of` 太早 |
+| `[INSUFFICIENT_HISTORY] ...`（退出码 4） | 上市时间太短，或 `--as-of` 太早，已收盘K线不足 |
 | `no CJK font found` | 没有中文字体，运行 `scripts/doctor.py` 查看对应发行版的安装命令 |
 | `uv: command not found` | 安装 uv：<https://docs.astral.sh/uv/>，或重新执行安装脚本并加 `--install-uv`；不想装 uv 时按 3.4「不用 uv 的手动安装」建 `.venv`，再把命令里的 `uv run python` 换成 `.venv/bin/python` |
 | 新会话里看不到 `kline-structure-chart` | 运行 `scripts/doctor.py` 检查技能软链；确认注册到了正在使用的 agent 的目录（第 3.1 节表格），然后新开会话 |
@@ -433,7 +430,7 @@ uv run --directory kline-structure-chart python scripts/lint_response.py --resul
 ## 9. 常见问题
 
 **Q：能告诉我上涨概率吗？**
-规则分（0~100）是技术条件的加权打分，不是概率；未来区间只描述波动幅度。本技能只提供两类受严格约束的频率/概率：(1) 脚本在标的自身历史上逐点无前视统计的「历史条件频率」（附样本数 n 与 95% Wilson 区间，n < 30 向市场基准收缩）；(2) 助手以历史条件频率为锚点、引用证据编号 `E1…En` 并通过 `validate_judgment.py` 校验的「主观研判概率」（已记入日志待到期按 Brier 分数检验）。
+不能。规则分（0~100）是技术条件的加权打分，不是概率；未来正常波动范围只描述波动幅度，不含方向。本技能**不输出任何概率、胜率或频率数字**，唯一例外是回测成交胜率（附 Wilson 95% 区间与样本量），它只是这套规则在该标的上已发生成交的统计，不是未来上涨概率。
 
 **Q：数据从哪里来，会不会用假数据？**
 新浪、Yahoo、腾讯的公开行情接口。取不到就以 `[DATA_UNAVAILABLE]` 退出，绝不估算或生成数据；离线测试使用录制下来的真实行情。

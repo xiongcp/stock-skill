@@ -1,6 +1,6 @@
-# 解读指南：形态、浪型、市场状态、风控、区间与回测
+# 解读指南：形态、浪型、市场状态、风控、正常波动范围与回测
 
-用户追问"这个形态说明什么""为什么风控否决""区间怎么看"时阅读。本文件只给解读要点和常见误读，所有点位一律取自本次运行的 `*_result.json` / `*_report.md`。字段含义见 `references/output-fields.md`，计算公式见 `references/math-patterns.md`。
+用户追问"这个形态说明什么""为什么风控否决""波动范围怎么看"时阅读。本文件只给解读要点和常见误读，所有点位一律取自本次运行的 `*_result.json` / `*_report.md`。字段含义见 `references/output-fields.md`，计算公式见 `references/math-patterns.md`。
 
 ## 1. 总原则
 
@@ -10,7 +10,7 @@
 4. **收盘为准**：触发与失效都以日线收盘判定，盘中刺破不算；报告带"待收盘确认"时必须保留。
 5. **不加料**：报告没有的价位、指标、新闻、资金面一律不补；用户提供的消息面信息要标注"未复核"。
 
-## 2. 轨道形态（`wedge_structure`）
+## 2. 轨道形态（`structure.channel`）
 
 | 形态 | 怎么读 | 常见误读 |
 | --- | --- | --- |
@@ -25,27 +25,27 @@
 - `apex_bars_ahead` 很小或 `expired = true`：收敛形态接近顶点或已过期，结构参考价值下降。
 - 轨道在最近 4 个同类拐点中打分选出（5.2.0 起）。旧版固定取凸包最后一条边，约 85% 的截面被判成收敛形态；现在收敛类约占一半，通道、扩散形态也能被识别出来（实测见 `references/math-patterns.md` 第 1.1 节）。
 
-## 3. 浪型计数（`abc_scenario` / `wave_counts`）
+## 3. 浪型计数（`structure.abc_scenario` / `structure.wave_counts`）
 
 - 只引用 `label`、`phase`、`b_retrace`、`c_progress.c_over_a` 和 `levels` 的原文，不自行数浪、不扩展成五浪。
-- A 浪起点是结构窗口内的最高点（下跌 ABC）或最低点（上涨 ABC），**不是**主图窗口最低点；窗口高低点另见 `legacy_summary.window_high` / `window_low`。
+- A 浪起点是结构窗口内的最高点（下跌 ABC）或最低点（上涨 ABC），**不是**主图窗口最低点；窗口高低点以 K 线序列为准，不要把 A 浪起点说成窗口最高/最低点。
 - `phase` 为"C 浪进行中"时，C 浪终点未知，`levels` 里的 1.0×A、1.618×A 只是测算位，不是目标价承诺。
 - `wave_counts` 给出主计数和最多 2 个备选计数。备选计数换了 A 浪起点，C 浪测算位和否定条件也不同；转述时先说主计数，再说"另一种数法是……，收盘越过 X 即失效"。
 - 备选计数只提示"主计数可能错在哪里"，**不代表可能性大小**，不要说"主计数概率更高"。
 
 ## 4. 条件推演的时间与"正在争夺的价位"
 
-- 触发位距现价至少 0.5 个 ATR。距离不足 0.5 个 ATR 的情景在 `rule_scenarios.scenarios` 中归为 `status = ACTIVE`（"已在进行中"），不再作为待触发条件；更近的阶梯价位列在 `contested_levels`（"现价附近正在争夺的价位"）。
-- 多情景引擎从 `references/scenario-playbook.md` 的 8 类标准情景中筛出当前前提成立的 2~5 个情景，每个情景的时间窗 `time_window_bars` 取历史触发样本"到达目标用时"的 25%/50%/75% 分位数并截断在 `horizon_bars` 内；`eta_bars` 是扩散尺度估计。`target_within_horizon = false` 时要说"目标位按当前波动估算超出 N 日预测期"，不要说"N 日内到达"。
-- 时间估计只是时间量级，不含方向判断。
+- 触发位距现价至少 0.5 个 ATR。距离不足 0.5 个 ATR 的情景在 `scenarios.active` 中归为 `status = ACTIVE`（"已在进行中"），不再作为待触发条件；更近的阶梯价位列在 `scenarios.contested_levels`（"现价附近正在争夺的价位"）。
+- 多情景引擎从 `references/scenario-playbook.md` 的 8 类标准情景中筛出当前前提成立的 2~5 个情景。`result.json` 只给每个情景的状态、触发条件、目标位和失效条件，不给到达用时，也不给任何频率或概率。
+- 推演路径图上的折点时间只用于画图（来自 `chart_data.json`），不要把折点横坐标说成"N 日内到达"。
 
-## 5. 支撑压力阶梯（`key_levels`）
+## 5. 支撑压力阶梯（`structure.key_levels`）
 
 - 每个价位都带来源（前高、前低、均线、斐波那契、轨道、ABC 测算位），转述时带上来源，按"由近到远"排列。
 - 多个来源重合的价位更值得关注，但这只是描述，不代表"一定守住"。
-- 大级别背景（`series_export.background`，近 250 日）只描述位置，不作为触发位、失效位或目标位。
+- 大级别背景（近 250 日，在 `chart_data.json`，不是稳定接口）只描述位置，不作为触发位、失效位或目标位。
 
-## 6. 市场状态（`market_regime` / `market_benchmark.regime`）
+## 6. 市场状态（`structure.regime` / `market_context.regime`）
 
 | 状态 | 判定要点 | 解读 | 常见误读 |
 | --- | --- | --- | --- |
@@ -55,13 +55,13 @@
 | `MEAN_REVERTING_RANGE` 区间震荡 | 不满足上面条件 | 区间两端更有参考价值 | — |
 | `HIGH_VOLATILITY_CHAOS` 高波失序 | VIX ≥ 28，或 20/60 日波动比 ≥ 1.55，或 ATR20 ≥ 4.5%（优先于其他状态判定） | 波动放大，止损距离变宽、同样风险下股数变少 | 当成"恐慌底" |
 
-- 状态分 `regime_score`（5~95）是规则加减分，不是概率；只有"低于 35 触发风控否决"这一条有硬规则含义。
+- 状态分 `regime_score`（`structure.regime` 与 `market_context` 各有一个，5~95）是规则加减分，不是概率；只有"低于 35 触发风控否决"这一条有硬规则含义。
 
 ## 7. 规则分与动作标签
 
-- `rule_score`（0~100）= 四组各 25 分的规则加权；`multi_timeframe_score.regime_adjustment.applied = true`（均值回归体制）时，分数已按反转规则旋转，不再等于四组之和（调整前合计见 `components_total`），低分表示"短期偏离均值过大、防追高"，不表示周线或结构走空，必须原文转述 `note_cn`。它**不是**胜率、上涨概率或置信度，也没有经过逐标的的样本外检验；用户问"81 分是不是很稳"时要明确说明这一点。
+- `verdict.rule_score`（0~100）= 四组各 25 分的规则加权；`verdict.rule_detail.regime_adjustment.applied = true`（均值回归体制）时，分数已按反转规则旋转，不再等于四组之和（调整前合计见 `rule_detail.components_total`），低分表示"短期偏离均值过大、防追高"，不表示周线或结构走空，必须原文转述 `note_cn`。它**不是**胜率、上涨概率或置信度，也没有经过逐标的的样本外检验；用户问"81 分是不是很稳"时要明确说明这一点。
 - 动作标签（确认做多 / 条件观察 / 观望 / 防守回避）由规则分、计划类型和风控否决共同决定。风控否决时一律只能说观察或防守。
-- 回测里不同动作标签的后续收益没有稳定差异时，不得说"确认做多信号更可靠"。回测给出 `rule_score_ic` 与 `action_forward_returns`，`informative = false` 时要说明"规则分在该标的上没有显示排序能力，只作描述"。
+- 回测里不同动作标签的后续收益没有稳定差异时，不得说"确认做多信号更可靠"。回测给出 `backtest.rule_score_ic` 与 `backtest.action_forward_returns`，`informative = false` 时要说明"规则分在该标的上没有显示排序能力，只作描述"。
 
 ## 8. 风控计划与否决
 
@@ -70,12 +70,12 @@
 - 仓位股数是按"账户净值 × 单笔风险 ÷（入场区上沿 − 止损 + 交易成本）"并按每手取整的机械计算，不是个性化建议；它假设能按止损价成交，跳空低开、A 股跌停封板或 T+1 当日无法卖出时实际亏损会超过预算（`gap_risk_note`）。风控否决或评级不是做多时不给股数，不要替用户换算。港股每手股数未取得时要提醒以券商为准。
 - 做空与持仓防守：A 股融券受严格限制（见 `references/cn-market.md` 第 6 节），只谈持仓的减仓 / 离场条件；港股只能卖空指定证券且禁止裸卖空（`references/hk-market.md` 第 4 节）；美股卖空需要先借券，并受 Rule 201 约束（`references/us-market.md` 第 4 节）。报告第 4 节已给出"持仓防守计划"（股票/ETF）和港股、美股的"破位做空计划"：转述做空计划时必须同时说明 `constraints`（卖空限制）与 `warnings`，并注明盈亏比未计融券费用；报告里没有做空点位时（A 股、指数）不得自行给出。
 
-## 9. 未来区间
+## 9. 未来 15 日正常波动范围（`volatility_range`）
 
-- 中枢 q50 = 最新收盘价，区间只描述"未来 N 日价格大致的波动幅度"。q75 / q90 不是"乐观目标"，q25 / q10 也不是"止损位"。
+- 中枢 q50 = 最新收盘价，范围只描述"未来 N 日价格大致的波动幅度"。q75 / q90 不是"乐观目标"，q25 / q10 也不是"止损位"。
 - 必须同时说清：实测覆盖率、评估样本数、约等于多少个独立样本、状态（已达标 / 校准观察期）。
-- 区间是逐日的边际区间，不代表整条路径的联合概率；"15 日内触及 q90"的概率不等于 10%。
-- 有 `uncalibrated_overlays`（如 VIX 放大）时，区间宽度含未校准的放大项，状态不会是"已达标"。
+- 这是逐日的边际范围，不代表整条路径的联合情况；不能由它推出"15 日内是否触及 q90"，更不能折算成触及概率。
+- 有 `calibration_audit.uncalibrated_overlays`（如 VIX 放大）时，范围宽度含未校准的放大项，状态不会是"已达标"。
 
 ## 10. 回测
 
@@ -86,9 +86,9 @@
 
 ## 11. 概率与频率怎么说
 
-- `rule_scenarios.scenarios[*].historical_frequency` 给出该情景在本标的自身历史上逐日无前视统计的"触发后先到目标 / 先到失效 / 到期"频率。转述时直接引用 `display_cn`（含样本数 `n`、95% Wilson 置信区间，以及 `n < 30` 时向市场基准同情景频率的 Beta-Binomial 收缩说明），统一称"历史条件频率"，**不得**改称为胜率或上涨概率。
-- 回测 `scenario_frequency_brier` 用样本外 Brier 分数与各情景自身基准率（per-scenario climatology）对比：只有相对各情景自身基准率的 `brier_skill_score > 0` 时才允许说"历史频率具有区分度"；否则应按 `verdict` 说明"尚未优于各情景自身基准率，仅作历史统计参考"。
-- 在按 `references/llm-judgment-protocol.md` 生成 `*_judgment.json` 并通过 `scripts/validate_judgment.py` 校验前，不得输出任何超出 `historical_frequency` 的主观概率数字。规则详见 `SKILL.md` 的"对外表述与概率规则"一节。
+- 不输出任何概率、胜率或频率数字：规则分、状态分、情景状态都不是概率；推演路径只写"触发条件 → 目标位 → 失效条件"。
+- 唯一例外是回测成交胜率（`backtest.all_long_signals` / `long_confirmed` / `watch_long_setup` 的 `win_rate_pct`）：必须带 Wilson 95% 区间与成交笔数，并说明它是这套规则在该标的上已发生成交的统计，不是未来上涨概率；少于 30 笔时转述 `sample_size_warning`。
+- 用户追问"概率是多少"时，说明本技能不提供方向概率，可以给的是触发 / 失效条件和 `volatility_range` 的正常波动范围。规则详见 `SKILL.md` 的"对外表述与概率规则"一节。
 
 ## 12. 不同市场板块与涨跌幅制度的差异化解读
 
@@ -97,6 +97,6 @@
 1. **沪深主板（10% 涨跌幅）、港股主板、金融红利、周期资源与大消费**：
    - 关注大盘状态分 `regime_score`、个股 `rule_score`、相对强弱 `relative_strength_vs_index` 与通道中轨位置。
 2. **科创板（`688` 及 `588/589` ETF）、创业板（`300/301` 及创业板/双创 ETF）等 20% 涨跌幅品种**：
-   - 受 `±20%` 宽涨跌幅影响，短期脉冲后回撤幅度较大，严禁在超出 `triple_barrier_plan.entry_zone` 上沿或短期极度超买（`(Close - EMA20)/ATR14 > 2.0`、`RSI14 >= 70`）时追高，并提示利用三重屏障的 `TP1` 止盈与 `breakeven_ratchet`（盘中触及 `+0.90R` 且收盘 `≥ +0.30R` 后次日起上移至 `+0.08R` 保本位）控制回撤。
+   - 受 `±20%` 宽涨跌幅影响，短期脉冲后回撤幅度较大，严禁在超出 `plan.long.entry_zone` 上沿或短期极度超买（`(Close - EMA20)/ATR14 > 2.0`、`RSI14 >= 70`）时追高，并提示利用三重屏障的 `TP1` 止盈与 `breakeven_ratchet`（盘中触及 `+0.90R` 且收盘 `≥ +0.30R` 后次日起上移至 `+0.08R` 保本位）控制回撤。
 3. **空头趋势下的「超跌反弹」（`OVERSOLD_BOUNCE`）与观察级计划（`WATCH_LONG_SETUP`）**：
    - 在 `Close < MA60` 的下跌通道中，单凭 RSI 超卖左侧接飞刀失效率较高；`WATCH_LONG_SETUP` 必须等待日线企稳收阳或突破右侧触发位后再执行，不得在阴线破位当日盲目抄底。

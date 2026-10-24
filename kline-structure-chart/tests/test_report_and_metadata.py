@@ -20,6 +20,8 @@ from market_rules import (
     tencent_quote_code_for,
     yahoo_symbol_for,
 )
+from conftest import load_v6
+from contract_v6 import artifact_files, build_result
 from render_report_md import render_report_markdown
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc)
@@ -129,14 +131,16 @@ def cn_pipeline(replay_recorded, tmp_path: Path) -> tuple[dict, str, dict]:
     return report, md, backtest
 
 
+@pytest.mark.slow
 def test_report_md_numbers_match_json(cn_pipeline) -> None:
     report, md, backtest = cn_pipeline
-    meta, fp = report["meta"], report["future_projection_15d"]
+    result, _ = load_v6(report)
+    meta, fp = result["meta"], result["volatility_range"]
     assert md.startswith(f"# {meta['name']}（{meta['symbol']}）")
     assert f"数据截至 **{meta['as_of']}**" in md
-    assert f"**{report['multi_timeframe_score']['rule_score']:.1f} / 100**" in md
+    assert f"**{result['verdict']['rule_score']:.1f} / 100**" in md
     assert "不是胜率" in md
-    plan = report["triple_barrier_plan"]
+    plan = result["plan"]["long"]
     assert f"{plan['entry_zone'][0]:.2f} ~ {plan['entry_zone'][1]:.2f}" in md
     assert f"| {plan['stop_loss_barrier']:.2f} | {plan['take_profit_1']:.2f} |" in md
     last = len(fp["horizon_dates"]) - 1
@@ -153,39 +157,45 @@ def test_report_md_numbers_match_json(cn_pipeline) -> None:
     assert md.rstrip().endswith("*以上为规则化技术分析，仅供研究参考，不构成投资建议。*")
 
 
+@pytest.mark.slow
 def test_report_md_puts_veto_before_conclusions(cn_pipeline) -> None:
     report, md, _ = cn_pipeline
-    if report["debate_and_veto"]["risk_officer_veto"]:
+    verdict = load_v6(report)[0]["verdict"]
+    if verdict["risk_veto"]:
         assert md.index("**风控否决**") < md.index("## 1. 结论速览")
-        for reason in report["debate_and_veto"]["veto_reasons"]:
+        for reason in verdict["veto_reasons"]:
             assert reason in md
     else:
         assert "**风控否决**" not in md
 
 
+@pytest.mark.slow
 def test_report_md_hides_all_prices_when_data_unavailable(cn_pipeline, tmp_path: Path) -> None:
     from render_html import render_html
 
     report, _, _ = cn_pipeline
-    broken = copy.deepcopy(report)
+    result, chart = load_v6(report)
+    broken = copy.deepcopy(result)
     broken["quality"]["status"] = "UNAVAILABLE"
     broken["quality"]["warnings"] = ["标的行情为合成数据，价格与形态均非真实"]
     md = render_report_markdown(broken)
     assert "数据不可用" in md and "标的行情为合成数据" in md
     for section in ("## 1.", "## 3.", "## 4.", "## 6."):
         assert section not in md
-    assert f"{report['triple_barrier_plan']['stop_loss_barrier']:.2f}" not in md
-    html_out = render_html(broken, tmp_path / "unavailable.html")
+    stop = f"{result['plan']['long']['stop_loss_barrier']:.2f}"
+    assert stop not in md
+    html_out = render_html(broken, chart, tmp_path / "unavailable.html")
     html_text = html_out.read_text(encoding="utf-8")
-    assert f"{report['triple_barrier_plan']['stop_loss_barrier']:.2f}" not in html_text
+    assert stop not in html_text
     assert 'data-quality-status="UNAVAILABLE"' in html_text
 
 
+@pytest.mark.slow
 def test_report_md_zero_trade_rows_show_dash(cn_pipeline) -> None:
     report, _, backtest = cn_pipeline
     bt = copy.deepcopy(backtest)
     bt["backtest"]["long_confirmed"] = {"trades": 0}
-    md = render_report_markdown(report, bt)
+    md = render_report_markdown(load_v6(report)[0], bt)
     assert "| 确认做多 | 0 | — | — | — | — |" in md
 
 
@@ -235,15 +245,15 @@ def test_default_benchmark_itself_needs_no_external_benchmark(replay_recorded, t
 
 
 @pytest.mark.parametrize(
-    ("args", "prefix", "message"),
+    ("args", "code", "exit_code", "message"),
     [
-        (["--symbol", "600519"], "[INVALID_ARGUMENT]", "Cannot resolve market"),
-        (["--symbol", "000001"], "[INVALID_ARGUMENT]", "Ambiguous symbol"),
-        (["--symbol", "600519.SH", "--days", "30"], "[INVALID_ARGUMENT]", "--days must be between 60 and 500"),
-        (["--symbol", "600519.SH", "--offline"], "[DATA_UNAVAILABLE]", "网络已禁用"),
+        (["--symbol", "600519"], "INVALID_ARGUMENT", 2, "Cannot resolve market"),
+        (["--symbol", "000001"], "INVALID_ARGUMENT", 2, "Ambiguous symbol"),
+        (["--symbol", "600519.SH", "--days", "30"], "INVALID_ARGUMENT", 2, "--days must be between 60 and 500"),
+        (["--symbol", "600519.SH", "--offline"], "DATA_UNAVAILABLE", 3, "网络已禁用"),
     ],
 )
-def test_cli_errors_are_labelled_without_traceback(tmp_path: Path, args: list[str], prefix: str, message: str) -> None:
+def test_cli_errors_are_labelled_without_traceback(tmp_path: Path, args: list[str], code: str, exit_code: int, message: str) -> None:
     import subprocess
     import sys
 
@@ -252,9 +262,12 @@ def test_cli_errors_are_labelled_without_traceback(tmp_path: Path, args: list[st
         [sys.executable, str(script), *args, "--output-dir", str(tmp_path / "out")],
         capture_output=True, text=True, timeout=120,
     )
-    assert proc.returncode != 0
-    assert prefix in proc.stderr and message in proc.stderr
+    assert proc.returncode == exit_code
+    assert f"[{code}]" in proc.stderr and message in proc.stderr
     assert "Traceback" not in proc.stderr
+    envelope = json.loads(proc.stdout)
+    assert envelope["status"] == "error" and envelope["error"]["code"] == code
+    assert message in envelope["error"]["message"]
 
 
 def test_cli_help_renders() -> None:
@@ -289,7 +302,7 @@ def test_missing_closed_session_is_disclosed_not_filled(replay_recorded) -> None
     assert report["quality"]["status"] == "OK"
     note = next(n for n in report["quality"]["notes"] if n.startswith("数据只到 2026-10-15"))
     assert "2026-10-16" in note and "不含该日行情" in note
-    assert note in render_report_markdown(report)
+    assert note in render_report_markdown(build_result(report, artifact_files("600519.SH", False)))
     # 收盘前 2026-10-15 就是最近已收盘交易日，不应提示
     early = load_bundle(req, now=datetime(2026, 10, 16, 6, 59, tzinfo=timezone.utc))
     assert early["provenance"]["missing_closed_session"] is None

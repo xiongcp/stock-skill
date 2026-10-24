@@ -22,6 +22,7 @@ NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)  # 录制数据最后一根为 2
 # ---------------------------------------------------------------------------
 # 录制真实行情回放（不访问网络）
 # ---------------------------------------------------------------------------
+@pytest.mark.slow
 @pytest.mark.parametrize(
     ("market", "symbol", "asset_type", "recorded", "bench_source"),
     [
@@ -125,7 +126,7 @@ def test_input_bundle_honors_as_of_and_incomplete_bar(tmp_path: Path, replay_rec
     bars = load_recorded("sina_daily/sh600519.json")
     instrument = data_gateway.resolve_instrument("600519.SH", market="CN", asset_type="equity")
     bundle = {
-        "schema_version": "5.3.0",
+        "schema_version": "6.0.0",
         "market": "CN",
         "target": {"instrument": instrument, "bars": bars, "intraday": None},
         "benchmark": None,

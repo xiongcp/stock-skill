@@ -4,13 +4,13 @@
     "name": "xiongcp"
   },
   "metadata": {
-    "description": "A股 / 港股 / 美股 K 线结构分析技能（真实行情、多情景无前视历史频率、受约束研判校验、JSON + PNG + 离线 HTML）",
-    "version": "5.3.0"
+    "description": "A股 / 港股 / 美股 K 线结构分析技能（真实行情、JSON + PNG + 离线 HTML）",
+    "version": "6.0.0"
   },
   "plugins": [
     {
       "name": "kline-structure-chart",
-      "description": "Deterministic CN/HK/US candlestick structure analysis from real OHLCV data: indicators, patterns, multi-scenario historical frequencies, constrained LLM judgment validation, risk levels, calibrated price ranges and plan-replay backtests",
+      "description": "Deterministic CN/HK/US candlestick structure analysis from real OHLCV data: indicators, patterns, multi-scenario structure paths, risk levels, direction-free volatility ranges and plan-replay backtests",
       "source": "./",
       "strict": false,
       "skills": [

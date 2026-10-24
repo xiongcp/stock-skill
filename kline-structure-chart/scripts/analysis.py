@@ -3,17 +3,17 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from contract_v6 import SCHEMA_VERSION
 from contracts import (
     AnalysisReport,
     AnalysisRequest,
+    InsufficientHistoryError,
     MarketDataBundle,
     assess_data_quality,
     compute_canonical_hash,
-    validate_report,
 )
 from forecast import compute_conformal_forecast
 from indicators import compute_all_indicators
-from judgment import build_judgment_pack
 from market_rules import (
     DEFAULT_BENCHMARKS,
     get_market_microstructure_rules,
@@ -231,7 +231,7 @@ def analyze_bundle(
     structure: dict[str, Any] | None = None,
     include_forecast: bool = True,
 ) -> AnalysisReport:
-    """100% 纯数学计算核心：从 OHLCV 矩阵计算全部指标、形态证据、SMC、多周期共振分、三重屏障与保形预测。"""
+    """100% 纯数学计算核心：从 OHLCV 矩阵计算全部指标、形态证据、SMC、多周期共振分、三重屏障与正常波动范围。"""
     target = bundle["target"]
     inst = target["instrument"]
     bars = target["bars"]
@@ -253,13 +253,12 @@ def analyze_bundle(
             show,
             price_decimals=lambda price, day: price_decimals(price, inst["market"], inst["asset_type"], day),
             horizon_bars=horizon_bars,
-            benchmark_bars=bench_bars_raw,
             round_price=lambda price, day: round_to_tick(price, inst["market"], inst["asset_type"], day),
         )
     )
     completed, active_intra, data_note = layer["completed"], layer["active_intra"], layer["data_note"]
     if len(completed) < 60:
-        raise ValueError(f"Insufficient completed bars ({len(completed)} < 60) for {inst['symbol']}")
+        raise InsufficientHistoryError(f"历史长度不足：已收盘K线 {len(completed)} < 60（{inst['symbol']}）")
     view, hist, sview, off = layer["view"], layer["hist"], layer["sview"], layer["off"]
     last_c = layer["last_c"]
     pivots, zz_thr = layer["pivots"], layer["zz_thr"]
@@ -420,14 +419,13 @@ def analyze_bundle(
         max_risk_pct=float(request.get("max_risk_pct") or 0.01),
     )
 
-    # 7. 未来 H 步（默认 15 日）分位数预测 + 序列保形预测校准
+    # 7. 未来 H 步（默认 15 日）分位数预测 + 序列 split-conformal 校准
     if include_forecast:
         future_proj = compute_conformal_forecast(
             completed,
             meta=meta,
             horizon_bars=horizon_bars,
             extra_context=extra_ctx,
-            scenarios=projections.get("scenarios"),
         )
     else:
         base_p = round(float(last_c), p_dec)
@@ -524,7 +522,7 @@ def analyze_bundle(
     }
 
     report: AnalysisReport = {
-        "schema_version": "5.3.0",
+        "schema_version": SCHEMA_VERSION,
         "meta": meta,
         "request": request,
         "market_benchmark": benchmark_info,
@@ -566,7 +564,7 @@ def analyze_bundle(
             "forecast_promotion_status": future_proj["promotion_status"],
         },
         "reproducibility": {
-            "engine_version": "5.3.0",
+            "engine_version": SCHEMA_VERSION,
             "bars_hash": compute_canonical_hash([(b["day"], b["close"]) for b in completed[-120:]]),
             "report_hash": "",
         },
@@ -621,9 +619,4 @@ def analyze_bundle(
             "q50": report["future_projection_15d"]["base_median_q50"],
         }
     )
-    if include_forecast:
-        report["judgment_pack"] = build_judgment_pack(report)
-        validate_report(report)
-    else:
-        report["judgment_pack"] = {}
     return report

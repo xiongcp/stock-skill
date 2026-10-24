@@ -36,7 +36,7 @@
 
 ## 5. VIX 恐慌指数与财报窗口修正
 
-- VIX 取自 Yahoo `^VIX` 最近收盘（来源见 `volatility_scaling.vix_source`）；当 `vix > 20` 时放大未来预测扇形带宽，取不到时为 `null` 且不做缩放。
+- VIX 取自 Yahoo `^VIX` 最近收盘（来源见 `volatility_range.volatility_scaling.vix_source`）；当 `vix > 20` 时放大正常波动范围带宽，取不到时为 `null` 且不做缩放。
 - 财报日 (`earnings_date`) 目前没有数据源，恒为 `null`（`earnings_date_source = NOT_AVAILABLE`），财报窗口放大暂不生效。
 
 ## 6. 视觉配色

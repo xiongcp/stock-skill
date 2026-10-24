@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
-"""多市场 (A股/港股/美股 · 大盘+个股) K线数学结构、三重屏障风控与15日保形预测同源双出入口。
+"""多市场 (A股/港股/美股 · 大盘+个股) K线数学结构、三重屏障风控与15日正常波动范围同源双出入口。
 
 一次运行同时产出：
-1. result.json        — 通过 assets/analysis.schema.json 顶层契约校验的指标、形态公式证据、三重屏障与15步分位区间
-2. preview.png        — 供 AI 聊天窗口直接内嵌展示的 1920x1160 高清结构与预测图
-3. dashboard.html     — 零外部依赖、支持图层开关、悬停查看 OHLC/均线/RSI/分位、相对强弱切换与时间推演回放的单文件交互终端
-4. backtest.json      — (当传入 --backtest 时) 因果回放审计、线上计划逐日回放回测与分位区间覆盖率审计
-5. report.md          — 按 SKILL.md 回复契约组织的中文分析报告，数字全部取自 result.json（与 backtest.json）
+1. result.json        — v6 稳定契约：通过 assets/analysis.schema.json 全量校验的结论、结构、指标、情景、计划与正常波动范围
+2. chart_data.json    — 渲染数据（K线、拐点、背景层、路径点与回放快照），非稳定接口，只供本技能的 PNG/HTML 渲染器读取
+3. preview.png        — 供 AI 聊天窗口直接内嵌展示的 1920x1160 高清结构与预测图
+4. dashboard.html     — 零外部依赖、支持图层开关、悬停查看 OHLC/均线/RSI/分位、相对强弱切换与时间推演回放的单文件交互终端
+5. backtest.json      — (当传入 --backtest 时) 因果回放审计、线上计划逐日回放回测与分位区间覆盖率审计
+6. report.md          — 按 SKILL.md 回复契约组织的中文分析报告，数字全部取自 result.json（与 backtest.json）
 """
 from __future__ import annotations
 
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any
 
 from analysis import analyze_bundle
-from contracts import AnalysisRequest, sanitize_filename, validate_report
+from contract_v6 import SCHEMA_VERSION, artifact_files, build_chart_data, build_result
+from contracts import AnalysisRequest, InsufficientHistoryError, sanitize_filename, validate_chart_data, validate_report
 from data_gateway import load_bundle
 from evaluation import run_causal_replay_audit, run_plan_backtest
 from market_rules import price_decimals, round_to_tick
@@ -27,6 +30,18 @@ from render_structure_chart import render as render_png_chart
 from structure import compute_structure_layer
 
 MAX_RISK_PCT_LIMIT = 0.05  # 单笔风险上限 5%：更大的值几乎都是把百分数当比例传入
+
+EXIT_INVALID_ARGUMENT = 2
+EXIT_DATA_UNAVAILABLE = 3
+EXIT_INSUFFICIENT_HISTORY = 4
+_ENVELOPE_VERDICT_KEYS = ("action", "action_cn", "risk_veto", "veto_reasons", "rule_score", "rating_cn", "headline_cn")
+
+
+def _fail(code: str, message: str, exit_code: int) -> int:
+    # 标准输出给 agent 解析的 JSON；stderr 保留 [CODE] 前缀，兼容按文字前缀判断的旧调用方
+    print(json.dumps({"status": "error", "error": {"code": code, "message": message}}, ensure_ascii=False))
+    print(f"[{code}] {message}", file=sys.stderr)
+    return exit_code
 
 
 def run_pipeline(
@@ -60,14 +75,12 @@ def run_pipeline(
     )
     # 结构层只算一次：同一份结果写入 JSON 并交给 PNG 渲染器（算图分离）；价格文本按价位表精度，与 report.md 一致
     inst = bundle["target"]["instrument"]
-    bench_bars_raw = (bundle.get("benchmark") or {}).get("bars")
     layer = compute_structure_layer(
         bundle["target"]["bars"],
         bundle["target"].get("intraday"),
         int(request.get("display_bars") or 120),
         price_decimals=lambda price, day: price_decimals(price, inst["market"], inst["asset_type"], day),
         horizon_bars=horizon_bars,
-        benchmark_bars=bench_bars_raw,
         round_price=lambda price, day: round_to_tick(price, inst["market"], inst["asset_type"], day),
     )
     report = analyze_bundle(bundle, request, include_replay=True, structure=layer)
@@ -75,10 +88,8 @@ def run_pipeline(
     meta = report["meta"]
     quality = report["quality"]
     safe_sym = sanitize_filename(meta["symbol"])
-    png_path = output_dir / f"{safe_sym}_preview.png"
-    html_path = output_dir / f"{safe_sym}_dashboard.html"
-    json_path = output_dir / f"{safe_sym}_result.json"
-    jpack_path = output_dir / f"{safe_sym}_judgment_pack.json"
+    files = artifact_files(safe_sym, has_backtest=run_backtest)
+    paths = {key: output_dir / name for key, name in files.items()}
 
     title = (
         f"{meta['name']} ({meta['symbol']}) · 近{request.get('display_bars', 120)}日数学结构与未来{request.get('horizon_bars', 15)}日推演"
@@ -87,7 +98,7 @@ def run_pipeline(
         bundle["target"]["bars"],
         bundle["target"].get("intraday"),
         title,
-        png_path,
+        paths["preview_png"],
         show=int(request.get("display_bars") or 120),
         data_source=str(meta["data_source"]),
         data_warning="；".join(quality["warnings"]) if quality["status"] != "OK" else None,
@@ -99,12 +110,7 @@ def run_pipeline(
         volume_profile=report.get("volume_profile"),
     )
     report["legacy_summary"] = legacy_summary
-    report["rendered_paths"] = {
-        "result_json": str(json_path.resolve()),
-        "judgment_pack_json": str(jpack_path.resolve()),
-        "preview_png": str(png_path.resolve()),
-        "dashboard_html": str(html_path.resolve()),
-    }
+    report["rendered_paths"] = {key: str(p.resolve()) for key, p in paths.items()}
 
     bt_payload: dict[str, Any] | None = None
     if run_backtest:
@@ -115,29 +121,28 @@ def run_pipeline(
             step=backtest_step,
         )
         causal_audit = run_causal_replay_audit(bundle["target"]["bars"])
-        bt_path = output_dir / f"{safe_sym}_backtest.json"
         bt_payload = {
+            "schema_version": SCHEMA_VERSION,
             "symbol": meta["symbol"],
             "market": meta["market"],
             "causal_replay_audit": causal_audit,
             "backtest": bt_res,
         }
-        bt_path.write_text(json.dumps(bt_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        report["rendered_paths"]["backtest_json"] = str(bt_path.resolve())
+        paths["backtest_json"].write_text(json.dumps(bt_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    md_path = output_dir / f"{safe_sym}_report.md"
-    report["rendered_paths"]["report_md"] = str(md_path.resolve())
-
-    validate_report(report)
-    render_html(report, html_path)
-    jpack_path.write_text(json.dumps(report["judgment_pack"], ensure_ascii=False, indent=2), encoding="utf-8")
-    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 面向回答的中文 Markdown 报告：数字全部取自上面的 JSON，供 agent 直接转述
-    md_path.write_text(render_report_markdown(report, bt_payload), encoding="utf-8")
+    result = build_result(report, files)
+    chart = build_chart_data(report)
+    validate_report(result)
+    validate_chart_data(chart)
+    render_html(result, chart, paths["dashboard_html"])
+    paths["result_json"].write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    paths["chart_data_json"].write_text(json.dumps(chart, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    # 面向回答的中文 Markdown 报告：数字全部取自 result.json，供 agent 直接转述
+    paths["report_md"].write_text(render_report_markdown(result, bt_payload), encoding="utf-8")
     return report
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Multi-market K-line algebraic analyzer & conformal forecaster")
     parser.add_argument("--market", choices=["CN", "HK", "US"], default=None, help="Market code: CN, HK, US")
     parser.add_argument("--symbol", required=True, help="Instrument symbol, e.g. 000001.SH, 600519.SH, 00700.HK, NVDA.US")
@@ -170,7 +175,7 @@ def main() -> None:
     parser.add_argument("--offline", action="store_true", help="Disable live network requests (requires --input local file)")
     parser.add_argument("--backtest", action="store_true", help="Run plan-replay backtest & causal replay audit")
     parser.add_argument("--backtest-step", type=int, default=1, help="Decision-day step for plan replay backtest (default 1 = every bar)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     req: AnalysisRequest = {
         "symbol": args.symbol,
@@ -208,36 +213,26 @@ def main() -> None:
             run_backtest=args.backtest,
             backtest_step=max(1, args.backtest_step),
         )
+    except InsufficientHistoryError as exc:
+        return _fail("INSUFFICIENT_HISTORY", str(exc), EXIT_INSUFFICIENT_HISTORY)
     except RuntimeError as exc:
-        # 真实行情取不到：数据源失败、限流、数据损坏或历史不足
-        raise SystemExit(f"[DATA_UNAVAILABLE] {exc}") from exc
+        # 真实行情取不到：数据源失败、限流、数据损坏
+        return _fail("DATA_UNAVAILABLE", str(exc), EXIT_DATA_UNAVAILABLE)
     except ValueError as exc:
-        # 参数或输入不合法：代码无法识别、参数越界、本地文件格式错误
-        raise SystemExit(f"[INVALID_ARGUMENT] {exc}") from exc
-    summary_out = {
-        "meta": report["meta"],
-        "quality": {k: report["quality"][k] for k in ("status", "data_source_class", "benchmark_source", "warnings", "notes")},
-        "market_benchmark": {
-            "index_symbol": report["market_benchmark"]["index_symbol"],
-            "regime": report["market_benchmark"]["regime"],
-            "regime_score": report["market_benchmark"]["regime_score"],
-            "relative_strength_vs_index": report["market_benchmark"]["relative_strength_vs_index"],
-        },
-        "multi_timeframe_score": report["multi_timeframe_score"],
-        "meta_labeling_decision": report["meta_labeling_decision"],
-        "triple_barrier_plan": report["triple_barrier_plan"],
-        "future_projection_15d": {
-            "horizon_dates": report["future_projection_15d"]["horizon_dates"],
-            "q25": report["future_projection_15d"]["q25"],
-            "base_median_q50": report["future_projection_15d"]["base_median_q50"],
-            "optimistic_q75": report["future_projection_15d"]["optimistic_q75"],
-            "calibration_audit": report["future_projection_15d"]["calibration_audit"],
-        },
-        "debate_and_veto": report["debate_and_veto"],
-        "rendered_paths": report["rendered_paths"],
+        # 参数或输入不合法：代码无法识别、参数越界、本地文件格式错误。
+        # 注意：run_pipeline 内 validate_report / validate_chart_data 的契约自检失败也是 ValueError，同样落在这里（属内部错误，却报 2）
+        return _fail("INVALID_ARGUMENT", str(exc), EXIT_INVALID_ARGUMENT)
+    result = json.loads(Path(report["rendered_paths"]["result_json"]).read_text(encoding="utf-8"))
+    envelope = {
+        "status": "ok",
+        "schema_version": result["schema_version"],
+        "verdict": {k: result["verdict"][k] for k in _ENVELOPE_VERDICT_KEYS},
+        "quality": {k: result["quality"][k] for k in ("status", "warnings", "notes")},
+        "files": result["files"],
     }
-    print(json.dumps(summary_out, ensure_ascii=False, indent=2))
+    print(json.dumps(envelope, ensure_ascii=False, indent=2))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -1,6 +1,6 @@
 [project]
 name = "kline-structure-chart"
-version = "5.3.0"
+version = "6.0.0"
 description = "Multi-market (CN/HK/US) deterministic K-line structure, algebraic pattern, triple-barrier risk, conformal forecast, and dual PNG+HTML rendering skill"
 requires-python = ">=3.12"
 dependencies = [
@@ -11,5 +11,11 @@ dependencies = [
 dev = [
     "numpy>=1.26.0",
     "pytest>=8.0.0",
+    "pytest-xdist>=3.8.0",
     "ta-lib>=0.6",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: 单个用例约 5 秒以上的端到端流水线与回测测试；日常用 -m \"not slow\" 跳过，提 PR 前与 CI 跑全量",
 ]

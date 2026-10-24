@@ -137,7 +137,7 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 | C-03 | P1 | `scripts/forecast.py:303-305,367-368` | `q50` 受规则分漂移污染且未披露相对随机游走误差 | ✅ 已修复：`q50` 取最新收盘价（`MARTINGALE_LAST_CLOSE`），`calibration_audit` 直接披露 `q50_mae_pct` 与 `random_walk_mae_pct`；`test_c02_c03_conformal_bands_are_calibrated_and_q50_has_no_drift` |
 | C-04 | P1 | `scripts/evaluation.py:239-372` | 回测使用固定 ATR 倍数而非线上真实计划 | ✅ 已修复：`run_plan_backtest` 逐日调用 `analyze_bundle` 回放线上真实 `triple_barrier_plan`；`test_c04_c05_c10_backtest_replays_live_plan_with_bootstrap_ci` |
 | C-05 | P1 | `scripts/evaluation.py:239-310` | 回测在样本内拟合元权重导致样本外泄漏 | ✅ 已修复：回测不学习任何参数，完全按事前固定规则逐日回放；同上 |
-| C-06 | P1 | `scripts/data_gateway.py:26`、`scripts/analysis.py:181-215` | 取数长度随 `--days` 变化导致 v5 报告随 `--days` 漂移 | ✅ 已修复：取数固定 `FETCH_BARS=760`，v5 报告除展示数组外跨 `--days` 完全不变；`test_c06_v5_pipeline_is_days_invariant`、`test_c06_fetch_length_does_not_depend_on_days` |
+| C-06 | P1 | `scripts/data_gateway.py:26`、`scripts/analysis.py:181-215` | 取数长度随 `--days` 变化导致 v5 报告随 `--days` 漂移 | ✅ 已修复：取数固定 `FETCH_BARS=760`，v5 报告除展示数组外跨 `--days` 完全不变；`test_c06_pipeline_is_days_invariant`、`test_c06_fetch_length_does_not_depend_on_days` |
 | C-07 | P2 | `scripts/forecast.py:228-231` | 港股隔夜跳空在收盘到收盘波动率上重复乘系数放大 | ✅ 已修复：仅披露 `overnight_gap_ratio`，不再重复乘系数 |
 | C-08 | P2 | `scripts/forecast.py:52-75`、`references/math-patterns.md:43` | 相似 Patch 允许 10 根重叠，与文档“无重叠”冲突 | ✅ 已修复：`max_cand_end = cur_end - horizon_bars - patch_len` 且候选间距 `>= patch_len`，严格零重叠；`test_causal_replay_invariance_no_lookahead` |
 | C-09 | P2 | `scripts/risk.py:144-153`、`scripts/evaluation.py:239` | 规则加权自称概率 `confidence_score` 与假 Walk-Forward | ✅ 已修复：移除 `confidence_score` 与假 Walk-Forward，明确标注 `scoring_method = DETERMINISTIC_MULTI_FACTOR_RULE_V5`；`test_no_unimplemented_capability_claims` |
@@ -222,7 +222,7 @@ runs=420 failing=0 days=[60, 120, 200, 250, 300, 500]
 
 **F. 因果与不变性**
 - [x] 核平滑、拐点、蜡烛形态、SMC、相似 Patch（$t_c + H \le t_{\text{now}} - L_{\text{patch}}$）与保形预测均无前视泄漏（`run_causal_replay_audit` 守护）
-- [x] `--days` 不变性同时覆盖 v4.1 结构层（真实录制数据 420 次运行 0 失败）与 v5 `run_pipeline`（`test_c06_v5_pipeline_is_days_invariant`）
+- [x] `--days` 不变性同时覆盖 v4.1 结构层（真实录制数据 420 次运行 0 失败）与 v5 `run_pipeline`（`test_c06_pipeline_is_days_invariant`）
 
 **G. 渲染**
 - [x] PNG 和 HTML 只读取计算层输出，不重新计算结构点位

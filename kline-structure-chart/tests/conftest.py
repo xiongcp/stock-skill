@@ -59,3 +59,12 @@ def replay_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(data_gateway, "fetch_tencent_index_daily_bars", tencent)
     monkeypatch.setattr(data_gateway, "fetch_yahoo_corporate_actions", events)
     monkeypatch.setattr(data_gateway, "fetch_tencent_quote_meta", quote)
+
+
+def load_v6(report: dict) -> tuple[dict, dict]:
+    """读取 run_pipeline 写出的 v6 result.json 与 chart_data.json。"""
+    paths = report["rendered_paths"]
+    return (
+        json.loads(Path(paths["result_json"]).read_text(encoding="utf-8")),
+        json.loads(Path(paths["chart_data_json"]).read_text(encoding="utf-8")),
+    )
