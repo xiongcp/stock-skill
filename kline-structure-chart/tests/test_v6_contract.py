@@ -370,7 +370,10 @@ def test_v6_html_adapter_joins_scenario_paths_by_id(replay_recorded, tmp_path: P
         + html_text[start:end]
         + "\nconsole.log(JSON.stringify(REPORT.rule_scenarios.scenarios.map(s => [s.id, s.waypoints_offset])));\n"
     )
-    out = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30, check=True).stdout
+    # 脚本里嵌着整份数据（数百 KB），不能走 node -e：Linux 单个命令行参数上限 128 KB
+    script_file = tmp_path / "adapter_check.js"
+    script_file.write_text(script, encoding="utf-8")
+    out = subprocess.run([node, str(script_file)], capture_output=True, text=True, timeout=30, check=True).stdout
     merged = json.loads(out)
     assert [sid for sid, _ in merged] == [s["id"] for s in result["scenarios"]["active"]]
     for sid, wps in merged:
