@@ -16,9 +16,9 @@ from analyze_and_forecast import run_pipeline  # noqa: E402
 REQ_BASE = {"display_bars": 120, "structure_bars": 120, "horizon_bars": 15}
 
 
-def _cn_moutai(tmp_path: Path, **kw) -> dict:
+def _cn_moutai(tmp_path: Path, request_extra: dict | None = None, **kw) -> dict:
     return run_pipeline(
-        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ_BASE},
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ_BASE, **(request_extra or {})},
         output_dir=tmp_path,
         **kw,
     )
@@ -162,7 +162,7 @@ def test_v6_schema_marks_stability_and_rejects_unknown_fields() -> None:
     assert schema_errors(True, {"type": "number"})
 
 
-KEYPATH_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "contract" / "result_v6_keypaths_600519.json"
+KEYPATH_DIR = Path(__file__).resolve().parent / "fixtures" / "contract"
 
 
 def _key_paths(obj, path=""):
@@ -177,23 +177,44 @@ def _key_paths(obj, path=""):
             yield from _key_paths(v, f"{path}[*]")
 
 
-def test_v6_result_keypaths_match_snapshot(replay_recorded, tmp_path: Path) -> None:
-    """固定 600519.SH 录制行情下 result.json 的完整键集，防止内部新字段经透传投影静默进入稳定契约。
+# 每个配置一份快照 result_v6_keypaths_<id>.json：
+#   600519_plain           基线（无账户净值、无回测），即最初的单配置快照
+#   600519_equity_backtest 带账户净值（position_sizing 字段）与回测（files.backtest_json），含 plan.short.*
+#   00700_hk / nvda_us     港美股：market_microstructure.{lot_size_source,day_trading_rule} 等市场相关字段
+#   000001_index           指数：asset_type=index 下没有交易计划的键形
+KEYPATH_CONFIGS = {
+    "600519_plain": ({"symbol": "600519.SH", "market": "CN", "asset_type": "equity"}, {}),
+    "600519_equity_backtest": (
+        {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "account_equity": 500000, "max_risk_pct": 0.01},
+        {"run_backtest": True, "backtest_step": 20},
+    ),
+    "00700_hk": ({"symbol": "00700.HK", "market": "HK", "asset_type": "equity"}, {}),
+    "nvda_us": ({"symbol": "NVDA.US", "market": "US", "asset_type": "equity"}, {}),
+    "000001_index": ({"symbol": "000001.SH", "market": "CN", "asset_type": "index"}, {}),
+}
+
+
+@pytest.mark.parametrize("config_id", list(KEYPATH_CONFIGS))
+def test_v6_result_keypaths_match_snapshot(replay_recorded, tmp_path: Path, config_id: str) -> None:
+    """固定录制行情下各配置 result.json 的完整键集，防止内部新字段经透传投影静默进入稳定契约。
 
     确认是有意的契约变更后重新生成快照：
     UPDATE_V6_KEYPATHS=1 uv run pytest -q tests/test_v6_contract.py -k keypaths_match_snapshot
     """
     import os
 
-    result, _ = load_v6(_cn_moutai(tmp_path))
+    request, kw = KEYPATH_CONFIGS[config_id]
+    rep = run_pipeline({**request, **REQ_BASE}, output_dir=tmp_path, **kw)
+    result, _ = load_v6(rep)
     actual = sorted(set(_key_paths(result)))
+    snapshot = KEYPATH_DIR / f"result_v6_keypaths_{config_id}.json"
     if os.environ.get("UPDATE_V6_KEYPATHS") == "1":
-        KEYPATH_SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
-        KEYPATH_SNAPSHOT.write_text(json.dumps(actual, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    expected = json.loads(KEYPATH_SNAPSHOT.read_text(encoding="utf-8"))
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        snapshot.write_text(json.dumps(actual, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    expected = json.loads(snapshot.read_text(encoding="utf-8"))
     added, removed = sorted(set(actual) - set(expected)), sorted(set(expected) - set(actual))
     assert not added and not removed, (
-        f"result.json 键路径与快照不一致：新增 {added}；删除 {removed}。"
+        f"[{config_id}] result.json 键路径与快照不一致：新增 {added}；删除 {removed}。"
         "新增或删除契约字段须同步 schema 的 x-stability 标注与 CHANGELOG\"契约变更\"，确认后再更新快照"
     )
 
@@ -218,7 +239,7 @@ def test_cli_insufficient_history_exit_code(replay_recorded, tmp_path: Path, cap
     captured = capsys.readouterr()
     env = json.loads(captured.out)
     assert env == {"status": "error", "error": {"code": "INSUFFICIENT_HISTORY", "message": env["error"]["message"]}}
-    assert "历史长度不足" in env["error"]["message"]
+    assert "历史长度不足" in env["error"]["message"] and "600519.SH" in env["error"]["message"]  # 消息带上标的代码
     assert captured.err.startswith("[INSUFFICIENT_HISTORY]")
 
 
@@ -288,3 +309,33 @@ def test_v6_report_md_reads_result(replay_recorded, tmp_path: Path) -> None:
     assert f"{vr['q10'][-1]:.2f}" in md and f"{vr['q90'][-1]:.2f}" in md
     assert "正常波动范围" in md
     assert md == Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+
+
+def test_lint_rejects_share_and_ratio_frequency_numbers_but_allows_factor_wording() -> None:
+    """「上涨占比」「先到目标的比例」是频率数字，与概率同样不得对外；实体占比等因子、参数用语不受影响。"""
+    from lint_response import _unvalidated_probability_hits
+
+    for bad in ("上涨占比 53.8%", "上涨占比为53.8%", "先到目标的比例为 62%", "触及止损的比例约 30%"):
+        assert _unvalidated_probability_hits(bad + "。"), bad
+    for ok in (
+        "K线实体占比 0.35，上影线占比偏高。",
+        "实体占比 35%，影线占比 20%。",
+        "单笔风险比例 1%，斐波那契回撤比例 61.8%。",
+        "涨跌停比例 10%，隔夜跳空占比 2%。",
+        "回测胜率 55.0%（n=40，95% 区间 40.0%~69.0%）。",
+    ):
+        assert _unvalidated_probability_hits(ok) == [], ok
+
+
+@pytest.mark.slow
+def test_report_md_has_no_frequency_numbers_with_backtest(replay_recorded, tmp_path: Path) -> None:
+    """带回测的完整 report.md 不得出现任何未经校验的频率/概率数字，也不再有「上涨占比」列。"""
+    from lint_response import _unvalidated_probability_hits
+
+    rep = _cn_moutai(
+        tmp_path, {"account_equity": 500000, "max_risk_pct": 0.01}, run_backtest=True, backtest_step=20
+    )
+    md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    assert "回测" in md and "胜率" in md  # 确认回测章节确实渲染了
+    assert "上涨占比" not in md
+    assert _unvalidated_probability_hits(md) == []

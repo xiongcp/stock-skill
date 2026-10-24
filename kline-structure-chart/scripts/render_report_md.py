@@ -389,27 +389,7 @@ def render_report_markdown(
                 f"- 规则分与未来 {ic['forward_horizon_bars']} 日收益的秩相关 IC = {ic_text}"
                 f"（{ic['decisions']} 个决策日，约 {ic['effective_independent_samples']} 个独立样本）：{ic['verdict']}。"
             ]
-        afr = bt.get("action_forward_returns") or {}
-        if any(row.get("decisions") for row in afr.values()):
-            lines += [
-                "",
-                f"| 决策日动作 | 次数 | 未来 {ic.get('forward_horizon_bars', horizon)} 日平均收益 | 中位数 | 上涨占比 |",
-                "| --- | --- | --- | --- | --- |",
-            ]
-            action_cn = {
-                "LONG_CONFIRMED": "确认做多",
-                "WATCH_LONG_SETUP": "观察做多",
-                "NEUTRAL_HOLD_WAIT": "观望",
-                "DEFENSIVE_AVOID": "防守回避",
-            }
-            for action, row in afr.items():
-                if not row.get("decisions"):
-                    continue
-                lines += [
-                    f"| {action_cn.get(action, action)} | {row['decisions']} | {row['mean_forward_return_pct']:.2f}% "
-                    f"| {row['median_forward_return_pct']:.2f}% | {row['up_share_pct']:.1f}% |"
-                ]
-            lines += ["", "- 上表是每个决策日之后的实际涨跌，用于检验动作标签是否与后续走势一致，不是交易收益。"]
+        # action_forward_returns / rule_score_buckets 含「上涨占比」频率数字，属于维护者诊断字段，不进入面向用户的报告
         veto_counts = bt.get("veto_reason_counts") or {}
         if veto_counts:
             veto_cn = {

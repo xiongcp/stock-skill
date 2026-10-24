@@ -219,7 +219,8 @@ def main(argv: list[str] | None = None) -> int:
         # 真实行情取不到：数据源失败、限流、数据损坏
         return _fail("DATA_UNAVAILABLE", str(exc), EXIT_DATA_UNAVAILABLE)
     except ValueError as exc:
-        # 参数或输入不合法：代码无法识别、参数越界、本地文件格式错误
+        # 参数或输入不合法：代码无法识别、参数越界、本地文件格式错误。
+        # 注意：run_pipeline 内 validate_report / validate_chart_data 的契约自检失败也是 ValueError，同样落在这里（属内部错误，却报 2）
         return _fail("INVALID_ARGUMENT", str(exc), EXIT_INVALID_ARGUMENT)
     result = json.loads(Path(report["rendered_paths"]["result_json"]).read_text(encoding="utf-8"))
     envelope = {
