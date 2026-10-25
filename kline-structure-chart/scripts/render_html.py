@@ -615,9 +615,16 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   }});
 
   let subchartMode = 'vol';
+  const SUBCHART_MODES = ['vol', 'rsi', 'macd'];
+  const SUBCHART_LABELS = {{
+    'vol': '副图: 成交量 & RVOL',
+    'rsi': '副图: RSI(14) 强弱带',
+    'macd': '副图: MACD 柱状动能'
+  }};
   document.getElementById('subchartModeBtn').addEventListener('click', function(ev) {{
-    subchartMode = (subchartMode === 'vol') ? 'rsi' : 'vol';
-    ev.target.textContent = subchartMode === 'rsi' ? '副图: RSI(14) 强弱带' : '副图: 成交量 & RVOL';
+    const nextIdx = (SUBCHART_MODES.indexOf(subchartMode) + 1) % SUBCHART_MODES.length;
+    subchartMode = SUBCHART_MODES[nextIdx];
+    ev.target.textContent = SUBCHART_LABELS[subchartMode];
     drawChart();
   }});
 
@@ -628,9 +635,9 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   const rrSharesEl = document.getElementById('rrSharesInput');
   const rrGridEl = document.getElementById('rrResultGrid');
   const initEntry = (tb.entry_zone && tb.entry_zone.length === 2) ? tb.entry_zone[1] : (bars.length ? bars[bars.length - 1].close : 100);
-  const initStop = tb.stop_loss_barrier || (initEntry * 0.95);
-  const initTarget = tb.take_profit_tp1 || (initEntry * 1.08);
-  const initShares = (tb.position_sizing && tb.position_sizing.recommended_shares) ? tb.position_sizing.recommended_shares : (tb.market_microstructure.lot_size || 100);
+  const initStop = tb.stop_loss_barrier || tb.stop_loss || (initEntry * 0.95);
+  const initTarget = tb.take_profit_1 || tb.take_profit_tp1 || (initEntry * 1.08);
+  const initShares = (tb.position_sizing && tb.position_sizing.recommended_shares) ? tb.position_sizing.recommended_shares : ((tb.market_microstructure && tb.market_microstructure.lot_size) || 100);
   rrEntryEl.value = Number(initEntry).toFixed(pDec);
   rrStopEl.value = Number(initStop).toFixed(pDec);
   rrTargetEl.value = Number(initTarget).toFixed(pDec);
@@ -1053,7 +1060,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
       ctx.fillText('真实收盘 ' + fmtPrice(rLast), W - padR + 6, yOfPrice(rLast) - 6);
     }}
 
-    // Subchart subplot (Volume+RVOL20 or RSI14)
+    // Subchart subplot (Volume+RVOL20, RSI14, or MACD Hist)
     ctx.fillStyle = '#0e1420';
     ctx.fillRect(padL, volT, histW, volB - volT);
     if (subchartMode === 'rsi') {{
@@ -1079,6 +1086,26 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
       ctx.font = '11px sans-serif';
       const curRsi = (lastBar && lastBar.rsi14 !== undefined && lastBar.rsi14 !== null) ? lastBar.rsi14 : (ind.momentum.rsi14 || '--');
       ctx.fillText('RSI(14) 超买70/超卖30 (截面 ' + curRsi + ')', padL + 8, volT + 16);
+    }} else if (subchartMode === 'macd') {{
+      const midY = (volT + volB) / 2 + 4;
+      const maxAbsM = Math.max(1e-6, Math.max.apply(null, activeBars.map(function(b) {{ return Math.abs(b.macd_hist || 0); }})));
+      ctx.strokeStyle = 'rgba(148,163,184,0.25)';
+      ctx.beginPath();
+      ctx.moveTo(padL, midY);
+      ctx.lineTo(padL + histW, midY);
+      ctx.stroke();
+      activeBars.forEach(function(b, i) {{
+        const mh = b.macd_hist || 0;
+        const x = xOfBar(i);
+        const hPx = (Math.abs(mh) / maxAbsM) * ((volB - volT) / 2 - 14);
+        ctx.fillStyle = mh >= 0 ? UP_COL : DN_COL;
+        if (mh >= 0) ctx.fillRect(x - barHalf, midY - hPx, barHalf * 2, hPx);
+        else ctx.fillRect(x - barHalf, midY, barHalf * 2, hPx);
+      }});
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '11px sans-serif';
+      const curMacd = (lastBar && lastBar.macd_hist !== undefined && lastBar.macd_hist !== null) ? lastBar.macd_hist : (ind.momentum.macd_hist || '--');
+      ctx.fillText('MACD 柱状动能 Hist (截面 ' + curMacd + ')', padL + 8, volT + 16);
     }} else {{
       const maxVol = Math.max.apply(null, activeBars.map(function(b) {{ return b.volume || 1; }}));
       activeBars.forEach(function(b, i) {{
@@ -1282,4 +1309,28 @@ def export_cloudflare_worker_bundle(
         "webp_path": str(webp_path),
         "webp_size_bytes": webp_path.stat().st_size,
     }
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="导出 Cloudflare Worker 看板部署包（绑定 *.taylor-link.xyz + WebP）")
+    parser.add_argument("--artifacts-dir", type=Path, required=True, help="analyze_and_forecast 输出目录")
+    parser.add_argument("--symbol", required=True, help="标的代码（如 600519.SH）")
+    parser.add_argument("--slug", required=True, help="子域名前缀（如 kline-600519）")
+    parser.add_argument("--output-dir", type=Path, required=True, help="生成的 Worker 工程目录")
+    args = parser.parse_args(argv)
+    meta = export_cloudflare_worker_bundle(
+        artifacts_dir=args.artifacts_dir,
+        symbol=args.symbol,
+        slug=args.slug,
+        output_dir=args.output_dir,
+    )
+    print(json.dumps(meta, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
 

@@ -799,29 +799,35 @@ def audit_trade_idea(
 
     is_round = _is_round_number_price(stop_f, market)
     sys_stop = float(long_plan.get("stop_loss_barrier") or long_plan.get("stop_loss") or round_to_tick(entry_f - 1.5 * atr14, market, asset_type, as_of))
+    supports = [float(s["price"]) for s in ((structure.get("levels") or {}).get("supports") or []) if "price" in s]
+    nearest_sup = min(supports, key=lambda p: abs(p - stop_f)) if supports else sys_stop
+    too_tight_to_support = direction_u == "LONG" and bool(supports) and abs(stop_f - nearest_sup) < 0.20 * atr14
     rec_stop = (
         sys_stop
         if (direction_u == "LONG" and sys_stop < entry_f)
-        else round_to_tick(stop_f - 0.35 * atr14, market, asset_type, as_of)
+        else round_to_tick(stop_f - 0.35 * atr14 if direction_u == "LONG" else stop_f + 0.35 * atr14, market, asset_type, as_of)
     )
     if _is_round_number_price(rec_stop, market):
-        rec_stop = round_to_tick(rec_stop - 2.0 * float(rules.get("tick_size") or 0.01), market, asset_type, as_of)
+        step_tick = 2.0 * float(rules.get("tick_size") or 0.01)
+        rec_stop = round_to_tick(rec_stop - step_tick if direction_u == "LONG" else rec_stop + step_tick, market, asset_type, as_of)
 
-    if is_round:
+    if is_round or too_tight_to_support:
         stop_trap = {
             "status": "WARN",
-            "is_round_number": True,
+            "is_round_number": is_round,
+            "too_close_to_support": too_tight_to_support,
             "user_stop": stop_f,
             "recommended_stop": rec_stop,
             "note_cn": (
-                f"用户止损位 {stop_f:.{p_dec}f} 位于明显整数关口（极易被日内假跌破流动性扫损打穿）；"
-                f"建议将硬止损下移至结构极值下方非整数位 {rec_stop:.{p_dec}f}，并以「5/15分钟放量跌破且反抽失败」作为执行确认"
+                f"用户止损位 {stop_f:.{p_dec}f} 位于明显整数关口或紧贴结构支撑（极易被日内假跌破流动性扫损打穿）；"
+                f"建议将硬止损调整至结构极值外侧非整数位 {rec_stop:.{p_dec}f}，并以「5/15分钟放量突破/跌破且反抽失败」作为执行确认"
             ),
         }
     else:
         stop_trap = {
             "status": "PASS",
             "is_round_number": False,
+            "too_close_to_support": False,
             "user_stop": stop_f,
             "recommended_stop": stop_f,
             "note_cn": f"止损位 {stop_f:.{p_dec}f} 已避开整数关口与密集扫损带",
@@ -881,6 +887,13 @@ def audit_trade_idea(
             "q90_price": q90,
             "note_cn": f"目标价 {target_f:.{p_dec}f} 超出未来 15 日正常波动范围上沿（{q90:.{p_dec}f}），建议在 q75（{q75:.{p_dec}f}）附近先分批锁定 TP1",
         }
+    elif direction_u == "SHORT" and target_f < q10:
+        reach_check = {
+            "status": "WARN",
+            "q25_price": q25,
+            "q10_price": q10,
+            "note_cn": f"做空目标价 {target_f:.{p_dec}f} 低于未来 15 日正常波动范围下沿（{q10:.{p_dec}f}），建议在 q25（{q25:.{p_dec}f}）附近先分批锁定 TP1",
+        }
     else:
         reach_check = {
             "status": "PASS",
@@ -898,10 +911,19 @@ def audit_trade_idea(
     else:
         overall = "APPROVED"
 
-    rec_entry = round(min(entry_f, float(sys_entry_zone[1])), p_dec) if (direction_u == "LONG" and anti_chase["status"] != "PASS") else entry_f
-    rec_target = round(max(target_f, rec_entry + 1.8 * abs(rec_entry - rec_stop)), p_dec) if (direction_u == "LONG" and rr_check["status"] == "FAIL") else target_f
-    be_trigger = round(rec_entry + 0.90 * abs(rec_entry - rec_stop), p_dec)
-    be_stop = round(rec_entry + max(fee_per_share, 0.08 * abs(rec_entry - rec_stop)), p_dec)
+    rec_entry = (
+        round(min(entry_f, float(sys_entry_zone[1])), p_dec)
+        if (direction_u == "LONG" and anti_chase["status"] != "PASS")
+        else entry_f
+    )
+    if direction_u == "LONG":
+        rec_target = round(max(target_f, rec_entry + 1.8 * abs(rec_entry - rec_stop)), p_dec) if rr_check["status"] == "FAIL" else target_f
+        be_trigger = round(rec_entry + 0.90 * abs(rec_entry - rec_stop), p_dec)
+        be_stop = round(rec_entry + max(fee_per_share, 0.08 * abs(rec_entry - rec_stop)), p_dec)
+    else:
+        rec_target = round(min(target_f, rec_entry - 1.8 * abs(rec_stop - rec_entry)), p_dec) if rr_check["status"] == "FAIL" else target_f
+        be_trigger = round(rec_entry - 0.90 * abs(rec_stop - rec_entry), p_dec)
+        be_stop = round(rec_entry - max(fee_per_share, 0.08 * abs(rec_stop - rec_entry)), p_dec)
 
     playbook = {
         "if_trigger_cn": (
@@ -960,4 +982,40 @@ def append_idea_to_ledger(audit_doc: dict[str, Any], ledger_path: Any) -> None:
     if audit_doc["idea_id"] not in existing_ids:
         with lp.open("a", encoding="utf-8") as f:
             f.write(json.dumps(audit_doc, ensure_ascii=False) + "\n")
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    import json
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description="交易想法 If-Then 机械化 6 维双向风控审计器")
+    parser.add_argument("--result", type=Path, required=True, help="*_result.json 路径")
+    parser.add_argument("--direction", default="LONG", choices=["LONG", "SHORT"], help="交易方向")
+    parser.add_argument("--entry", type=float, required=True, help="计划入场价")
+    parser.add_argument("--stop", type=float, required=True, help="计划止损价")
+    parser.add_argument("--target", type=float, required=True, help="计划目标价")
+    parser.add_argument("--shares", type=int, default=None, help="计划股数")
+    parser.add_argument("--note", default="", help="备注")
+    parser.add_argument("--ledger", type=Path, default=None, help="可选：追加写入的 JSONL 账本路径")
+    args = parser.parse_args(argv)
+    res_doc = json.loads(args.result.read_text(encoding="utf-8"))
+    audit = audit_trade_idea(
+        res_doc,
+        direction=args.direction,
+        entry=args.entry,
+        stop=args.stop,
+        target=args.target,
+        shares=args.shares,
+        note=args.note,
+    )
+    if args.ledger is not None:
+        append_idea_to_ledger(audit, args.ledger)
+    print(json.dumps(audit, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
 

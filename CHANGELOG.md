@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+### 新增与增强（v6.1 演进）
+
+- **契约变更（新增实验字段，`x-stability: experimental`）**：
+  - `indicators.qlib_factors` 新增 `vpa_pullback_dryup`（近 10 日高点回落未破前低、近 3 日量能萎缩且最新 K 线具备下影或日内中上半区收盘承接）、`vpa_upthrust_distribution`（近 20 日高位放量上冲回落 UTAD 派发识别）与 `vwap20_deviation_atr`（相对 20 日滚动 VWAP 的 ATR 偏离度）。
+  - `verdict.anti_quant_traps` 同步新增 `vpa_pullback_dryup` 与 `vpa_upthrust_distribution` 布尔标识及对应 `warnings_cn` 提示。
+- **微观交易摩擦与小额账户保护**：
+  - `scripts/market_rules.py` 新增 `compute_round_trip_cost_detail`，覆盖 A 股单笔 5 元最低佣金（往返 10 元）+ 股票中登过户费（双边 0.2 bps）、港股双边印花税（20 bps）+ 四项交易所/监管规费（双边 2.1 bps）+ 最低佣金、美股 SEC/FINRA 规费。
+  - `scripts/risk.py` 在小额账户触发单笔最低佣金时自动下调推荐整手股数，确保含固定最低佣金的最大止损金额绝不突破 `risk_budget_amount`。
+- **除权除息日盘中对齐与腾讯真实日线容灾**：
+  - `scripts/data_gateway.py` 修复除权日盘中运行时因拆分未收盘 K 线导致当日除权因子漏算的断层问题，并在主源网络/限流故障时自动回退至腾讯真实未复权日线（`TENCENT_FAILOVER_DAILY`）。
+- **If-Then 交易想法 6 维双向风控审计与到期对账闭环**：
+  - `scripts/risk.py` 新增 `audit_trade_idea`、`append_idea_to_ledger` 及 CLI 入口，支持 LONG/SHORT 双向审计与整数关口/支撑位过近扫损预警。
+  - `scripts/evaluation.py` 新增 `reconcile_trade_ideas` 及 CLI 入口，支持 A 股 T+1、一字涨跌停锁死、跳空穿仓真实滑点与保本棘轮保护（`RATCHET_PROTECTED`）对账。
+- **离线交互看板 2.0、Cloudflare Worker 导出器与 30 组对抗评测集**：
+  - `scripts/render_html.py` 新增三模态副图切换（`成交量 & RVOL` / `RSI(14)` / `MACD Hist`）、侧栏「If-Then 交互式净盈亏比与摩擦试算器」及 `export_cloudflare_worker_bundle`（绑定 `*.taylor-link.xyz` + WebP 压缩）。
+  - `scripts/doctor.py` 与 `install.sh` 支持探测 `~/.hermes/skills` 分类子目录、Profile 路径与脚本集合一致性校验。
+
 ### 修复（合入后代码审查）
 
 - 回复校验（`scripts/lint_response.py`）：

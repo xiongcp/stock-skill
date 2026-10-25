@@ -547,6 +547,29 @@ def test_score_trade_ideas_reconciles_swept_integer_stop_vs_audited_stop() -> No
     assert item["audited_outcome"]["status"] == "TP_HIT"
     assert item["attribution"] == "STOP_SWEPT_THEN_TARGET"
 
+    # 验证冲高 +0.9R 且收盘 >= +0.3R 后触发保本棘轮保护（RATCHET_PROTECTED_AFTER_SURGE），以及跳空低开真实滑点 (< -1.0R)
+    ratchet_idea = {
+        "idea_id": "idea_test_002",
+        "symbol": "300604.SZ",
+        "market": "CN",
+        "as_of": "2026-10-15",
+        "direction": "LONG",
+        "user_idea": {"entry": 100.00, "stop": 90.00, "target": 125.00, "shares": 100},
+        "recommended_adjustments": {"entry": 100.00, "stop": 89.20, "target": 125.00},
+    }
+    surge_then_drop_bars = [
+        {"day": "2026-10-16", "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 100000},
+        # 次日冲高 110.5 (> 100 + 0.9*10.8) 且收盘 105.0 (> 100 + 0.3*10.8)，激活保本棘轮
+        {"day": "2026-10-19", "open": 101.0, "high": 110.5, "low": 100.5, "close": 105.0, "volume": 150000},
+        # 第三日回落至 88.0，未设棘轮的用户计划触发止损，而启用棘轮的审计计划在保本位 (+0.08R) 保护离场
+        {"day": "2026-10-20", "open": 102.0, "high": 102.5, "low": 88.0, "close": 88.5, "volume": 120000},
+    ]
+    r_sum = reconcile_trade_ideas([ratchet_idea], bars_by_symbol={"300604.SZ": surge_then_drop_bars}, horizon_bars=15)
+    assert r_sum["ratchet_saved_count"] == 1
+    assert r_sum["items"][0]["attribution"] == "RATCHET_PROTECTED_AFTER_SURGE"
+    assert r_sum["items"][0]["audited_outcome"]["realized_r"] > 0
+
+
 
 def test_dashboard_v2_and_cloudflare_worker_exporter(replay_recorded, tmp_path: Path) -> None:
     """验证看板 2.0 副图切换、If-Then 净盈亏比交互计算器，以及 Cloudflare Worker 打包器 (*.taylor-link.xyz)。"""

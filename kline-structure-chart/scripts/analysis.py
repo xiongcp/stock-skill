@@ -193,6 +193,9 @@ def _build_replay_snapshots(
                     "rsi14": round(float(ind_sub_win["series"]["rsi14"][sv_i]), 2)
                     if ind_sub_win["series"]["rsi14"][sv_i] is not None
                     else None,
+                    "macd_hist": round(float(ind_sub_win["series"]["macd"]["hist"][sv_i]), 3)
+                    if ind_sub_win["series"]["macd"]["hist"][sv_i] is not None
+                    else None,
                     "rvol20": round(float(ind_sub_win["series"]["rvol20"][sv_i]), 2)
                     if ind_sub_win["series"]["rvol20"][sv_i] is not None
                     else None,

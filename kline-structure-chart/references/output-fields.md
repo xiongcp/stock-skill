@@ -85,7 +85,7 @@
 | `verdict.overextended` | 短期是否乖离过大（追高风险） | 布尔 | 否 | experimental | 为 `true` 时提醒不要追高 |
 | `verdict.rule_detail` | 规则分明细：`components`（`macro_trend_25`、`structure_pattern_25`、`strategy_trigger_25`、`volume_benchmark_25`，各 0~25）、`components_total`（调整前合计）、`regime_adjustment`（`applied`、`scoring_regime`、`components_total`、`adjusted_rule_score`、`reversion_score_adj`、`causal_momentum_ic_15d`、`note_cn`）、`timeframes_aligned`、`scoring_method`、`note` | 对象 | 否（未调整时 `applied = false`） | experimental | 追问时解释；调整时原文转述 `note_cn`，不得把调整后的低分说成"多周期空头" |
 | `verdict.strategy_signals` | 五个规则策略的状态：`strategy_id`、`name_cn`、`family`、`direction`、`state`（如 `LONG_ACTIVE`）、`as_of`、`formula_verified` | 对象数组 | 否 | experimental | "某策略处于多头激活" |
-| `verdict.anti_quant_traps` | 反量化陷阱检查：`warnings_cn`、`gates_active`、`ignition_bull_trap_downgraded`、`momentum_crowding` 等 | 对象 | 是 | experimental | 有 `warnings_cn` 时原文转述 |
+| `verdict.anti_quant_traps` | 反量化陷阱检查：`warnings_cn`、`gates_active`、`ignition_bull_trap_downgraded`、`momentum_crowding`、`vpa_pullback_dryup`、`vpa_upthrust_distribution` 等 | 对象 | 是 | experimental | 有 `warnings_cn` 时原文转述 |
 | `verdict.bull_case` / `bear_case` | 多空两方的规则化证据句 | 文本数组 | 否（可为空数组） | experimental | 可作为证据列举 |
 
 ## `market_context`
@@ -124,7 +124,7 @@
 | `indicators.trend` | 趋势指标：`sma20` / `sma60` / `sma120` / `sma250`、`ema20` / `ema50` / `ema60` / `ema200`、`vwap20`（近 20 日成交量加权均价）、`supertrend_line` / `supertrend_dir`（1 多、-1 空）、`adx14` / `plus_di14` / `minus_di14`（0~100，ADX 高于 23 视为有趋势） | 价格 / 0~100 | 历史不足时部分可空 | stable | "MA20 X" |
 | `indicators.momentum` | 动量指标：`rsi14`（0~100，不单独作为买卖依据）、`rsi14_prev`（前一根K线的 RSI14，普通指标）、`macd_dif` / `macd_dea` / `macd_hist`、`stoch_k` / `stoch_d`、`rvol20`（当日成交量 / 近 20 日均量，倍数） | 数值 | 历史不足时可空 | stable | "量能为 20 日均量的 X 倍" |
 | `indicators.volatility` | 波动率指标：`atr14`、`atr20_pct`（占价格百分比）、`bb_upper` / `bb_mid` / `bb_lower`、`bbw`、`bbw_percentile_120`（近 120 日带宽分位，低表示收敛） | 价格 / % / 0~100 | 否 | stable | — |
-| `indicators.qlib_factors` | 量价因子：实体占比、上下影线比、量价相关、ATR 归一化动量、20/60 日年化波动及其比值等 | 比值 | 是 | experimental | 只在用户追问时解释 |
+| `indicators.qlib_factors` | 量价因子：实体占比、上下影线比、量价相关、ATR 归一化动量、20/60 日年化波动及其比值、`vwap20_deviation_atr`、`vpa_pullback_dryup`、`vpa_upthrust_distribution` 等 | 比值/布尔 | 是 | experimental | 只在用户追问时解释 |
 
 ## `scenarios`
 
