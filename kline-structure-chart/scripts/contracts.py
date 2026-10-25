@@ -177,6 +177,13 @@ class InsufficientHistoryError(RuntimeError):
     """已收盘K线不足以计算（上市太短或 --as-of 太早）；属于数据不可用的一种，命令行单独以退出码 4 报告。"""
 
 
+class ContractViolationError(Exception):
+    """投影出的 result.json / chart_data.json 未通过契约自检：技能自身的 bug，命令行以 INTERNAL_ERROR、退出码 1 报告。
+
+    刻意不继承 ValueError / RuntimeError，避免被当成参数错误或行情不可用。
+    """
+
+
 _JSON_TYPES: dict[str, type | tuple[type, ...]] = {
     "object": dict, "array": list, "string": str, "boolean": bool, "null": type(None),
 }

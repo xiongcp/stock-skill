@@ -29,6 +29,9 @@ from market_rules import (
 MIN_LIVE_BARS = 130
 # 取数长度固定（覆盖 --days 上限 500 + MA250 预热），保证所有计算与展示参数 --days 无关
 FETCH_BARS = 760
+# 只凭根数分不清"上市太短"和"厂商本次只返回了部分历史"，提示里两种都写明，免得把截断响应说成新股
+_SHORT_LIVE_HINT = "：可能是上市时间短、--as-of 太早，或数据源本次只返回了部分历史（可稍后重试）"
+_SHORT_LOCAL_HINT = "：本地文件的历史太短，或 --as-of 太早"
 # 历史回放需要额外覆盖 as_of 之前的指标预热窗口；新浪单次请求可返回 3000 根。
 HISTORICAL_FETCH_BARS = 2600
 # 腾讯 fqkline 历史窗口上限（请求更多会返回空）。
@@ -395,7 +398,7 @@ def _load_single_series(
             if src.startswith("YAHOO_"):
                 bars, placeholder_days = drop_placeholder_bars(bars)
             if len(bars) < MIN_LIVE_BARS:
-                raise InsufficientHistoryError(f"历史长度不足 ({symbol}: {len(bars)} < {MIN_LIVE_BARS})")
+                raise InsufficientHistoryError(f"历史长度不足 ({symbol}: {len(bars)} < {MIN_LIVE_BARS})" + _SHORT_LIVE_HINT)
             return bars, src, errors, placeholder_days
         except InsufficientHistoryError:
             raise  # 历史不足不是取数失败，原样上抛让命令行以退出码 4 报告
@@ -476,7 +479,7 @@ def load_bundle(
             target_bars, intraday = split_incomplete_last_bar(target_bars, inst["market"], now)
             if len(target_bars) < MIN_LIVE_BARS:
                 raise InsufficientHistoryError(
-                    f"历史长度不足 ({inst.get('symbol') or '输入行情包标的'}: {len(target_bars)} < {MIN_LIVE_BARS})"
+                    f"历史长度不足 ({inst.get('symbol') or '输入行情包标的'}: {len(target_bars)} < {MIN_LIVE_BARS})" + _SHORT_LOCAL_HINT
                 )
             out = dict(raw_data)
             out["target"] = {**target, "bars": target_bars, "intraday": intraday or target.get("intraday")}
@@ -513,7 +516,7 @@ def load_bundle(
             validate_bars(bars, "input_bars")
             bars, intraday = split_incomplete_last_bar(bars, inst["market"], now)
             if len(bars) < MIN_LIVE_BARS:
-                raise InsufficientHistoryError(f"历史长度不足 ({inst['symbol']}: {len(bars)} < {MIN_LIVE_BARS})")
+                raise InsufficientHistoryError(f"历史长度不足 ({inst['symbol']}: {len(bars)} < {MIN_LIVE_BARS})" + _SHORT_LOCAL_HINT)
             # 本地K线数组没有公司行动数据，按原样使用并在复权状态中注明
             bars = apply_point_in_time_adjustment(bars, mode="raw", as_of_day=bars[-1]["day"])
             local_adjustment = {
@@ -568,7 +571,7 @@ def load_bundle(
     # 未收盘K线不得当作已收盘参与指标/预测计算（即使传入 --as-of 为当天或未来日期，也必须拆出尚未收盘的当日K线）
     target_bars, intraday = split_incomplete_last_bar(target_bars, market, now)
     if len(target_bars) < MIN_LIVE_BARS:
-        raise InsufficientHistoryError(f"历史长度不足 ({inst['symbol']}: {len(target_bars)} < {MIN_LIVE_BARS})")
+        raise InsufficientHistoryError(f"历史长度不足 ({inst['symbol']}: {len(target_bars)} < {MIN_LIVE_BARS})" + _SHORT_LIVE_HINT)
     missing_session = None
     latest_closed = latest_closed_session(market, now)
     if not as_of or str(as_of)[:10] >= latest_closed:

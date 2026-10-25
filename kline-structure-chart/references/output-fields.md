@@ -14,7 +14,7 @@
 2. 枚举可能新增取值，读取方必须容忍未知取值。
 3. 每个字段标注稳定级别：`stable` 按第 1 条承诺；`experimental` 可在次版本中变动，变动写进 `CHANGELOG.md` 对应版本的"契约变更"小节。
 4. `*_chart_data.json` 不是稳定接口，只供本技能的 PNG / HTML 渲染使用，字段可能在任何版本变化；回答用户时不要引用。
-5. 契约边界由测试守护：新增或移除契约字段时，必须同时更新 `assets/analysis.schema.json` 的 `x-stability`、`CHANGELOG.md` 的"契约变更"小节，以及 `tests/fixtures/contract/result_v6_keypaths_{600519_plain,600519_equity_backtest,00700_hk,nvda_us,000001_index}.json` 各配置的全键路径快照（`tests/test_v6_contract.py::test_v6_result_keypaths_match_snapshot` 按配置参数化：A 股基线、带账户净值与回测、港股、美股、指数）。
+5. 契约边界由测试守护：新增或移除契约字段时，必须同时更新 `assets/analysis.schema.json` 的 `x-stability`、`CHANGELOG.md` 的"契约变更"小节，以及 `tests/fixtures/contract/result_v6_keypaths_{600519_plain,600519_equity_backtest,00700_hk,nvda_us,000001_index}.json` 各配置的全键路径快照（`tests/test_v6_contract.py::test_v6_result_keypaths_match_snapshot` 按配置参数化：A 股基线、带账户净值与回测、港股、美股、指数）；`backtest.json` 的键结构由 `tests/fixtures/contract/backtest_v6_keypaths_600519.json` 守护（以动作代码、否决代码为键的统计表折叠为 `{*}`）。
 6. `result.json` 落盘（`indent=2`）不超过 80 KB。
 
 ## 顶层

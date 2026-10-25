@@ -31,8 +31,10 @@ _UNVALIDATED_PROB_PHRASES = (
     re.compile(r"(?:上涨|下跌|突破|反弹|上攻|下探|成功|盈利|翻倍|见顶|见底|涨|跌)(?:的)?(?:概率|可能性|几率)"),
     re.compile(
         r"(?:概率|可能性|几率|胜率|成功率|命中率|命中概率|准确率|把握|频率"
-        # 占比/比例：上涨占比、先到目标的比例都是频率数字；因子/参数类的固定用语（实体占比、风险比例、斐波那契比例等）不算
-        r"|(?<!实体)(?<!影线)(?<!跳空)(?<!风险)(?<!仓位)(?<!回撤)(?<!斐波那契)(?<!涨跌停)(?:占比|比例))\s*"
+        # 占比/比例：只有挂在涨跌、盈亏、命中、到达这类结果事件上时才是频率数字（上涨占比、先到目标的比例）；
+        # 实体占比、风险比例、成交量占比等因子与参数用语不含这些事件词，不受影响
+        r"|(?:上涨|下跌|上攻|下探|盈利|亏损|获利|胜|成功|命中|触及|达标|到达|先到|收阳|收阴|收涨|收跌)"
+        r"[^\d\n。；，,、%]{0,8}?(?:占比|比例))\s*"
         r"(?:约|大约|为|是|达|达到|高达|超|超过|高于|接近|有|在|>=?|:|：|=)?\s*\d+(?:\.\d+)?\s*%"
     ),
     re.compile(r"[一二三四五六七八九]成(?:把握|胜算|概率|机会|以上)?(?=[^\d]|$)"),
@@ -40,7 +42,7 @@ _UNVALIDATED_PROB_PHRASES = (
 _NEGATION_RE = re.compile(r"不是|不叫|不代表|并非|不得|不能|严禁|禁止|不构成|不等于|不要|不应|不宜|而非|不含|没有")
 # 唯一允许的概率类数字：回测成交胜率，同一句必须出现「回测」并给出 95% 区间
 _BACKTEST_SENTENCE_RE = re.compile(r"回测")
-_CI_RE = re.compile(r"95%\s*区间|Wilson")
+_CI_RE = re.compile(r"95%\s*(?:置信)?区间|Wilson")
 # 回测胜率专用：必须与 backtest.json 的成交样本一致；小样本不得被包装为 70% 目标证据
 _BACKTEST_RATE_RE = re.compile(
     r"(?:胜率|成功率|命中率|命中概率|准确率)\s*(?:为|是|约|达|达到|高达|超|超过|高于|接近|在|>=?|:|：|=|攀升至)?\s*(\d+(?:\.\d+)?)\s*%"
@@ -91,7 +93,13 @@ def _unvalidated_probability_hits(text: str) -> list[str]:
             if _NEGATION_RE.search(before):
                 continue  # 「不是胜率或上涨概率」「不得出现大概率突破」之类的否定说明
             sent = _sentence_around(text, m.start(), m.end())
-            if pat is numeric_pat and _BACKTEST_SENTENCE_RE.search(sent) and _CI_RE.search(sent):
+            # 例外只给"胜率"本身：同句的"回测""95% 区间"不能替频率、占比、概率数字背书
+            if (
+                pat is numeric_pat
+                and m.group(0).startswith("胜率")
+                and _BACKTEST_SENTENCE_RE.search(sent)
+                and _CI_RE.search(sent)
+            ):
                 continue
             hits.append(m.group(0))
     return hits
