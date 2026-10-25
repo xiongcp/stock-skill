@@ -1713,6 +1713,41 @@ def test_money_parameters_are_validated_before_fetching(tmp_path: Path, field: s
         run_pipeline(req, output_dir=tmp_path)
 
 
+def test_microstructure_exact_cost_detail_and_small_account_min_commission(replay_recorded) -> None:
+    """A 股 5 元最低佣金+过户费、港股全口径规费及小额账户最低佣金风控预算保护。"""
+    from analysis import analyze_bundle
+    from market_rules import compute_round_trip_cost_detail, get_market_microstructure_rules
+
+    cn_eq_rules = get_market_microstructure_rules("CN", "equity", "600519.SH", day_str="2026-10-15")
+    # 小额成交 2,000 元：双边最低佣金 5+5=10 元，加上卖出印花税 5bps (1.0元) + 双边过户费 0.2bps (0.04元) = 11.04 元
+    small_cn = compute_round_trip_cost_detail(2000.0, cn_eq_rules, shares=100)
+    assert small_cn["min_commission_applied"] is True
+    assert small_cn["total_cost_amount"] == pytest.approx(11.04, abs=0.01)
+    assert small_cn["effective_cost_rate"] > 0.005
+
+    # 大额成交 200,000 元：比例佣金 2.5bps/边 = 50 元/边 > 5 元，不触发最低佣金
+    large_cn = compute_round_trip_cost_detail(200000.0, cn_eq_rules, shares=100)
+    assert large_cn["min_commission_applied"] is False
+
+    # 港股股票：双边印花税 20bps + 港交所/证监会/财汇局/结算规费 2.1bps + 最低佣金保护
+    hk_rules = get_market_microstructure_rules("HK", "equity", "00700.HK", day_str="2026-10-15", board_lot=100)
+    hk_cost = compute_round_trip_cost_detail(100000.0, hk_rules, shares=200)
+    assert hk_cost["regulatory_levies_bps"] == pytest.approx(2.1, abs=0.05)
+    assert hk_cost["total_cost_amount"] > 100000.0 * 0.0026
+
+    # 小额账户在 510300.SH (约 4.2 元/股，100 股约 420 元，往返最低佣金 10 元 > 2%) 下，含最低佣金的总止损亏损不得击穿风险预算
+    now = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
+    small_req = {
+        "symbol": "510300.SH", "market": "CN", "asset_type": "etf", "display_bars": 120,
+        "horizon_bars": 15, "account_equity": 4000.0, "max_risk_pct": 0.01, "as_of": "2025-09-12",
+    }
+    rep = analyze_bundle(load_bundle(small_req, now=now), small_req, include_replay=False, include_forecast=False)
+    sz = rep["triple_barrier_plan"]["position_sizing"]
+    assert sz["max_loss_at_stop"] <= sz["risk_budget_amount"] + 1e-6
+    assert "最低佣金" in sz["gap_risk_note"]
+
+
+
 def test_p1_backtest_limit_prices_use_exchange_rounding_and_one_price_boards() -> None:
     from market_rules import daily_limit_prices
 

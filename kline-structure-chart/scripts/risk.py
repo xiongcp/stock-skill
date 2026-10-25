@@ -4,6 +4,7 @@ import math
 from typing import Any
 
 from market_rules import (
+    compute_round_trip_cost_detail,
     get_market_microstructure_rules,
     price_decimals,
     round_shares_to_lot,
@@ -395,11 +396,31 @@ def compute_triple_barrier_plan(
         risk_budget = float(account_equity) * float(max_risk_pct)
         raw_shares = int(math.floor(risk_budget / max(1e-6, worst_unit_risk)))
         lot = int(rules["lot_size"])
+        step = int(rules.get("lot_step", lot))
         lot_shares = round_shares_to_lot(raw_shares, rules)
         max_cash_shares = round_shares_to_lot(
             int(math.floor(float(account_equity) / max(1e-6, entry_high_raw * (1.0 + fee_rate)))), rules
         )
         final_shares = max(0, min(lot_shares, max_cash_shares))
+        price_loss_per_share = (entry_high - stop_loss) / adj_factor
+        cost_info = compute_round_trip_cost_detail(final_shares * entry_high_raw, rules, shares=final_shares)
+        if cost_info["min_commission_applied"] and final_shares > 0:
+            while final_shares > 0:
+                ci = compute_round_trip_cost_detail(final_shares * entry_high_raw, rules, shares=final_shares)
+                if final_shares * price_loss_per_share + ci["total_cost_amount"] <= risk_budget + 1e-6:
+                    cost_info = ci
+                    break
+                final_shares = round_shares_to_lot(final_shares - step, rules)
+            cost_info = compute_round_trip_cost_detail(final_shares * entry_high_raw, rules, shares=final_shares)
+            gap_risk_note = (
+                gap_risk_note
+                + f"；小额单笔最低佣金/规费生效（双边最低佣金下往返固定摩擦至少约 { compute_round_trip_cost_detail(lot * entry_high_raw, rules)['total_cost_amount']:.2f} {meta.get('currency', '')}）"
+            )
+        max_loss_val = (
+            round(final_shares * price_loss_per_share + cost_info["total_cost_amount"], 2)
+            if (cost_info["min_commission_applied"] and final_shares > 0)
+            else round(final_shares * worst_unit_risk, 2)
+        )
         # 风控否决或评级不是做多确认/条件观察时不给股数：股数本身就是买入建议，与"否决时只给观察位"冲突
         long_allowed = not vetoed and action in ("LONG_CONFIRMED", "WATCH_LONG_SETUP")
         position_sizing = {
@@ -409,12 +430,12 @@ def compute_triple_barrier_plan(
             "risk_budget_amount": round(risk_budget, 2),
             "lot_size": lot,
             "min_order_shares": int(rules.get("min_order_shares", lot)),
-            "lot_step": int(rules.get("lot_step", lot)),
+            "lot_step": step,
             "sizing_basis": "ENTRY_HIGH_WORST_FILL",
             "unit_risk_per_share": round(worst_unit_risk, 4),
             "recommended_shares": final_shares if long_allowed else None,
             "estimated_notional": round(final_shares * entry_high_raw, 2) if long_allowed else None,
-            "max_loss_at_stop": round(final_shares * worst_unit_risk, 2) if long_allowed else None,
+            "max_loss_at_stop": max_loss_val if long_allowed else None,
             "settlement_rule": rules["settlement"],
             "gap_risk_note": gap_risk_note,
         }

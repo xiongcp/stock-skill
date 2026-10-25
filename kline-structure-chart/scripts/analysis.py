@@ -575,6 +575,11 @@ def analyze_bundle(
         report["quality"]["notes"].append(
             f"复权未生效（{adj_status.get('error')}），价格为不复权原始价，除权除息缺口可能被误识别为跳空/FVG"
         )
+    intraday_ex_day = bundle.get("provenance", {}).get("intraday_ex_date_aligned")
+    if intraday_ex_day:
+        report["quality"]["notes"].append(
+            f"今日（{intraday_ex_day}）为除权除息日，历史已收盘K线与计划点位已按当日除权后口径对齐"
+        )
     missing_session = bundle.get("provenance", {}).get("missing_closed_session")
     if missing_session:
         report["quality"]["notes"].append(

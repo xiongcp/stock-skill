@@ -176,6 +176,37 @@ def fetch_tencent_index_daily_bars(tencent_code: str, datalen: int = 760) -> lis
     return bars
 
 
+def fetch_tencent_daily_bars(tencent_code: str, datalen: int = 760) -> list[dict[str, Any]]:
+    """腾讯未复权真实日线（主源限流/故障时的同口径真实备用源，绝不合成数据）。"""
+    capped = min(datalen, TENCENT_INDEX_MAX_BARS)
+    url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={_url_token(tencent_code)},day,,,{capped},"
+    payload = json.loads(_http_get(url))
+    node = ((payload.get("data") or {}).get(tencent_code)) or {}
+    rows = node.get("day") or node.get("qfqday") or []
+    bars: list[dict[str, Any]] = []
+    for row in rows:
+        o, c, h, l = (float(row[1]), float(row[2]), float(row[3]), float(row[4]))
+        if min(o, c, h, l) <= 0:
+            continue
+        vol = float(row[5]) if len(row) > 5 else 0.0
+        if tencent_code.startswith(("sh", "sz", "bj")):
+            vol *= 100.0
+        bars.append(
+            {
+                "day": str(row[0])[:10],
+                "open": o,
+                "high": max(o, c, h, l),
+                "low": min(o, c, h, l),
+                "close": c,
+                "volume": vol,
+                "complete": True,
+            }
+        )
+    if not bars:
+        raise RuntimeError(f"Tencent daily kline empty for {tencent_code}")
+    return bars
+
+
 def fetch_tencent_quote_meta(tencent_code: str) -> dict[str, Any]:
     """腾讯行情快照：返回证券简称与港股每手股数（字段 60）。仅用于标的元数据，不参与任何价格计算。"""
     raw = _http_get(f"https://qt.gtimg.cn/q={_url_token(tencent_code)}", encoding="gbk")
@@ -276,6 +307,7 @@ def build_corporate_actions(
     raw_bars: list[dict[str, Any]],
     events: list[dict[str, Any]],
     include_splits: bool,
+    max_ex_date: str | None = None,
 ) -> list[dict[str, Any]]:
     """把除权除息事件换算成复权参数：dividend_factor = (除息前一日收盘 - 每股股息) / 除息前一日收盘。
 
@@ -286,7 +318,7 @@ def build_corporate_actions(
     if not raw_bars:
         return []
     first_day = raw_bars[0]["day"]
-    last_day = raw_bars[-1]["day"]
+    last_day = max(raw_bars[-1]["day"], str(max_ex_date)[:10]) if max_ex_date else raw_bars[-1]["day"]
     splits = [s for s in events if float(s.get("split_ratio") or 1.0) != 1.0]
     actions: list[dict[str, Any]] = []
     for ev in events:
@@ -324,13 +356,14 @@ def _load_corporate_actions(
     source: str,
     mode: str,
     allow_network: bool,
+    max_ex_date: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """返回 (复权参数, 复权状态)。取不到事件时不复权，并如实记录原因。"""
     status: dict[str, Any] = {"requested": mode, "applied": "raw", "events_used": 0, "source": None, "error": None}
     if mode == "raw" or inst["asset_type"] == "index":
         status["requested"] = "raw"
         return [], status
-    if not source.startswith(("SINA_", "YAHOO_")):
+    if not source.startswith(("SINA_", "YAHOO_", "TENCENT_")):
         status["error"] = f"数据源 {source} 无公司行动数据"
         return [], status
     if not allow_network:
@@ -343,8 +376,13 @@ def _load_corporate_actions(
     except Exception as exc:  # noqa: BLE001 - 失败原因写入复权状态
         status["error"] = f"{type(exc).__name__}: {exc}"
         return [], status
-    # 新浪 A 股为不复权原始价，需同时处理送转与分红；Yahoo 港美股价格已按拆股调整，只处理分红
-    actions = build_corporate_actions(raw_bars, events, include_splits=source.startswith("SINA_"))
+    # 新浪/腾讯未复权行情需同时处理送转与分红；Yahoo 港美股价格已按拆股调整，只处理分红
+    actions = build_corporate_actions(
+        raw_bars,
+        events,
+        include_splits=not source.startswith("YAHOO_"),
+        max_ex_date=max_ex_date,
+    )
     if mode == "split":
         actions = [a for a in actions if a["split_ratio"] != 1.0]
     status.update(applied=mode, events_used=len(actions), source=f"YAHOO_EVENTS({y_sym})")
@@ -404,6 +442,23 @@ def _load_single_series(
             raise  # 历史不足不是取数失败，原样上抛让命令行以退出码 4 报告
         except Exception as exc:  # noqa: BLE001 - 失败原因必须记录并向上抛出
             errors.append(f"{type(exc).__name__}: {exc}")
+            # 当新浪或 Yahoo 因网络/限流故障（非本地代码或厂商 OHLC 损坏 ValueError）失败时，尝试腾讯真实日线容灾
+            if not isinstance(exc, ValueError) and symbol not in TENCENT_INDEX_SOURCES:
+                try:
+                    t_code = tencent_quote_code_for(symbol, market)
+                    bars = fetch_tencent_daily_bars(t_code, datalen=min(datalen, TENCENT_INDEX_MAX_BARS))
+                    src = f"TENCENT_FAILOVER_DAILY({t_code})"
+                    validate_bars(bars, f"{src}:{symbol}")
+                    if as_of:
+                        bars = [b for b in bars if b["day"] <= as_of[:10]]
+                    bars, placeholder_days = drop_placeholder_bars(bars)
+                    if len(bars) < MIN_LIVE_BARS:
+                        raise InsufficientHistoryError(f"历史长度不足 ({symbol}: {len(bars)} < {MIN_LIVE_BARS})" + _SHORT_LIVE_HINT)
+                    return bars, src, [], placeholder_days
+                except InsufficientHistoryError:
+                    raise
+                except Exception as fb_exc:  # noqa: BLE001
+                    errors.append(f"TencentFailover({type(fb_exc).__name__}: {fb_exc})")
 
     raise RuntimeError(f"无法获取 {symbol} 的真实行情（{'; '.join(errors)}），拒绝使用合成数据")
 
@@ -578,13 +633,23 @@ def load_bundle(
         if target_bars[-1]["day"] < latest_closed:
             missing_session = latest_closed
     adj_mode = request.get("adjustment", "total_return" if inst["asset_type"] != "index" else "raw")
-    actions, adjustment_status = _load_corporate_actions(inst, target_bars, target_src, adj_mode, allow_network)
+    eff_as_of_day = intraday["day"] if intraday else target_bars[-1]["day"]
+    actions, adjustment_status = _load_corporate_actions(
+        inst, target_bars, target_src, adj_mode, allow_network, max_ex_date=eff_as_of_day
+    )
     target_bars = apply_point_in_time_adjustment(
         target_bars,
         corporate_actions=actions,
         mode=adjustment_status["applied"],
-        as_of_day=target_bars[-1]["day"],
+        as_of_day=eff_as_of_day,
     )
+    intraday_ex_day = (
+        intraday["day"]
+        if (intraday and adjustment_status["applied"] != "raw" and any(a["ex_date"] == intraday["day"] for a in actions))
+        else None
+    )
+    if intraday is not None and target_bars:
+        intraday = {**intraday, "prev": float(target_bars[-1]["close"])}
 
     # 先大盘、后个股：若当前标的不是该市场默认基准指数，则同步加载基准指数（截至标的最后一根已收盘K线）
     bench_cfg = DEFAULT_BENCHMARKS[market]
@@ -634,6 +699,7 @@ def load_bundle(
             "adjustment_status": adjustment_status,
             "errors": target_errors,
             "intraday_excluded_day": intraday["day"] if intraday else None,
+            "intraday_ex_date_aligned": intraday_ex_day,
             "missing_closed_session": missing_session,
             "placeholder_bars_removed": target_placeholders,
             "instrument_meta": instrument_meta,

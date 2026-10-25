@@ -734,6 +734,60 @@ def round_trip_cost_rate(rules: dict[str, Any]) -> float:
     return bps / 10000.0
 
 
+def compute_round_trip_cost_detail(
+    notional: float,
+    rules: dict[str, Any],
+    shares: int | None = None,
+) -> dict[str, Any]:
+    """计算含单笔最低佣金、过户费与交易所规费的精确往返成本明细。
+
+    - CN：单笔最低佣金 5 元（往返 10 元）；股票另计中国结算过户费双边共 0.2 bps（买卖各 0.1 bps = 0.001%）。
+    - HK：单笔最低佣金 15 港元（往返 30 港元）；另计港交所交易费（0.565 bps/边）、证监会交易征费（0.27 bps/边）、
+          财汇局征费（0.015 bps/边）与中央结算交收费（0.20 bps/边），双边规费合计 2.10 bps。
+    - US：单笔最低佣金 0.50 美元（往返 1.00 美元）；卖方 SEC/FINRA 规费约 0.28 bps。
+    """
+    prop_rate = round_trip_cost_rate(rules)
+    if notional <= 0:
+        return {
+            "total_cost_amount": 0.0,
+            "effective_cost_rate": prop_rate,
+            "proportional_cost_rate": prop_rate,
+            "regulatory_levies_bps": 0.0,
+            "min_commission_applied": False,
+            "breakeven_price_delta": 0.0,
+        }
+    market = str(rules.get("market") or "CN")
+    comm_bps = float(rules.get("commission_bps") or 0.0)
+    stamp_bps = float(rules.get("stamp_duty_buy_bps") or 0.0) + float(rules.get("stamp_duty_sell_bps") or 0.0)
+    prop_comm_leg = notional * (comm_bps / 10000.0)
+    if market == "CN":
+        min_comm_leg = 5.0
+        is_equity = float(rules.get("stamp_duty_sell_bps") or 0.0) > 0 or float(rules.get("tick_size") or 0.01) >= 0.01
+        levies_bps = 0.2 if is_equity else 0.0
+    elif market == "HK":
+        min_comm_leg = 15.0
+        levies_bps = 2.1
+    else:
+        min_comm_leg = 0.50
+        levies_bps = 0.28
+    actual_comm_leg = max(min_comm_leg, prop_comm_leg)
+    min_comm_applied = prop_comm_leg + 1e-9 < min_comm_leg
+    commission_total = 2.0 * actual_comm_leg
+    stamp_total = notional * (stamp_bps / 10000.0)
+    levies_total = notional * (levies_bps / 10000.0)
+    total_cost = commission_total + stamp_total + levies_total
+    eff_rate = total_cost / notional
+    be_delta = (total_cost / int(shares)) if (shares and int(shares) > 0) else 0.0
+    return {
+        "total_cost_amount": round(total_cost, 4),
+        "effective_cost_rate": round(eff_rate, 6),
+        "proportional_cost_rate": round(prop_rate, 6),
+        "regulatory_levies_bps": levies_bps,
+        "min_commission_applied": min_comm_applied,
+        "breakeven_price_delta": round(be_delta, 4),
+    }
+
+
 def apply_point_in_time_adjustment(
     bars: list[dict[str, Any]],
     corporate_actions: list[dict[str, Any]] | None = None,
