@@ -650,12 +650,24 @@ def compute_volume_profile(
     vols = [0.0] * num_bins
     for b in sub:
         lo, hi = float(b["low"]), float(b["high"])
+        o = float(b.get("open", lo))
+        c = float(b.get("close", hi))
+        tp = (hi + lo + c) / 3.0
         v = max(1.0, float(b.get("volume") or 1.0))
         b_start = max(0, min(num_bins - 1, int((lo - p_min) / step)))
         b_end = max(0, min(num_bins - 1, int((hi - p_min) / step)))
         span = b_end - b_start + 1
+        # 60% 成交量按全振幅分布，25% 集中于实体区间，15% 锚定典型价 (H+L+C)/3，抑制长影线对 POC 的稀释
         for k in range(b_start, b_end + 1):
-            vols[k] += v / span
+            vols[k] += (0.60 * v) / span
+        body_lo, body_hi = min(o, c), max(o, c)
+        body_start = max(0, min(num_bins - 1, int((body_lo - p_min) / step)))
+        body_end = max(0, min(num_bins - 1, int((body_hi - p_min) / step)))
+        body_span = body_end - body_start + 1
+        for k in range(body_start, body_end + 1):
+            vols[k] += (0.25 * v) / body_span
+        tp_idx = max(0, min(num_bins - 1, int((tp - p_min) / step)))
+        vols[tp_idx] += 0.15 * v
 
     poc_idx = max(range(num_bins), key=lambda k: vols[k])
     poc_price = p_min + (poc_idx + 0.5) * step

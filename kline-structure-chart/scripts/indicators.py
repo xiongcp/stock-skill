@@ -359,8 +359,12 @@ def price_volume_rank_corr(closes: list[float], volumes: list[float], window: in
     return out
 
 
-def compute_qlib_orthogonal_factors(bars: list[dict[str, Any]], atr_vals: list[float | None]) -> dict[str, Any]:
-    """提取 Qlib Alpha158 风格量价特征（未做正交化）：实体占比、影线偏度、量价秩相关、ATR 归一化动量、历史波动率比值。"""
+def compute_qlib_orthogonal_factors(
+    bars: list[dict[str, Any]],
+    atr_vals: list[float | None],
+    vwap20_vals: list[float | None] | None = None,
+) -> dict[str, Any]:
+    """提取 Qlib Alpha158 风格量价特征与多 K 线 VPA 供需衰竭因子：实体占比、影线偏度、量价秩相关、ATR 归一化动量、历史波动率比值、VWAP 偏离度与缩量回踩/放量派发识别。"""
     if not bars:
         return {}
     closes = [float(b["close"]) for b in bars]
@@ -377,12 +381,37 @@ def compute_qlib_orthogonal_factors(bars: list[dict[str, Any]], atr_vals: list[f
     pv_corr_series = price_volume_rank_corr(closes, volumes, window=20)
     pv_corr = pv_corr_series[-1] if pv_corr_series[-1] is not None else 0.0
 
-    atr_last = atr_vals[-1] if (atr_vals and atr_vals[-1]) else max(1e-6, h - l)
+    atr_last = float(atr_vals[-1]) if (atr_vals and atr_vals[-1]) else max(1e-6, h - l)
     prev_c = closes[-2] if len(closes) >= 2 else o
     rv_vals = rvol(volumes, 20)
     rv_last = float(rv_vals[-1]) if (rv_vals and rv_vals[-1] is not None) else 1.0
-    effort_vs_result = ((c - prev_c) / max(1e-6, float(atr_last))) / max(0.25, rv_last)
+    effort_vs_result = ((c - prev_c) / max(1e-6, atr_last)) / max(0.25, rv_last)
     mom10 = (c - closes[-11]) / (atr_last * math.sqrt(10)) if len(closes) >= 11 and atr_last > 0 else 0.0
+
+    vwap_last = float(vwap20_vals[-1]) if (vwap20_vals and vwap20_vals[-1] is not None) else c
+    vwap_dev_atr = (c - vwap_last) / max(1e-6, atr_last)
+
+    # VPA 多 K 线供需结构：
+    # 1) 缩量回踩测试企稳 (vpa_pullback_dryup)：近 10 日高点回落但未破近 10 日低点，近 3 日量能萎缩且最新 K 线具备下影/中上半区收盘承接
+    win10 = bars[-min(10, len(bars)) :]
+    hi10 = max(float(b["high"]) for b in win10)
+    lo10 = min(float(b["low"]) for b in win10)
+    recent_rvs = [float(x) for x in rv_vals[-3:] if x is not None]
+    vpa_pullback_dryup = bool(
+        len(recent_rvs) == 3
+        and c <= hi10 - 0.5 * atr_last
+        and c > lo10
+        and (sum(recent_rvs) / 3.0 <= 0.85 or (recent_rvs[2] <= recent_rvs[1] <= recent_rvs[0] and recent_rvs[2] <= 0.90))
+        and (close_in_range >= 0.45 or lower_wick >= 0.35)
+    )
+    # 2) 高位放量上冲派发 (vpa_upthrust_distribution / UTAD)：近 20 日高位放量上冲但收盘落入日内下半区或留长上影
+    win20 = bars[-min(20, len(bars)) :]
+    hi20 = max(float(b["high"]) for b in win20)
+    lo20 = min(float(b["low"]) for b in win20)
+    high_rank20 = 0.5 if hi20 <= lo20 else (h - lo20) / max(1e-9, hi20 - lo20)
+    vpa_upthrust_distribution = bool(
+        high_rank20 >= 0.85 and rv_last >= 1.60 and (close_in_range <= 0.42 or upper_wick >= 0.45)
+    )
 
     # HV20 / HV60 ratio
     rets = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes)) if closes[i - 1] > 0 and closes[i] > 0]
@@ -402,6 +431,9 @@ def compute_qlib_orthogonal_factors(bars: list[dict[str, Any]], atr_vals: list[f
         "hv20_annualized": round(hv20, 4),
         "hv60_annualized": round(hv60, 4),
         "hv_ratio_20_60": hv_ratio,
+        "vwap20_deviation_atr": round(vwap_dev_atr, 4),
+        "vpa_pullback_dryup": vpa_pullback_dryup,
+        "vpa_upthrust_distribution": vpa_upthrust_distribution,
     }
 
 
@@ -421,7 +453,7 @@ def compute_all_indicators(bars: list[dict[str, Any]]) -> dict[str, Any]:
     adx_res = adx(bars, 14)
     rvol20 = rvol(volumes, 20)
     vwap20 = vwap_rolling(bars, 20)
-    qlib_factors = compute_qlib_orthogonal_factors(bars, atr14)
+    qlib_factors = compute_qlib_orthogonal_factors(bars, atr14, vwap20)
 
     def _last(arr: list[Any], digits: int = 2) -> float | None:
         if not arr or arr[-1] is None:

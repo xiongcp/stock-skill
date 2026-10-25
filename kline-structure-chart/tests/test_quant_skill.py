@@ -1747,6 +1747,23 @@ def test_microstructure_exact_cost_detail_and_small_account_min_commission(repla
     assert "最低佣金" in sz["gap_risk_note"]
 
 
+def test_vpa_supply_demand_factors_and_dry_deduplication(replay_recorded) -> None:
+    """验证 VPA 缩量回踩企稳 (vpa_pullback_dryup)、放量上冲派发 (vpa_upthrust_distribution) 与 VWAP 偏离度因子。"""
+    from analysis import analyze_bundle
+
+    now = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=now)
+    rep = analyze_bundle(bundle, req, include_replay=False, include_forecast=False)
+    qlib = rep["mathematical_indicators"]["qlib_factors"]
+    assert "vpa_pullback_dryup" in qlib and isinstance(qlib["vpa_pullback_dryup"], bool)
+    assert "vpa_upthrust_distribution" in qlib and isinstance(qlib["vpa_upthrust_distribution"], bool)
+    assert "vwap20_deviation_atr" in qlib and isinstance(qlib["vwap20_deviation_atr"], float)
+    traps = rep["meta_labeling_decision"]["anti_quant_traps"]
+    assert "vpa_pullback_dryup" in traps and "vpa_upthrust_distribution" in traps
+
+
+
 
 def test_p1_backtest_limit_prices_use_exchange_rounding_and_one_price_boards() -> None:
     from market_rules import daily_limit_prices

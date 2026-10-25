@@ -347,6 +347,17 @@ def compute_triple_barrier_plan(
         anti_quant_warnings.append(
             "【破底翻扫损收回提示】近期出现盘中刺穿波段前低扫损后放量收阳站回支撑（LIQUIDITY_SWEEP_BULLISH），防守止损已设置于扫损极值下方并避开整数挂单关口"
         )
+    qlib_f = ind_snapshot.get("qlib_factors") or {}
+    vpa_dryup = bool(qlib_f.get("vpa_pullback_dryup", False))
+    vpa_utad = bool(qlib_f.get("vpa_upthrust_distribution", False))
+    if vpa_utad and not is_bull_trap_churn:
+        anti_quant_warnings.append(
+            f"【量价VPA·高位放量上冲回落(UTAD)】近20日高位放量（量比 {rv:.2f}x）上冲但收盘落入日内偏弱区（分位 {close_in_range*100:.0f}%），供应涌现，警惕派发"
+        )
+    if vpa_dryup and setup_type == "LEFT_SIDE_PULLBACK":
+        anti_quant_warnings.append(
+            "【量价VPA·缩量回踩测试】近期回调量能萎缩且日内承接良好，符合供需衰竭（No Supply）企稳特征"
+        )
 
     if not vetoed and not overextended and rule_score >= 65.0 and setup_type in ("RIGHT_SIDE_BREAKOUT", "LEFT_SIDE_PULLBACK"):
         action = "LONG_CONFIRMED"
@@ -470,6 +481,8 @@ def compute_triple_barrier_plan(
             "right_turn_confirmed": right_turn_confirmed,
             "momentum_crowding": momentum_crowding,
             "liquidity_sweep_reclaim": has_liquidity_sweep,
+            "vpa_pullback_dryup": vpa_dryup,
+            "vpa_upthrust_distribution": vpa_utad,
             "close_in_range": round(close_in_range, 4),
             "upper_wick_ratio": round(upper_wick_ratio, 4),
             "body_to_range": round(body_to_range, 4),
