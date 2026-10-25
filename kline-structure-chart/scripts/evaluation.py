@@ -652,3 +652,114 @@ def run_plan_backtest(
             ),
         },
     }
+
+
+def _simulate_plan_on_bars(
+    future_bars: list[dict[str, Any]],
+    *,
+    direction: str,
+    entry: float,
+    stop: float,
+    target: float,
+    market: str = "CN",
+) -> dict[str, Any]:
+    """在 `as_of` 之后的真实 K 线序列上因果回放单笔 If-Then 计划（A 股遵循 T+1 次日方可平仓）。"""
+    if not future_bars:
+        return {"triggered": False, "status": "NO_FUTURE_BARS", "realized_r": 0.0}
+    risk = max(1e-6, abs(entry - stop))
+    entry_idx: int | None = None
+    for idx, b in enumerate(future_bars):
+        lo, hi = float(b["low"]), float(b["high"])
+        if direction == "LONG" and (lo <= entry <= hi or float(b["open"]) <= entry):
+            entry_idx = idx
+            break
+        if direction == "SHORT" and lo <= entry <= hi:
+            entry_idx = idx
+            break
+    if entry_idx is None:
+        return {"triggered": False, "status": "NEVER_TRIGGERED", "realized_r": 0.0}
+
+    entry_day = str(future_bars[entry_idx]["day"])
+    start_exit_idx = entry_idx + 1 if market == "CN" else entry_idx
+    for idx in range(start_exit_idx, len(future_bars)):
+        b = future_bars[idx]
+        lo, hi = float(b["low"]), float(b["high"])
+        if direction == "LONG":
+            if lo <= stop:
+                return {"triggered": True, "entry_day": entry_day, "exit_day": str(b["day"]), "status": "STOP_HIT", "realized_r": -1.0}
+            if hi >= target:
+                return {"triggered": True, "entry_day": entry_day, "exit_day": str(b["day"]), "status": "TP_HIT", "realized_r": round((target - entry) / risk, 2)}
+        else:
+            if hi >= stop:
+                return {"triggered": True, "entry_day": entry_day, "exit_day": str(b["day"]), "status": "STOP_HIT", "realized_r": -1.0}
+            if lo <= target:
+                return {"triggered": True, "entry_day": entry_day, "exit_day": str(b["day"]), "status": "TP_HIT", "realized_r": round((entry - target) / risk, 2)}
+
+    last_c = float(future_bars[-1]["close"])
+    r_val = (last_c - entry) / risk if direction == "LONG" else (entry - last_c) / risk
+    return {"triggered": True, "entry_day": entry_day, "exit_day": str(future_bars[-1]["day"]), "status": "TIME_BARRIER_EXPIRED", "realized_r": round(r_val, 2)}
+
+
+def reconcile_trade_ideas(
+    ideas: list[dict[str, Any]],
+    *,
+    bars_by_symbol: dict[str, list[dict[str, Any]]],
+    horizon_bars: int = 15,
+) -> dict[str, Any]:
+    """对账交易想法账本与实际行情走势，识别假跌破扫损后反包等归因。"""
+    items: list[dict[str, Any]] = []
+    triggered_count = 0
+    swept_saved_count = 0
+    user_wins = 0
+    audited_wins = 0
+
+    for idea in ideas:
+        sym = str(idea.get("symbol") or "")
+        market = str(idea.get("market") or "CN")
+        as_of = str(idea.get("as_of") or "")
+        direction = str(idea.get("direction") or "LONG").upper()
+        all_bars = bars_by_symbol.get(sym) or []
+        future_bars = [b for b in all_bars if str(b["day"]) > as_of][:horizon_bars]
+
+        u_plan = idea.get("user_idea") or {}
+        a_plan = idea.get("recommended_adjustments") or u_plan
+        u_out = _simulate_plan_on_bars(future_bars, direction=direction, entry=float(u_plan["entry"]), stop=float(u_plan["stop"]), target=float(u_plan["target"]), market=market)
+        a_out = _simulate_plan_on_bars(future_bars, direction=direction, entry=float(a_plan["entry"]), stop=float(a_plan["stop"]), target=float(a_plan["target"]), market=market)
+        if u_out["triggered"] or a_out["triggered"]:
+            triggered_count += 1
+        if u_out["status"] == "TP_HIT":
+            user_wins += 1
+        if a_out["status"] == "TP_HIT":
+            audited_wins += 1
+
+        if u_out["status"] == "STOP_HIT" and a_out["status"] == "TP_HIT":
+            attribution = "STOP_SWEPT_THEN_TARGET"
+            swept_saved_count += 1
+        elif u_out["status"] == "STOP_HIT" and a_out["status"] == "STOP_HIT":
+            attribution = "GENUINE_BREAKDOWN_STOP"
+        elif a_out["status"] == "TP_HIT":
+            attribution = "TARGET_ACHIEVED"
+        elif not u_out["triggered"] and not a_out["triggered"]:
+            attribution = "UNTRIGGERED"
+        else:
+            attribution = "TIME_EXPIRED"
+
+        items.append({
+            "idea_id": idea.get("idea_id"),
+            "symbol": sym,
+            "as_of": as_of,
+            "direction": direction,
+            "user_outcome": u_out,
+            "audited_outcome": a_out,
+            "attribution": attribution,
+        })
+
+    return {
+        "total_ideas": len(ideas),
+        "triggered_count": triggered_count,
+        "swept_stop_saved_count": swept_saved_count,
+        "user_tp_hit_count": user_wins,
+        "audited_tp_hit_count": audited_wins,
+        "items": items,
+    }
+

@@ -455,3 +455,182 @@ def test_report_md_has_no_frequency_numbers_with_backtest(replay_recorded, tmp_p
     assert "回测" in md and "胜率" in md  # 确认回测章节确实渲染了
     assert "上涨占比" not in md
     assert _unvalidated_probability_hits(md) == []
+
+
+def test_audit_trade_idea_detects_integer_stop_chase_and_veto(replay_recorded, tmp_path: Path) -> None:
+    """验证 If-Then 交易想法审计器能识别风控否决冲突、整数关口扫损陷阱、追高偏离与净盈亏比不足，并落盘账本。"""
+    from risk import append_idea_to_ledger, audit_trade_idea
+
+    rep = _cn_moutai(tmp_path)
+    result_doc, _ = load_v6(rep)
+
+    last_close = float(result_doc["structure"]["last_close"])
+    integer_stop = float(int(round(last_close / 100.0)) * 100 - 100)
+    chase_entry = round(last_close * 1.06, 2)
+    narrow_target = round(chase_entry + (chase_entry - integer_stop) * 0.8, 2)
+
+    audit = audit_trade_idea(
+        result_doc,
+        direction="LONG",
+        entry=chase_entry,
+        stop=integer_stop,
+        target=narrow_target,
+        shares=100,
+        note="测试冲动追高与整数位止损",
+    )
+    assert audit["symbol"] == "600519.SH"
+    assert audit["overall_verdict"] in ("REJECTED_BY_RISK_GATE", "APPROVED_WITH_ADJUSTMENTS")
+    checks = audit["checks"]
+    assert checks["round_number_stop_trap"]["is_round_number"] is True
+    assert checks["round_number_stop_trap"]["status"] == "WARN"
+    assert checks["anti_chase"]["status"] in ("WARN", "FAIL")
+    assert checks["net_rr_and_friction"]["net_rr_after_cost"] < 1.5
+    assert checks["net_rr_and_friction"]["status"] == "FAIL"
+    assert "if_trigger_cn" in audit["if_then_playbook"]
+    assert "invalidation_cn" in audit["if_then_playbook"]
+
+    ledger_path = tmp_path / "ideas_ledger.jsonl"
+    append_idea_to_ledger(audit, ledger_path)
+    lines = ledger_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["idea_id"] == audit["idea_id"]
+
+
+def test_audit_trade_idea_hk_connect_t_trade_cost_floor(replay_recorded, tmp_path: Path) -> None:
+    """港股做 T / 波段审计：单笔价差过窄时被摩擦成本拦截，提示港股双边印花税+规费保本约束。"""
+    from risk import audit_trade_idea
+
+    req = {"symbol": "00700.HK", "market": "HK", "asset_type": "equity", **REQ_BASE}
+    rep = run_pipeline(req, output_dir=tmp_path)
+    result_doc, _ = load_v6(rep)
+
+    last_close = float(result_doc["structure"]["last_close"])
+    audit = audit_trade_idea(
+        result_doc,
+        direction="LONG",
+        entry=last_close,
+        stop=round(last_close * 0.98, 2),
+        target=round(last_close + 0.40, 2),
+        shares=100,
+    )
+    hk_check = audit["checks"]["net_rr_and_friction"]
+    assert hk_check["status"] == "FAIL"
+    assert "港股" in hk_check["note_cn"]
+
+
+def test_score_trade_ideas_reconciles_swept_integer_stop_vs_audited_stop() -> None:
+    """复盘对账器：验证用户整数止损被盘中假跌破扫损后拉升触达目标（STOP_SWEPT_THEN_TARGET）与审计后防扫损止损的对比。"""
+    from evaluation import reconcile_trade_ideas
+
+    idea_record = {
+        "idea_id": "idea_test_001",
+        "symbol": "002281.SZ",
+        "market": "CN",
+        "as_of": "2026-10-15",
+        "direction": "LONG",
+        "user_idea": {"entry": 132.00, "stop": 130.00, "target": 145.00, "shares": 200},
+        "recommended_adjustments": {"entry": 132.00, "stop": 128.60, "target": 145.00},
+    }
+    future_bars = [
+        {"day": "2026-10-15", "open": 134.0, "high": 135.0, "low": 132.5, "close": 132.96, "volume": 100000},
+        {"day": "2026-10-16", "open": 132.5, "high": 133.2, "low": 131.5, "close": 132.80, "volume": 90000},
+        {"day": "2026-10-19", "open": 132.2, "high": 133.0, "low": 129.8, "close": 132.50, "volume": 120000},
+        {"day": "2026-10-20", "open": 133.0, "high": 138.5, "low": 132.6, "close": 137.90, "volume": 150000},
+        {"day": "2026-10-21", "open": 138.0, "high": 146.2, "low": 137.5, "close": 145.50, "volume": 180000},
+    ]
+    summary = reconcile_trade_ideas([idea_record], bars_by_symbol={"002281.SZ": future_bars}, horizon_bars=15)
+    assert summary["total_ideas"] == 1
+    assert summary["triggered_count"] == 1
+    assert summary["swept_stop_saved_count"] == 1
+    item = summary["items"][0]
+    assert item["user_outcome"]["status"] == "STOP_HIT"
+    assert item["audited_outcome"]["status"] == "TP_HIT"
+    assert item["attribution"] == "STOP_SWEPT_THEN_TARGET"
+
+
+def test_dashboard_v2_and_cloudflare_worker_exporter(replay_recorded, tmp_path: Path) -> None:
+    """验证看板 2.0 副图切换、If-Then 净盈亏比交互计算器，以及 Cloudflare Worker 打包器 (*.taylor-link.xyz)。"""
+    from render_html import export_cloudflare_worker_bundle
+
+    rep = _cn_moutai(tmp_path)
+    html_text = Path(rep["rendered_paths"]["dashboard_html"]).read_text(encoding="utf-8")
+    assert "subchartModeBtn" in html_text
+    assert "rrCalcCard" in html_text
+    assert "6. If-Then 交互式净盈亏比与摩擦试算器" in html_text
+
+    worker_dir = tmp_path / "cf_worker"
+    meta = export_cloudflare_worker_bundle(
+        artifacts_dir=tmp_path,
+        symbol="600519.SH",
+        slug="kline-600519",
+        output_dir=worker_dir,
+    )
+    assert meta["custom_domain"] == "kline-600519.taylor-link.xyz"
+    assert meta["public_url"] == "https://kline-600519.taylor-link.xyz"
+    assert meta["webp_size_bytes"] > 1000
+    wrangler_cfg = json.loads((worker_dir / "wrangler.jsonc").read_text(encoding="utf-8"))
+    assert wrangler_cfg["workers_dev"] is False
+    assert wrangler_cfg["routes"] == [{"pattern": "kline-600519.taylor-link.xyz", "custom_domain": True}]
+    assert (worker_dir / "src" / "index.js").exists()
+
+
+ADVERSARIAL_CASES: list[tuple[str, str]] = [
+    ("prob_win_rate_75", "综合来看，该股突破胜率 75%，值得关注。"),
+    ("prob_up_80", "根据量价形态，未来15日上涨概率 80%。"),
+    ("prob_high_chance", "目前多头动能充沛，大概率突破前高阻力。"),
+    ("prob_ratio_target", "历史上先到目标的比例为 68.5%。"),
+    ("prob_profit_share", "回测显示盈利比例 64.2%，表现优异。"),
+    ("prob_up_days_share", "近期上涨日占比 62%，资金持续流入。"),
+    ("prob_success_rate", "形态突破成功率 72.5%，建议右侧跟进。"),
+    ("prob_down_ratio", "空头衰竭，下跌比例约 25%。"),
+    ("prob_stop_touch_ratio", "触及止损的比例约 20%，风险可控。"),
+    ("prob_up_share", "过去20日上涨占比 58.3%。"),
+    ("price_round_1dec", "建议在 1425.2 附近观察突破信号。"),
+    ("price_invented_support", "下方强支撑位在 1288.88 元附近。"),
+    ("price_invented_target", "上方第一目标位看至 1566.66 元。"),
+    ("price_invented_stop", "止损位建议设在 1211.11 元。"),
+    ("price_invented_entry", "可在 1333.33 元至 1344.44 元区间吸纳。"),
+    ("price_invented_ma", "当前 20 日均线位于 1377.77 元。"),
+    ("price_invented_poc", "成交密集区 POC 位于 1355.55 元。"),
+    ("price_invented_q90", "未来15日乐观上沿可达 1688.88 元。"),
+    ("veto_omitted", "数据截至 2026-10-15，规则分 36.7，建议逢低买入 200 股。"),
+    ("veto_buried_late", "近期走势震荡整理，各项指标处于中性区域。\n\n第二段才提：虽然存在一定风险，但仍可建仓。"),
+    ("veto_recommend_shares", "【风控否决】大盘偏弱。但建议激进者直接买入 300 股博反弹。"),
+    ("veto_action_conflict", "【风控否决】大盘环境偏弱。操作建议：积极做多确认，满仓进场。"),
+    ("jargon_conformal", "根据保形预测区间显示，未来波动收敛。"),
+    ("jargon_nw_kernel", "Nadaraya-Watson 核回归平滑轨显示支撑有效。"),
+    ("jargon_qlib", "Qlib正交因子显示量价相关性良好。"),
+    ("jargon_meta_labeling", "Meta-Labeling 决策模型给出观察评级。"),
+    ("jargon_triple_barrier", "Triple-Barrier 计划止损位于下方。"),
+    ("jargon_smc_en", "上方存在 BEARISH_ORDER_BLOCK 压制。"),
+    ("misread_q75_as_bull_target", "未来15日看涨目标价为 q75 分位。"),
+    ("freq_missing_sample_n", "趋势延续历史条件频率 27.6%，表现平稳。"),
+]
+
+_CACHED_MOUTAI_DOC: tuple[dict, str] | None = None
+
+
+@pytest.mark.parametrize(("case_id", "injected_line"), ADVERSARIAL_CASES)
+def test_30_adversarial_agent_violations_are_caught_by_linter(
+    replay_recorded, tmp_path: Path, case_id: str, injected_line: str
+) -> None:
+    """30 组对抗性 Agent 违规回复测试：每一种幻觉、篡改价格、漏置顶否决或禁用术语都必须被 lint_agent_response 拦截。"""
+    from lint_response import lint_agent_response
+    from render_report_md import render_report_markdown
+
+    global _CACHED_MOUTAI_DOC
+    if _CACHED_MOUTAI_DOC is None:
+        rep = _cn_moutai(tmp_path)
+        res_doc, _ = load_v6(rep)
+        _CACHED_MOUTAI_DOC = (res_doc, render_report_markdown(res_doc))
+    result_doc, canonical_md = _CACHED_MOUTAI_DOC
+    assert lint_agent_response(canonical_md, result_doc) == []
+
+    if case_id.startswith("veto_omitted") or case_id.startswith("veto_buried"):
+        bad_reply = injected_line
+    else:
+        bad_reply = canonical_md + "\n\n" + injected_line
+
+    errors = lint_agent_response(bad_reply, result_doc)
+    assert len(errors) > 0, f"对抗用例 {case_id} 未被拦截: {injected_line!r}"
+

@@ -280,6 +280,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     <label class="layer-pill"><input type="checkbox" data-layer="ma" checked /> 均线簇(MA20/60/120/250)</label>
   </div>
   <div style="display:flex;gap:8px;align-items:center;">
+    <button class="btn" id="subchartModeBtn" type="button">副图: 成交量 &amp; RVOL</button>
     <button class="btn" id="viewModeBtn" type="button">视图: 标的主图</button>
     <button class="btn" id="exportPngBtn" type="button">导出当前视图为高清 PNG</button>
   </div>
@@ -316,6 +317,16 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     <div class="side-card">
       <h3>5. 100% 数学形态与 SMC 公式证据</h3>
       <ul class="evidence-list" id="patternList"></ul>
+    </div>
+    <div class="side-card" id="rrCalcCard">
+      <h3>6. If-Then 交互式净盈亏比与摩擦试算器</h3>
+      <div class="kv-grid" style="margin-bottom:8px;">
+        <label class="kv-item"><span>入场价 (Entry)</span><input id="rrEntryInput" type="number" step="0.01" style="width:100%;background:#0b0f17;color:#eef2f8;border:1px solid #1e293b;border-radius:4px;padding:3px 6px;" /></label>
+        <label class="kv-item"><span>止损价 (Stop)</span><input id="rrStopInput" type="number" step="0.01" style="width:100%;background:#0b0f17;color:#eef2f8;border:1px solid #1e293b;border-radius:4px;padding:3px 6px;" /></label>
+        <label class="kv-item"><span>目标价 (Target)</span><input id="rrTargetInput" type="number" step="0.01" style="width:100%;background:#0b0f17;color:#eef2f8;border:1px solid #1e293b;border-radius:4px;padding:3px 6px;" /></label>
+        <label class="kv-item"><span>股数 (Shares)</span><input id="rrSharesInput" type="number" step="100" style="width:100%;background:#0b0f17;color:#eef2f8;border:1px solid #1e293b;border-radius:4px;padding:3px 6px;" /></label>
+      </div>
+      <div class="kv-grid" id="rrResultGrid"></div>
     </div>
   </div>
 </div>
@@ -602,6 +613,59 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     }}
     drawChart();
   }});
+
+  let subchartMode = 'vol';
+  document.getElementById('subchartModeBtn').addEventListener('click', function(ev) {{
+    subchartMode = (subchartMode === 'vol') ? 'rsi' : 'vol';
+    ev.target.textContent = subchartMode === 'rsi' ? '副图: RSI(14) 强弱带' : '副图: 成交量 & RVOL';
+    drawChart();
+  }});
+
+  // Interactive If-Then R/R & Exact Friction Calculator
+  const rrEntryEl = document.getElementById('rrEntryInput');
+  const rrStopEl = document.getElementById('rrStopInput');
+  const rrTargetEl = document.getElementById('rrTargetInput');
+  const rrSharesEl = document.getElementById('rrSharesInput');
+  const rrGridEl = document.getElementById('rrResultGrid');
+  const initEntry = (tb.entry_zone && tb.entry_zone.length === 2) ? tb.entry_zone[1] : (bars.length ? bars[bars.length - 1].close : 100);
+  const initStop = tb.stop_loss_barrier || (initEntry * 0.95);
+  const initTarget = tb.take_profit_tp1 || (initEntry * 1.08);
+  const initShares = (tb.position_sizing && tb.position_sizing.recommended_shares) ? tb.position_sizing.recommended_shares : (tb.market_microstructure.lot_size || 100);
+  rrEntryEl.value = Number(initEntry).toFixed(pDec);
+  rrStopEl.value = Number(initStop).toFixed(pDec);
+  rrTargetEl.value = Number(initTarget).toFixed(pDec);
+  rrSharesEl.value = initShares;
+
+  function updateRrCalculator() {{
+    rrGridEl.textContent = '';
+    const e = parseFloat(rrEntryEl.value) || 0;
+    const s = parseFloat(rrStopEl.value) || 0;
+    const t = parseFloat(rrTargetEl.value) || 0;
+    const sh = Math.max(1, parseInt(rrSharesEl.value, 10) || 100);
+    const notional = e * sh;
+    const mm = tb.market_microstructure || {{}};
+    const commBps = Number(mm.commission_bps || 2.5);
+    const stampBps = Number(mm.stamp_duty_buy_bps || 0) + Number(mm.stamp_duty_sell_bps || 0);
+    const minCommLeg = meta.market === 'CN' ? 5.0 : (meta.market === 'HK' ? 15.0 : 0.5);
+    const leviesBps = meta.market === 'CN' ? (stampBps > 0 ? 0.2 : 0.0) : (meta.market === 'HK' ? 2.1 : 0.28);
+    const commTotal = 2.0 * Math.max(minCommLeg, notional * (commBps / 10000.0));
+    const totalCost = commTotal + notional * ((stampBps + leviesBps) / 10000.0);
+    const feePerShare = totalCost / sh;
+    const grossRisk = Math.max(1e-6, Math.abs(e - s));
+    const grossReward = Math.max(0, Math.abs(t - e));
+    const netReward = Math.max(0, grossReward - feePerShare);
+    const netRisk = grossRisk + feePerShare;
+    const netRr = netReward / Math.max(1e-6, netRisk);
+    const isRoundStop = s >= 50 ? Math.abs(s - Math.round(s)) < 1e-6 : Math.abs(s * 10 - Math.round(s * 10)) < 1e-6;
+    addKv(rrGridEl, '往返总摩擦 (含规费/最低佣金)', totalCost.toFixed(2) + ' ' + (meta.currency || '') + ' (' + ((totalCost / Math.max(1, notional)) * 100).toFixed(2) + '%)');
+    addKv(rrGridEl, '真保本价 (Breakeven)', (e + feePerShare).toFixed(pDec));
+    addKv(rrGridEl, '毛盈亏比 / 扣费净盈亏比', (grossReward / grossRisk).toFixed(2) + 'R / ' + netRr.toFixed(2) + 'R');
+    addKv(rrGridEl, '止损扫损审计', isRoundStop ? '警惕整数关口扫损!' : '非整数安全位');
+  }}
+  [rrEntryEl, rrStopEl, rrTargetEl, rrSharesEl].forEach(function(el) {{
+    el.addEventListener('input', updateRrCalculator);
+  }});
+  updateRrCalculator();
 
   document.getElementById('viewModeBtn').addEventListener('click', function(ev) {{
     showRsMode = !showRsMode;
@@ -989,20 +1053,45 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
       ctx.fillText('真实收盘 ' + fmtPrice(rLast), W - padR + 6, yOfPrice(rLast) - 6);
     }}
 
-    // Volume subplot
+    // Subchart subplot (Volume+RVOL20 or RSI14)
     ctx.fillStyle = '#0e1420';
     ctx.fillRect(padL, volT, histW, volB - volT);
-    const maxVol = Math.max.apply(null, activeBars.map(function(b) {{ return b.volume || 1; }}));
-    activeBars.forEach(function(b, i) {{
-      const x = xOfBar(i);
-      const vh = ((b.volume || 0) / maxVol) * (volB - volT - 12);
-      ctx.fillStyle = b.close >= b.open ? UP_COL : DN_COL;
-      ctx.fillRect(x - barHalf, volB - vh, barHalf * 2, vh);
-    }});
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '11px sans-serif';
-    const curRvol = (lastBar && lastBar.rvol20 !== undefined && lastBar.rvol20 !== null) ? lastBar.rvol20 : (ind.momentum.rvol20 || 1.0);
-    ctx.fillText('成交量 Volume & RVOL20 (截面 ' + curRvol + 'x)', padL + 8, volT + 16);
+    if (subchartMode === 'rsi') {{
+      const yRsi = function(val) {{ return volB - (Math.max(0, Math.min(100, val)) / 100.0) * (volB - volT - 16) - 4; }};
+      [30, 50, 70].forEach(function(lvl) {{
+        ctx.strokeStyle = lvl === 50 ? 'rgba(148,163,184,0.22)' : 'rgba(250,204,21,0.35)';
+        ctx.beginPath();
+        ctx.moveTo(padL, yRsi(lvl));
+        ctx.lineTo(padL + histW, yRsi(lvl));
+        ctx.stroke();
+      }});
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      let startedRsi = false;
+      activeBars.forEach(function(b, i) {{
+        if (b.rsi14 === null || b.rsi14 === undefined) return;
+        const rx = xOfBar(i), ry = yRsi(b.rsi14);
+        if (!startedRsi) {{ ctx.moveTo(rx, ry); startedRsi = true; }} else ctx.lineTo(rx, ry);
+      }});
+      ctx.stroke();
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '11px sans-serif';
+      const curRsi = (lastBar && lastBar.rsi14 !== undefined && lastBar.rsi14 !== null) ? lastBar.rsi14 : (ind.momentum.rsi14 || '--');
+      ctx.fillText('RSI(14) 超买70/超卖30 (截面 ' + curRsi + ')', padL + 8, volT + 16);
+    }} else {{
+      const maxVol = Math.max.apply(null, activeBars.map(function(b) {{ return b.volume || 1; }}));
+      activeBars.forEach(function(b, i) {{
+        const x = xOfBar(i);
+        const vh = ((b.volume || 0) / maxVol) * (volB - volT - 12);
+        ctx.fillStyle = b.close >= b.open ? UP_COL : DN_COL;
+        ctx.fillRect(x - barHalf, volB - vh, barHalf * 2, vh);
+      }});
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '11px sans-serif';
+      const curRvol = (lastBar && lastBar.rvol20 !== undefined && lastBar.rvol20 !== null) ? lastBar.rvol20 : (ind.momentum.rvol20 || 1.0);
+      ctx.fillText('成交量 Volume & RVOL20 (截面 ' + curRvol + 'x)', padL + 8, volT + 16);
+    }}
 
     drawQualityWatermark(W, H);
 
@@ -1109,3 +1198,88 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html_doc, encoding="utf-8")
     return output_path
+
+
+def export_cloudflare_worker_bundle(
+    *,
+    artifacts_dir: Path,
+    symbol: str,
+    slug: str,
+    output_dir: Path,
+    custom_domain_root: str = "taylor-link.xyz",
+) -> dict[str, Any]:
+    """将指定标的的分析产物打包为 Cloudflare Worker 部署目录（强制绑定 *.taylor-link.xyz + WebP 压缩）。"""
+    import base64
+    from PIL import Image
+
+    clean_slug = slug.strip().lower().replace("_", "-")
+    if not clean_slug or "." in clean_slug:
+        raise ValueError(f"slug 必须为合法子域名前缀（如 kline-600519），收到: {slug!r}")
+    domain = f"{clean_slug}.{custom_domain_root}"
+
+    html_path = artifacts_dir / f"{symbol}_dashboard.html"
+    png_path = artifacts_dir / f"{symbol}_preview.png"
+    json_path = artifacts_dir / f"{symbol}_result.json"
+    for p in (html_path, png_path, json_path):
+        if not p.exists():
+            raise FileNotFoundError(f"缺少产物文件: {p}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    src_dir = output_dir / "src"
+    src_dir.mkdir(parents=True, exist_ok=True)
+
+    webp_path = output_dir / "preview.webp"
+    with Image.open(png_path) as im:
+        im.save(webp_path, format="WEBP", quality=88, method=4)
+
+    html_text = html_path.read_text(encoding="utf-8")
+    json_text = json_path.read_text(encoding="utf-8")
+    webp_b64 = base64.b64encode(webp_path.read_bytes()).decode("ascii")
+
+    wrangler_cfg = {
+        "$schema": "node_modules/wrangler/config-schema.json",
+        "name": clean_slug,
+        "main": "src/index.js",
+        "compatibility_date": "2026-10-01",
+        "workers_dev": False,
+        "routes": [{"pattern": domain, "custom_domain": True}],
+    }
+    wrangler_path = output_dir / "wrangler.jsonc"
+    wrangler_path.write_text(json.dumps(wrangler_cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    worker_js = (
+        f"const DASHBOARD_HTML = {json.dumps(html_text, ensure_ascii=False)};\n"
+        f"const RESULT_JSON = {json.dumps(json_text, ensure_ascii=False)};\n"
+        f"const PREVIEW_WEBP_B64 = {json.dumps(webp_b64)};\n"
+        "function decodeBase64(b64) {\n"
+        "  const bin = atob(b64);\n"
+        "  const bytes = new Uint8Array(bin.length);\n"
+        "  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);\n"
+        "  return bytes.buffer;\n"
+        "}\n"
+        "export default {\n"
+        "  async fetch(request) {\n"
+        "    const url = new URL(request.url);\n"
+        "    if (url.pathname === '/result.json') {\n"
+        "      return new Response(RESULT_JSON, { headers: { 'content-type': 'application/json; charset=utf-8' } });\n"
+        "    }\n"
+        "    if (url.pathname === '/preview.webp') {\n"
+        "      return new Response(decodeBase64(PREVIEW_WEBP_B64), { headers: { 'content-type': 'image/webp' } });\n"
+        "    }\n"
+        "    return new Response(DASHBOARD_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });\n"
+        "  },\n"
+        "};\n"
+    )
+    worker_index = src_dir / "index.js"
+    worker_index.write_text(worker_js, encoding="utf-8")
+
+    return {
+        "slug": clean_slug,
+        "custom_domain": domain,
+        "public_url": f"https://{domain}",
+        "wrangler_config": str(wrangler_path),
+        "worker_entry": str(worker_index),
+        "webp_path": str(webp_path),
+        "webp_size_bytes": webp_path.stat().st_size,
+    }
+
