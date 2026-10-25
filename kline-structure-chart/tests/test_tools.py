@@ -231,3 +231,23 @@ def test_install_sh_dry_run_falls_back_to_venv_without_uv(tmp_path: Path) -> Non
     assert f"{skill_src}/.venv/bin/python {skill_src}/scripts/doctor.py" in out
     assert "uv sync" not in out and "uv run" not in out
     assert not any(home.iterdir()), "--dry-run 不得在 HOME 下创建任何文件"
+
+
+def test_doctor_detects_hermes_category_and_split_brain_scripts(tmp_path: Path) -> None:
+    """doctor 应能发现 .hermes/skills/<category>/kline-structure-chart，并拦截脚本集合不一致的混装副本。"""
+    cat_entry = tmp_path / ".hermes" / "skills" / "productivity" / doctor.SKILL_NAME
+    (cat_entry / "scripts").mkdir(parents=True)
+    (cat_entry / "SKILL.md").write_text("---\nname: kline-structure-chart\ndescription: x\n---\nbody\n", encoding="utf-8")
+    # 模拟 v5.3 与 v6.0 混装：缺少 contract_v6.py 且残留 base_rates.py
+    (cat_entry / "scripts" / "base_rates.py").write_text("# stale v5\n", encoding="utf-8")
+    checks = doctor.check_skill_links(tmp_path)
+    assert len(checks) == 1 and not checks[0].ok
+    assert "脚本" in checks[0].detail or "不一致" in checks[0].detail
+
+    # 同步全部当前脚本后应通过检查
+    (cat_entry / "scripts" / "base_rates.py").unlink()
+    for src_py in (SKILL_DIR / "scripts").glob("*.py"):
+        (cat_entry / "scripts" / src_py.name).write_text("# synced\n", encoding="utf-8")
+    checks_ok = doctor.check_skill_links(tmp_path)
+    assert len(checks_ok) == 1 and checks_ok[0].ok and "productivity" in checks_ok[0].detail
+

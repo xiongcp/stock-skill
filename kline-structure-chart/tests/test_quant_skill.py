@@ -1278,6 +1278,7 @@ def test_o3_report_md_shows_wave_counts_defense_and_short_plans(replay_recorded,
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_o3_20_multi_scenario_engine_diversity_active_trigger_and_impulse_rules(replay_recorded) -> None:
     from scenarios import PLAYBOOK_BY_ID, SCENARIO_PLAYBOOK, detect_impulse_wave
     from structure import compute_structure_layer

@@ -211,6 +211,7 @@ def compute_conformal_forecast(
     meta: dict[str, Any],
     horizon_bars: int = 15,
     extra_context: dict[str, Any] | None = None,
+    include_audit: bool = True,
 ) -> dict[str, Any]:
     """未来 H 步分位区间：以最新收盘价为中心（鞅假设，不加任何漂移），按期限 h 分别做 split-conformal 校准。
 
@@ -287,7 +288,8 @@ def compute_conformal_forecast(
     per_h_hits: dict[int, list[tuple[int, int]]] = {h: [] for h in range(1, horizon_bars + 1)}
     q50_abs_errs: list[float] = []
     rw_abs_errs: list[float] = []
-    if calibrated:
+    if calibrated and include_audit:
+        rounded_closes = [round_to_tick(closes[k], market, asset_type, bars[k]["day"]) for k in range(n)]
         window_by_h: dict[int, list[float]] = {h: [] for h in range(1, horizon_bars + 1)}
         add_ptr: dict[int, int] = {h: 0 for h in range(1, horizon_bars + 1)}
         drop_ptr: dict[int, int] = {h: 0 for h in range(1, horizon_bars + 1)}
@@ -331,7 +333,7 @@ def compute_conformal_forecast(
                 closes[e], e_day, sigmas[e], mult_e, max_mature_h, market, asset_type, e_limit
             )
             for h in ready_horizons:
-                actual_c = round_to_tick(closes[e + h], market, asset_type, bars[e + h]["day"])
+                actual_c = rounded_closes[e + h]
                 lo50, hi50 = e_b50[h - 1]
                 lo80, hi80 = e_b80[h - 1]
                 per_h_hits[h].append((int(lo50 - 1e-6 <= actual_c <= hi50 + 1e-6), int(lo80 - 1e-6 <= actual_c <= hi80 + 1e-6)))

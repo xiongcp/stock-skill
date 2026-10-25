@@ -94,13 +94,18 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
                 mismatches.append(f"Future BOS leaked at cut={cut}: {brk}")
 
         # 3. 蜡烛形态在追加极端未来 K 线后无前视变化
+        ext_tail_len = len(ext_corrupted) - cut
         sub_cdl = detect_candlestick_patterns(
             sub, sub_ind["series"]["atr14"], sub_ind["series"]["rvol20"], lookback=40, max_items=None
         )
         ext_cdl = {
             (p["pattern"], p["observed_at"]): p["formula_verified"]
             for p in detect_candlestick_patterns(
-                ext_corrupted, ext_ind["series"]["atr14"], ext_ind["series"]["rvol20"], lookback=len(ext_corrupted), max_items=None
+                ext_corrupted,
+                ext_ind["series"]["atr14"],
+                ext_ind["series"]["rvol20"],
+                lookback=40 + ext_tail_len,
+                max_items=None,
             )
             if str(p["observed_at"]) <= cut_day
         }
@@ -110,7 +115,7 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
                 mismatches.append(f"Candlestick pattern mutated at cut={cut}: {pkey}")
 
         # 4. 正常波动范围的波动率与非一致性分数仅依赖截至 cut 的已收盘 K 线（不受 cut 之后极端未来价格影响）
-        fc_a = compute_conformal_forecast(sub, meta=meta_stub, horizon_bars=15)
+        fc_a = compute_conformal_forecast(sub, meta=meta_stub, horizon_bars=15, include_audit=False)
         sub_closes = [float(b["close"]) for b in sub]
         ext_closes = [float(b["close"]) for b in ext_corrupted]
         sub_lrets = [math.log(sub_closes[i] / sub_closes[i - 1]) for i in range(1, len(sub_closes))]
@@ -595,6 +600,7 @@ def run_plan_backtest(
             pit_sub[: cut + 1],
             meta={**meta_stub, "is_ipo_no_limit": bool(is_ipo_no_limit and cut < 5)},
             horizon_bars=horizon_bars,
+            include_audit=False,
         )
         actual = round_to_tick(float(pit_sub[cut + horizon_bars]["close"]), market, asset_type, pit_sub[cut + horizon_bars]["day"])
         base_c = float(pit_sub[cut]["close"])

@@ -60,7 +60,12 @@ def test_price_whitelist_moved_to_price_text() -> None:
 
 
 def test_historical_frequency_removed(replay_recorded, tmp_path: Path) -> None:
-    rep = _cn_moutai(tmp_path, run_backtest=True, backtest_step=20)
+    rep = _cn_moutai(
+        tmp_path,
+        request_extra={"account_equity": 500000, "max_risk_pct": 0.01},
+        run_backtest=True,
+        backtest_step=20,
+    )
     # pytest 的 tmp_path 目录名由测试函数名截断而来，会含 "historical_frequency"，先剔除再查字段
     text = json.dumps({k: v for k, v in rep.items() if k != "rendered_paths"}, ensure_ascii=False).replace(str(tmp_path), "")
     for token in ("historical_frequency", "time_window_bars", "target_freq", "bars_to_target"):
@@ -231,7 +236,12 @@ BACKTEST_MAP_PATHS = frozenset({"backtest.actions_seen", "backtest.veto_reason_c
 
 def test_v6_backtest_keypaths_match_snapshot(replay_recorded, tmp_path: Path) -> None:
     """backtest.json 也是稳定接口：固定录制行情下的完整键集由快照守住（代码→值映射表的键折叠为 {*}）。"""
-    rep = _cn_moutai(tmp_path, run_backtest=True, backtest_step=20)
+    rep = _cn_moutai(
+        tmp_path,
+        request_extra={"account_equity": 500000, "max_risk_pct": 0.01},
+        run_backtest=True,
+        backtest_step=20,
+    )
     bt = json.loads(Path(rep["rendered_paths"]["backtest_json"]).read_text(encoding="utf-8"))
     actual = sorted(set(_key_paths(bt, map_paths=BACKTEST_MAP_PATHS)))
     assert "backtest.all_long_signals.win_rate_95ci_pct" in actual
