@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kline-structure-chart · A股 / 港股 / 美股 K 线结构与风控研究技能</title>
+<meta name="description" content="给 Claude Code、Codex 等 AI 助手用的开源技能：用真实行情和确定性算法计算 K 线结构、三重屏障风控计划、15 日正常波动范围与无前视回测，产出 JSON + PNG + 离线 HTML。仅供研究，不构成投资建议。">
+<meta property="og:type" content="website">
+<meta property="og:title" content="kline-structure-chart">
+<meta property="og:description" content="Open-source Agent Skill for Claude Code & Codex: deterministic K-line structure, triple-barrier risk plan, 15-day normal volatility range and no-lookahead backtest on real A-share, HK & US data. Research only, not investment advice.">
+<meta property="og:url" content="https://xiongcp.github.io/stock-skill/">
+<meta property="og:image" content="https://xiongcp.github.io/stock-skill/examples/600519.SH/600519.SH_preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0f17;
+    --bg-2: #0f1522;
+    --card: #141c2b;
+    --card-2: #192335;
+    --border: #2a364f;
+    --text: #eef2f8;
+    --muted: #a3b1c6;
+    --accent: #38bdf8;
+    --accent-ink: #04121c;
+    --bull: #f24444;
+    --bear: #10bc84;
+    --warn: #facc15;
+    --radius: 12px;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
+  html[data-lang="zh"] [lang="en"], html[data-lang="en"] [lang="zh"] { display: none !important; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  code { font-family: var(--mono); font-size: .9em; background: var(--card-2); border: 1px solid var(--border); border-radius: 6px; padding: .05em .4em; }
+  .wrap { width: 100%; max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+  @media (min-width: 768px) { .wrap { padding: 0 32px; } }
+
+  /* nav */
+  header.nav { position: sticky; top: 0; z-index: 10; background: rgba(11, 15, 23, .88); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
+  .nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-family: var(--mono); font-weight: 600; font-size: 15px; white-space: nowrap; }
+  .brand:hover { text-decoration: none; }
+  .nav-links { display: none; gap: 22px; font-size: 14px; }
+  .nav-links a { color: var(--muted); }
+  .nav-links a:hover { color: var(--text); text-decoration: none; }
+  @media (min-width: 900px) { .nav-links { display: flex; } }
+  .nav-actions { display: flex; align-items: center; gap: 8px; }
+  .lang-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .lang-toggle button { background: transparent; color: var(--muted); border: 0; font: inherit; font-size: 13px; padding: 0 12px; min-height: 36px; cursor: pointer; white-space: nowrap; }
+  @media (max-width: 480px) { .brand-text { display: none; } .lang-toggle button { padding: 0 10px; } }
+  .lang-toggle button[aria-pressed="true"] { background: var(--card-2); color: var(--text); }
+
+  /* buttons */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 20px; border-radius: 10px; font-weight: 600; font-size: 15px; border: 1px solid var(--border); color: var(--text); background: var(--card); cursor: pointer; transition: background .2s, border-color .2s; }
+  .btn:hover { text-decoration: none; border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn.primary:hover { background: #7dd3fc; }
+  .btn.small { min-height: 36px; padding: 0 12px; font-size: 13px; }
+
+  /* hero */
+  .hero { padding: 56px 0 32px; background: radial-gradient(900px 400px at 15% -10%, rgba(56, 189, 248, .12), transparent 60%); }
+  .eyebrow { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .chip { font-size: 12.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; background: var(--bg-2); }
+  h1 { font-size: clamp(30px, 5.2vw, 52px); line-height: 1.18; letter-spacing: -.01em; max-width: 20ch; }
+  html[data-lang="en"] h1 { max-width: 24ch; }
+  .keep { word-break: keep-all; overflow-wrap: anywhere; }
+  .lead { margin-top: 18px; color: var(--muted); font-size: clamp(16px, 2vw, 18.5px); max-width: 68ch; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .cmd { margin-top: 24px; display: flex; align-items: stretch; max-width: 760px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2); overflow: hidden; }
+  .cmd pre { flex: 1; overflow-x: auto; padding: 12px 14px; font-family: var(--mono); font-size: 13.5px; line-height: 1.5; color: var(--text); white-space: pre; }
+  .cmd pre::before { content: "$ "; color: var(--muted); }
+  .cmd.plain pre::before { content: ""; }
+  .cmd .copy { border: 0; border-left: 1px solid var(--border); background: var(--card); color: var(--muted); font: inherit; font-size: 13px; padding: 0 14px; min-width: 72px; cursor: pointer; }
+  .cmd .copy:hover { color: var(--text); }
+  .fine { margin-top: 12px; font-size: 13.5px; color: var(--muted); }
+  .shot { margin-top: 40px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--card); }
+  .shot img { display: block; width: 100%; height: auto; aspect-ratio: 1920 / 1160; }
+  .shot figcaption { padding: 12px 16px; font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--border); }
+
+  /* sections */
+  section { padding: 64px 0; border-top: 1px solid var(--border); }
+  h2 { font-size: clamp(24px, 3.4vw, 34px); line-height: 1.25; }
+  .section-lead { margin-top: 10px; color: var(--muted); max-width: 70ch; }
+  .grid { display: grid; gap: 16px; margin-top: 32px; grid-template-columns: 1fr; }
+  @media (min-width: 700px) { .grid.two { grid-template-columns: 1fr 1fr; } .grid.three { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 1000px) { .grid.three { grid-template-columns: repeat(3, 1fr); } }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; }
+  .card h3 { font-size: 17px; line-height: 1.4; margin-bottom: 8px; }
+  .card p, .card li { color: var(--muted); font-size: 15px; }
+  .card ul { padding-left: 1.1em; }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 12px; color: var(--accent); margin-bottom: 10px; }
+
+  /* problem → approach */
+  .pair { display: grid; gap: 0; grid-template-columns: 1fr; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  @media (min-width: 700px) { .pair { grid-template-columns: 1fr 1fr; } }
+  .pair > div { padding: 18px 20px; }
+  .pair .bad { background: var(--bg-2); color: var(--muted); }
+  .pair .good { background: var(--card); }
+  .pair .label { display: block; font-family: var(--mono); font-size: 12px; margin-bottom: 6px; }
+  .pair .bad .label { color: var(--warn); }
+  .pair .good .label { color: var(--accent); }
+  .pairs { display: grid; gap: 14px; margin-top: 32px; }
+
+  /* demos */
+  .demo { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .demo img { display: block; width: 100%; height: auto; aspect-ratio: 1920 / 1160; border-bottom: 1px solid var(--border); }
+  .demo .body { padding: 18px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .demo h3 { font-size: 17px; }
+  .demo p { color: var(--muted); font-size: 14.5px; }
+  .demo .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 8px; }
+  .note { margin-top: 18px; font-size: 13.5px; color: var(--muted); }
+
+  /* steps */
+  .steps { counter-reset: step; }
+  .steps .card { position: relative; padding-top: 52px; }
+  .steps .card::before { counter-increment: step; content: "0" counter(step); position: absolute; top: 18px; left: 22px; font-family: var(--mono); font-size: 14px; color: var(--accent); }
+
+  /* install */
+  .install-item + .install-item { margin-top: 28px; }
+  .install-item h3 { font-size: 17px; margin-bottom: 6px; }
+  .install-item p { color: var(--muted); font-size: 15px; }
+  .install-item .cmd { margin-top: 10px; max-width: none; }
+  .agents { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+
+  /* boundaries */
+  .boundary { border-left: 3px solid var(--warn); }
+
+  footer { border-top: 1px solid var(--border); padding: 40px 0 56px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: grid; gap: 14px; }
+  footer .links { display: flex; flex-wrap: wrap; gap: 18px; }
+  .disclaimer { color: var(--text); }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="kline-structure-chart">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="4" height="9" rx="1" fill="#f24444"/><rect x="4.5" y="3" width="1" height="18" fill="#f24444"/><rect x="10" y="10" width="4" height="7" rx="1" fill="#10bc84"/><rect x="11.5" y="6" width="1" height="15" fill="#10bc84"/><rect x="17" y="5" width="4" height="8" rx="1" fill="#38bdf8"/><rect x="18.5" y="2" width="1" height="14" fill="#38bdf8"/></svg>
+      <span class="brand-text">kline-structure-chart</span>
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#why"><span lang="zh">为什么</span><span lang="en">Why</span></a>
+      <a href="#features"><span lang="zh">能力</span><span lang="en">Features</span></a>
+      <a href="#demos"><span lang="zh">在线示例</span><span lang="en">Live demos</span></a>
+      <a href="#install"><span lang="zh">安装</span><span lang="en">Install</span></a>
+      <a href="#boundaries"><span lang="zh">边界</span><span lang="en">Boundaries</span></a>
+    </nav>
+    <div class="nav-actions">
+      <div class="lang-toggle" role="group" aria-label="Language">
+        <button type="button" data-set-lang="zh" aria-pressed="true">中文</button>
+        <button type="button" data-set-lang="en" aria-pressed="false">EN</button>
+      </div>
+      <a class="btn small" href="https://github.com/xiongcp/stock-skill">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+  <div class="hero">
+    <div class="wrap">
+      <div class="eyebrow">
+        <span class="chip"><span lang="zh">开源</span><span lang="en">Open source</span></span>
+        <span class="chip">Agent Skill</span>
+        <span class="chip"><span lang="zh">A股 · 港股 · 美股</span><span lang="en">A-shares · Hong Kong · US</span></span>
+      </div>
+      <h1>
+        <span lang="zh" class="keep">让 AI 助手<wbr>用真实行情<wbr>和确定性算法<wbr>读 K 线</span>
+        <span lang="en">Let your AI agent read K-line charts with real data and deterministic math</span>
+      </h1>
+      <p class="lead">
+        <span lang="zh">kline-structure-chart 是给 Claude Code、Codex 等 AI 助手用的技能。一句话提问，助手运行 Python 在真实行情上计算 K 线结构、三重屏障风控计划、15 日正常波动范围和无前视回测，产出 JSON、PNG 结构图和离线交互看板。</span>
+        <span lang="en">kline-structure-chart is a skill for AI agents such as Claude Code and Codex. Ask one question and the agent runs Python on real market data to compute K-line structure, a triple-barrier risk plan, a 15-day normal volatility range and a no-lookahead backtest, delivered as JSON, a PNG chart and an offline interactive dashboard.</span>
+      </p>
+      <div class="cta">
+        <a class="btn primary" href="#install"><span lang="zh">安装</span><span lang="en">Install</span></a>
+        <a class="btn" href="#demos"><span lang="zh">看在线示例</span><span lang="en">See live demos</span></a>
+        <a class="btn" href="https://github.com/xiongcp/stock-skill"><span lang="zh">在 GitHub 查看</span><span lang="en">View on GitHub</span></a>
+      </div>
+      <div class="cmd">
+        <pre>curl -fsSL https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.sh | bash</pre>
+        <button type="button" class="copy"><span lang="zh">复制</span><span lang="en">Copy</span></button>
+      </div>
+      <p class="fine">
+        <span lang="zh">macOS / Linux 一行安装，自动注册到已安装的 Claude Code、Codex 等助手。仅供研究，不构成投资建议。</span>
+        <span lang="en">One-line install on macOS / Linux; registers with the Claude Code, Codex and other agents it finds. For research only, not investment advice.</span>
+      </p>
+      <figure class="shot">
+        <img src="examples/600519.SH/600519.SH_preview.png" width="1920" height="1160" alt="贵州茅台 600519.SH 结构推演图 / Kweichow Moutai 600519.SH structure chart">
+        <figcaption>
+          <span lang="zh">贵州茅台 <code>600519.SH</code> 结构推演图，由脚本基于真实行情自动生成，数据截至 2026-10-15。右上角红框是风控否决：大盘环境评分低于 35 时，个股不给做多评级。</span>
+          <span lang="en">Kweichow Moutai <code>600519.SH</code> structure chart, generated by the scripts from real market data as of 2026-10-15. The red box at the top right is a risk veto: when the market regime score is below 35, the stock gets no long rating.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <section id="why">
+    <div class="wrap">
+      <h2><span lang="zh">为什么不让大模型直接看图</span><span lang="en">Why not let an LLM read the chart directly</span></h2>
+      <p class="section-lead">
+        <span lang="zh">看截图问股有四个老问题。这个技能的做法是：计算交给 Python，助手只转述算出来的数字。</span>
+        <span lang="en">Asking a model about a chart screenshot has four familiar problems. This skill hands the computation to Python; the agent only relays the computed numbers.</span>
+      </p>
+      <div class="pairs">
+        <div class="pair">
+          <div class="bad"><span class="label"><span lang="zh">常见问题</span><span lang="en">Problem</span></span><span lang="zh">多模态模型看图读错坐标轴，编造不存在的价格，画错趋势线。</span><span lang="en">Vision models misread axes, invent prices and draw the wrong trend lines.</span></div>
+          <div class="good"><span class="label"><span lang="zh">这里的做法</span><span lang="en">Here</span></span><span lang="zh">所有点位都由 Python 从真实 OHLCV 序列计算一次并写入 JSON，PNG 和 HTML 只读这份结果。</span><span lang="en">Every level is computed once in Python from real OHLCV data and written to JSON; the PNG and HTML only read that result.</span></div>
+        </div>
+        <div class="pair">
+          <div class="bad"><span class="label"><span lang="zh">常见问题</span><span lang="en">Problem</span></span><span lang="zh">拐点和形态事后用未来 K 线重绘，回测看似完美，实盘无法复现。</span><span lang="en">Swing points and patterns are redrawn with future bars; the backtest looks perfect and cannot be reproduced.</span></div>
+          <div class="good"><span class="label"><span lang="zh">这里的做法</span><span lang="en">Here</span></span><span lang="zh">单边因果平滑，每个拐点记录确认日；回测在每个决策日只用当日及之前的数据重跑线上同一条流水线。</span><span lang="en">One-sided causal smoothing and a confirmation day for every swing point; the backtest reruns the live pipeline on each decision day with only the data available then.</span></div>
+        </div>
+        <div class="pair">
+          <div class="bad"><span class="label"><span lang="zh">常见问题</span><span lang="en">Problem</span></span><span lang="zh">把几个指标的加权分包装成"上涨概率"，没有样本支撑。</span><span lang="en">A weighted sum of indicators is presented as a "probability of going up", with no samples behind it.</span></div>
+          <div class="good"><span class="label"><span lang="zh">这里的做法</span><span lang="en">Here</span></span><span lang="zh">不输出上涨概率，规则分不叫胜率。唯一出现的胜率是回测成交胜率，附 Wilson 95% 区间和样本量。</span><span lang="en">No probability of going up, and the rule score is never called a win rate. The only win rate shown is the backtest fill win rate, with a Wilson 95% interval and the sample size.</span></div>
+        </div>
+        <div class="pair">
+          <div class="bad"><span class="label"><span lang="zh">常见问题</span><span lang="en">Problem</span></span><span lang="zh">大盘在跌还推荐追高；忽略 T+1、涨跌停、港股价位表和印花税等交易制度。</span><span lang="en">Chasing breakouts while the market falls; ignoring T+1, price limits, Hong Kong tick tables and stamp duty.</span></div>
+          <div class="good"><span class="label"><span lang="zh">这里的做法</span><span lang="en">Here</span></span><span lang="zh">先大盘后个股：大盘环境评分低于 35 时风控一票否决做多。三市场交易制度按带生效日期和来源的规则实现。</span><span lang="en">Market first: a regime score below 35 vetoes long setups. Each market's trading rules are implemented with effective dates and sources.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <h2><span lang="zh">它能做什么</span><span lang="en">What it does</span></h2>
+      <div class="grid three">
+        <div class="card">
+          <span class="tag">CN · HK · US</span>
+          <h3><span lang="zh">三市场覆盖</span><span lang="en">Three markets</span></h3>
+          <p><span lang="zh">A 股（沪深北个股、ETF、指数）、港股、美股，自动配对大盘基准（沪深300 / 恒生指数 / SPY）。</span><span lang="en">A-shares (stocks, ETFs and indices), Hong Kong and US, each paired with its benchmark (CSI 300 / Hang Seng / SPY).</span></p>
+        </div>
+        <div class="card">
+          <span class="tag">structure</span>
+          <h3><span lang="zh">K 线数学结构</span><span lang="en">K-line structure</span></h3>
+          <p><span lang="zh">因果拐点、轨道拟合、ABC 浪型与推动 5 浪、8 类标准情景、蜡烛与双底双顶、RSI 背离、SMC、成交分布。</span><span lang="en">Causal swing points, channel fitting, ABC and 5-wave counts, 8 standard scenarios, candlestick and double top/bottom patterns, RSI divergence, SMC and a volume profile.</span></p>
+        </div>
+        <div class="card">
+          <span class="tag">risk plan</span>
+          <h3><span lang="zh">三重屏障风控计划</span><span lang="en">Triple-barrier risk plan</span></h3>
+          <p><span lang="zh">入场区、止损、TP1/TP2、移动保本与持仓防守；给了账户净值就按单笔风险比例算股数。</span><span lang="en">Entry zone, stop, TP1/TP2, move-to-breakeven and position defense; with an account size it computes shares from the per-trade risk fraction.</span></p>
+        </div>
+        <div class="card">
+          <span class="tag">range</span>
+          <h3><span lang="zh">15 日正常波动范围</span><span lang="en">15-day normal volatility range</span></h3>
+          <p><span lang="zh">以最新收盘价为中心的 50% / 80% 区间，只描述波动幅度、不判断方向，附样本外覆盖率和独立样本数。</span><span lang="en">50% / 80% bands centered on the latest close. They describe the size of moves, not direction, with out-of-sample coverage and the number of independent samples.</span></p>
+        </div>
+        <div class="card">
+          <span class="tag">backtest</span>
+          <h3><span lang="zh">无前视回测</span><span lang="en">No-lookahead backtest</span></h3>
+          <p><span lang="zh">逐日回放线上计划，不学习任何参数；样本少于 30 笔时报告会明确提示参考价值低。</span><span lang="en">Replays the live plan day by day without fitting any parameters; with fewer than 30 fills the report says the statistics carry little weight.</span></p>
+        </div>
+        <div class="card">
+          <span class="tag">outputs</span>
+          <h3><span lang="zh">同源产物与回复守门</span><span lang="en">One computation, checked replies</span></h3>
+          <p><span lang="zh">结果 JSON、1920×1160 结构图、离线交互看板和中文报告出自同一份计算；<code>lint_response.py</code> 拦截编造的价格和概率话术。</span><span lang="en">Result JSON, a 1920×1160 chart, an offline dashboard and a Chinese report all come from one computation; <code>lint_response.py</code> blocks invented prices and probability claims.</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="demos">
+    <div class="wrap">
+      <h2><span lang="zh">在线示例</span><span lang="en">Live demos</span></h2>
+      <p class="section-lead">
+        <span lang="zh">下面三组产物都由技能脚本基于录制的真实行情生成（数据截至 2026-10-15），没有手工修改。交互看板是技能原样输出的离线 HTML，可以开关图层、拖动历史回放。</span>
+        <span lang="en">All three sets were generated by the skill's scripts from recorded real market data (as of 2026-10-15) with no manual edits. The dashboards are the skill's offline HTML output as-is: toggle layers and drag the history replay slider.</span>
+      </p>
+      <div class="grid three">
+        <article class="demo">
+          <img src="examples/600519.SH/600519.SH_preview.png" width="1920" height="1160" loading="lazy" alt="贵州茅台 600519.SH 结构图 / Moutai 600519.SH chart">
+          <div class="body">
+            <h3><span lang="zh">贵州茅台</span><span lang="en">Kweichow Moutai</span> · <code>600519.SH</code></h3>
+            <p><span lang="zh">A 股，基准沪深300，红涨绿跌，含回测。</span><span lang="en">A-share, CSI 300 benchmark, red up / green down, with backtest.</span></p>
+            <div class="actions">
+              <a class="btn small primary" href="examples/600519.SH/600519.SH_dashboard.html"><span lang="zh">打开交互看板</span><span lang="en">Open dashboard</span></a>
+              <a class="btn small" href="https://github.com/xiongcp/stock-skill/blob/main/examples/600519.SH/600519.SH_report.md"><span lang="zh">中文报告</span><span lang="en">Report (Chinese)</span></a>
+            </div>
+          </div>
+        </article>
+        <article class="demo">
+          <img src="examples/00700.HK/00700.HK_preview.png" width="1920" height="1160" loading="lazy" alt="腾讯控股 00700.HK 结构图 / Tencent 00700.HK chart">
+          <div class="body">
+            <h3><span lang="zh">腾讯控股</span><span lang="en">Tencent</span> · <code>00700.HK</code></h3>
+            <p><span lang="zh">港股，基准恒生指数，红涨绿跌。</span><span lang="en">Hong Kong, Hang Seng benchmark, red up / green down.</span></p>
+            <div class="actions">
+              <a class="btn small primary" href="examples/00700.HK/00700.HK_dashboard.html"><span lang="zh">打开交互看板</span><span lang="en">Open dashboard</span></a>
+              <a class="btn small" href="https://github.com/xiongcp/stock-skill/blob/main/examples/00700.HK/00700.HK_report.md"><span lang="zh">中文报告</span><span lang="en">Report (Chinese)</span></a>
+            </div>
+          </div>
+        </article>
+        <article class="demo">
+          <img src="examples/NVDA.US/NVDA.US_preview.png" width="1920" height="1160" loading="lazy" alt="英伟达 NVDA.US 结构图 / NVIDIA NVDA.US chart">
+          <div class="body">
+            <h3><span lang="zh">英伟达</span><span lang="en">NVIDIA</span> · <code>NVDA.US</code></h3>
+            <p><span lang="zh">美股，基准 SPY，绿涨红跌。</span><span lang="en">US, SPY benchmark, green up / red down.</span></p>
+            <div class="actions">
+              <a class="btn small primary" href="examples/NVDA.US/NVDA.US_dashboard.html"><span lang="zh">打开交互看板</span><span lang="en">Open dashboard</span></a>
+              <a class="btn small" href="https://github.com/xiongcp/stock-skill/blob/main/examples/NVDA.US/NVDA.US_report.md"><span lang="zh">中文报告</span><span lang="en">Report (Chinese)</span></a>
+            </div>
+          </div>
+        </article>
+      </div>
+      <p class="note">
+        <span lang="zh">示例中的数字只用于说明输出格式，不代表当前行情，也不构成投资建议。</span>
+        <span lang="en">Numbers in the examples only illustrate the output format. They do not reflect current prices and are not investment advice.</span>
+      </p>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <h2><span lang="zh">怎么用</span><span lang="en">How it works</span></h2>
+      <div class="grid three steps">
+        <div class="card">
+          <h3><span lang="zh">安装到你的助手</span><span lang="en">Install into your agent</span></h3>
+          <p><span lang="zh">一行脚本、插件市场或 <code>npx skills</code>，装好后新开一个会话。</span><span lang="en">One-line script, plugin marketplace or <code>npx skills</code>; then start a new session.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="zh">用自然语言提问</span><span lang="en">Ask in plain language</span></h3>
+          <p><span lang="zh">"看看茅台的 K 线结构，带回测"、"NVDA 现在的风控计划是什么？"。只说名称时助手会先查代码，有歧义会请你选。</span><span lang="en">"Show me Moutai's K-line structure, with a backtest" or "What's the risk plan for NVDA?". Given only a name, the agent looks up the ticker and asks you to choose if it is ambiguous.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="zh">拿到同源产物</span><span lang="en">Get the outputs</span></h3>
+          <p><span lang="zh">回答按报告骨架组织：大盘 → 结构 → 风控 → 波动范围 → 回测 → 免责。同时得到 <code>result.json</code>、PNG 和 HTML。</span><span lang="en">The answer follows the report: market → structure → risk plan → range → backtest → disclaimer, plus <code>result.json</code>, a PNG and the HTML dashboard.</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2><span lang="zh">安装</span><span lang="en">Install</span></h2>
+      <p class="section-lead">
+        <span lang="zh">需要 Python 3.12+ 和 Pillow，推荐用 uv；每次分析需要访问新浪、Yahoo、腾讯的行情接口。</span>
+        <span lang="en">Needs Python 3.12+ and Pillow (uv recommended); every analysis needs access to the Sina, Yahoo and Tencent market-data endpoints.</span>
+      </p>
+      <div class="card" style="margin-top: 28px;">
+        <div class="install-item">
+          <h3>macOS / Linux</h3>
+          <div class="cmd"><pre>curl -fsSL https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.sh | bash</pre><button type="button" class="copy"><span lang="zh">复制</span><span lang="en">Copy</span></button></div>
+        </div>
+        <div class="install-item">
+          <h3>Windows (PowerShell)</h3>
+          <p><span lang="zh">安装脚本尚未在 Windows 上实测。</span><span lang="en">The installer has not been tested on Windows yet.</span></p>
+          <div class="cmd plain"><pre>irm https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.ps1 | iex</pre><button type="button" class="copy"><span lang="zh">复制</span><span lang="en">Copy</span></button></div>
+        </div>
+        <div class="install-item">
+          <h3><span lang="zh">Claude Code 插件市场</span><span lang="en">Claude Code plugin marketplace</span></h3>
+          <div class="cmd plain"><pre>/plugin marketplace add xiongcp/stock-skill
+/plugin install kline-structure-chart@stock-skill</pre><button type="button" class="copy"><span lang="zh">复制</span><span lang="en">Copy</span></button></div>
+        </div>
+        <div class="install-item">
+          <h3>npx skills</h3>
+          <div class="cmd"><pre>npx skills add xiongcp/stock-skill</pre><button type="button" class="copy"><span lang="zh">复制</span><span lang="en">Copy</span></button></div>
+        </div>
+        <div class="install-item">
+          <h3><span lang="zh">让 AI 助手代装</span><span lang="en">Let your AI agent install it</span></h3>
+          <p><span lang="zh">把下面这句话发给能执行命令的助手：</span><span lang="en">Send this message to an agent that can run commands:</span></p>
+          <div class="cmd plain" lang="zh"><pre>请按 https://raw.githubusercontent.com/xiongcp/stock-skill/main/INSTALL_FOR_AGENTS.md 的步骤，把 kline-structure-chart 技能安装到你自己的技能目录；需要安装 uv 或其他软件前先问我，完成后把 doctor 自检结果告诉我。</pre><button type="button" class="copy">复制</button></div>
+          <div class="cmd plain" lang="en"><pre>Follow the steps in https://raw.githubusercontent.com/xiongcp/stock-skill/main/INSTALL_FOR_AGENTS.md to install the kline-structure-chart skill into your own skills directory. Ask me before installing uv or any other software, and tell me the doctor self-check result when done.</pre><button type="button" class="copy">Copy</button></div>
+        </div>
+        <div class="agents" aria-label="Supported agents">
+          <span class="chip">Claude Code</span><span class="chip">Codex</span><span class="chip">Cursor</span><span class="chip">Gemini CLI</span><span class="chip">OpenCode</span><span class="chip">Hermes Agent</span>
+        </div>
+      </div>
+      <p class="note">
+        <span lang="zh">安装选项、不用 uv 的方式、命令行参数和故障排查见 <a href="https://github.com/xiongcp/stock-skill#readme">README</a>。</span>
+        <span lang="en">Installer options, installing without uv, CLI arguments and troubleshooting are in the <a href="https://github.com/xiongcp/stock-skill/blob/main/README.en.md">README</a>.</span>
+      </p>
+    </div>
+  </section>
+
+  <section id="boundaries">
+    <div class="wrap">
+      <h2><span lang="zh">它不做什么</span><span lang="en">What it does not do</span></h2>
+      <div class="grid two">
+        <div class="card boundary">
+          <h3><span lang="zh">不预测涨跌</span><span lang="en">No up/down predictions</span></h3>
+          <p><span lang="zh">不输出上涨概率；规则分（0~100）是技术条件的加权打分，不是胜率；15 日区间只描述波动幅度，不是目标价。</span><span lang="en">No probability of going up; the rule score (0–100) is a weighted score of technical conditions, not a win rate; the 15-day range describes the size of moves and is not a price target.</span></p>
+        </div>
+        <div class="card boundary">
+          <h3><span lang="zh">不造数据</span><span lang="en">No fabricated data</span></h3>
+          <p><span lang="zh">只用新浪、Yahoo、腾讯的真实行情或你提供的本地真实文件；取不到就以 <code>[DATA_UNAVAILABLE]</code> 退出，不估算、不补数。</span><span lang="en">Only real data from Sina, Yahoo and Tencent, or real local files you provide; if data is unavailable it exits with <code>[DATA_UNAVAILABLE]</code> instead of estimating.</span></p>
+        </div>
+        <div class="card boundary">
+          <h3><span lang="zh">不替你下单</span><span lang="en">No order placement</span></h3>
+          <p><span lang="zh">只做规则化技术分析与研究验证，不连接券商、不执行交易。</span><span lang="en">Rule-based technical analysis and research validation only; it does not connect to brokers or execute trades.</span></p>
+        </div>
+        <div class="card boundary">
+          <h3><span lang="zh">不做基本面</span><span lang="en">No fundamentals</span></h3>
+          <p><span lang="zh">基本面、新闻、财报都不在范围内；成交分布是 OHLCV 近似，不等于真实持仓。</span><span lang="en">Fundamentals, news and earnings are out of scope; the volume profile approximates traded volume from OHLCV and is not actual holdings.</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="disclaimer">
+      <span lang="zh">本技能输出的所有内容都是基于历史行情的规则化技术分析，仅供研究与学习参考，不构成任何投资建议。市场有风险，决策需独立判断。</span>
+      <span lang="en">Everything this skill outputs is rule-based technical analysis of historical market data, for research and learning only. It is not investment advice. Markets carry risk; make your own decisions.</span>
+    </p>
+    <div class="links">
+      <a href="https://github.com/xiongcp/stock-skill">GitHub</a>
+      <a href="https://github.com/xiongcp/stock-skill#readme">README</a>
+      <a href="https://github.com/xiongcp/stock-skill/blob/main/README.en.md">README (English)</a>
+      <a href="https://github.com/xiongcp/stock-skill/blob/main/CHANGELOG.md">CHANGELOG</a>
+      <a href="https://github.com/xiongcp/stock-skill/blob/main/LICENSE">License</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var titles = {
+    zh: "kline-structure-chart · A股 / 港股 / 美股 K 线结构与风控研究技能",
+    en: "kline-structure-chart · K-line structure & risk-plan skill for AI agents"
+  };
+  function setLang(lang, persist) {
+    root.setAttribute("data-lang", lang);
+    root.setAttribute("lang", lang === "zh" ? "zh-CN" : "en");
+    document.title = titles[lang];
+    document.querySelectorAll("[data-set-lang]").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(b.getAttribute("data-set-lang") === lang));
+    });
+    if (persist) { try { localStorage.setItem("lang", lang); } catch (e) {} }
+  }
+  var initial = null;
+  var param = new URLSearchParams(location.search).get("lang");
+  if (param === "zh" || param === "en") initial = param;
+  if (!initial) { try { initial = localStorage.getItem("lang"); } catch (e) {} }
+  if (initial !== "zh" && initial !== "en") initial = /^zh/i.test(navigator.language || "") ? "zh" : "en";
+  setLang(initial, false);
+  document.querySelectorAll("[data-set-lang]").forEach(function (b) {
+    b.addEventListener("click", function () { setLang(b.getAttribute("data-set-lang"), true); });
+  });
+
+  document.querySelectorAll(".cmd .copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var text = btn.parentNode.querySelector("pre").textContent;
+      var original = btn.innerHTML;
+      function done(ok) {
+        btn.textContent = ok ? (root.getAttribute("data-lang") === "zh" ? "已复制" : "Copied") : "×";
+        setTimeout(function () { btn.innerHTML = original; }, 1600);
+      }
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+      } else { done(false); }
+    });
+  });
+})();
+</script>
+</body>
+</html>

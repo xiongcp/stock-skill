@@ -2,7 +2,7 @@
 
 **Deterministic K-line (candlestick) structure and risk-plan research skill for AI agents such as Claude Code and Codex, covering A-shares, Hong Kong and US stocks**
 
-[中文](README.md) | **English**
+[中文](README.md) | **English** | [Website](https://xiongcp.github.io/stock-skill/)
 
 [![CI](https://github.com/xiongcp/stock-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/xiongcp/stock-skill/actions/workflows/ci.yml) ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue) ![Agent Skills](https://img.shields.io/badge/Agent%20Skills-compatible-6f42c1)
 
