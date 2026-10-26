@@ -6,13 +6,13 @@
 
 [![CI](https://github.com/xiongcp/stock-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/xiongcp/stock-skill/actions/workflows/ci.yml) ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue) ![Agent Skills](https://img.shields.io/badge/Agent%20Skills-compatible-6f42c1)
 
-`kline-structure-chart` is a quantitative K-line structure analysis skill that follows the [Agent Skills open specification](https://agentskills.io/specification). Install it into Claude Code, Codex, Hermes Agent, Cursor, Gemini CLI, OpenCode or a similar AI agent, then just ask in plain language (for example: "Look at Kweichow Moutai's K-line structure, support and resistance; my account is 500,000 CNY; include a backtest"). The agent runs the full research loop on its own: **fetch real market data → deterministic structure detection → triple-barrier risk plan and normal volatility range → offline interactive dashboard and high-resolution chart → reply-contract check**.
+`kline-structure-chart` is a quantitative K-line structure analysis skill that follows the [Agent Skills open specification](https://agentskills.io/specification). Install it into Claude Code, Codex, Hermes Agent, Cursor, Gemini CLI, OpenCode or a similar AI agent, then just ask in plain language (for example: "Look at NVIDIA's K-line structure, support and resistance; my account is 100,000 USD; include a backtest"). The agent runs the full research loop on its own: **fetch real market data → deterministic structure detection → triple-barrier risk plan and normal volatility range → offline interactive dashboard and high-resolution chart → reply-contract check**.
 
 > Generated reports, chart labels and the reply contract are in Chinese. Ticker formats, CLI flags and JSON field names are the same in both languages.
 
-![Kweichow Moutai 600519.SH offline interactive dashboard demo](site/dashboard-demo.gif)
+![NVIDIA NVDA.US offline interactive dashboard demo](site/dashboard-demo-en.gif)
 
-<sub>Screen recording of the Kweichow Moutai `600519.SH` offline interactive dashboard (data as of 2026-10-15): dragging the history replay, where each past snapshot uses only the data available then and the white line is the close that actually followed; then layer toggles and sub-chart switching. The dashboard is the skill's HTML output as-is and can be opened on the [website](https://xiongcp.github.io/stock-skill/#demos). On-screen labels are in Chinese.</sub>
+<sub>Screen recording of the NVIDIA `NVDA.US` offline interactive dashboard (data as of 2026-10-15): dragging the history replay, where each past snapshot uses only the data available then and the white line is the close that actually followed; then layer toggles and sub-chart switching. The dashboard is the skill's HTML output as-is and can be opened on the [website](https://xiongcp.github.io/stock-skill/#demos). On-screen labels are in Chinese.</sub>
 
 ---
 
@@ -42,7 +42,7 @@ One-line install on macOS / Linux (registers the skill with the Claude Code, Cod
 curl -fsSL https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.sh | bash
 ```
 
-Then **start a new session** and ask "Analyze 600519.SH" or "Show me the K-line structure of Tencent 00700.HK, with a backtest". Windows, the Claude Code plugin marketplace, `npx skills`, letting your AI agent install it and installing without uv are covered in [section 3](#3-installation); command-line usage is in [section 5](#5-command-line-usage).
+Then **start a new session** and ask "Analyze NVDA.US" or "Show me the K-line structure of Tencent 00700.HK, with a backtest". Windows, the Claude Code plugin marketplace, `npx skills`, letting your AI agent install it and installing without uv are covered in [section 3](#3-installation); command-line usage is in [section 5](#5-command-line-usage).
 
 > For research and learning only. Not investment advice, and the skill never places orders for you.
 
@@ -61,7 +61,7 @@ Asking a multimodal model to read a chart, or chatting with an LLM about a stock
 
 ```mermaid
 flowchart TD
-    A["Natural-language question / CLI call<br/>(e.g. analyze Moutai / 00700.HK / NVDA.US)"] --> B["0. Ticker resolution and multi-market real data gateway<br/>resolve_symbol.py · data_gateway.py"]
+    A["Natural-language question / CLI call<br/>(e.g. analyze NVIDIA / 00700.HK / 300308.SZ)"] --> B["0. Ticker resolution and multi-market real data gateway<br/>resolve_symbol.py · data_gateway.py"]
     B --> C["Strip unclosed intraday bar + point-in-time adjustment (PIT) + benchmark pairing<br/>market_rules.py (CN CSI 300 / HK HSI / US SPY)"]
     C --> D["Deterministic structure and multi-timeframe rule layer<br/>one-sided causal NW kernel smoothing · causal ZigZag · scored channel fitting<br/>primary + alternative ABC waves · 5-wave impulse hard rules · 8 standard scenarios<br/>candlesticks / double bottom-top / RSI divergence · SMC (FVG/OB/BOS) · Volume Profile"]
     D --> F["Triple-barrier risk plan and normal volatility range<br/>risk.py · forecast.py · evaluation.py<br/>left/right-side entry zone / intraday hard stop / +0.90R breakeven / position defense / HK & US short plans<br/>martingale-centered 15-day 50% &amp; 80% range + day-by-day no-lookahead replay of the live plan"]
@@ -100,11 +100,11 @@ Security names, A-share ST/\*ST risk flags and Hong Kong board lots are fetched 
 
 All three `1920×1160` structure charts are generated automatically by the skill's scripts from real market data (as of 2026-10-15; full reports, JSON and offline dashboards are in [examples/](examples/README.md)):
 
-#### (1) A-share: Kweichow Moutai (`600519.SH` · red up / green down · broadening formation + three scenarios + 15-day normal volatility range)
+#### (1) A-share: Zhongji Innolight (`300308.SZ` · ChiNext · red up / green down · broadening formation + close below the lower rail + three scenarios + 15-day normal volatility range)
 
-![Kweichow Moutai 600519.SH structure chart](examples/600519.SH/600519.SH_preview.png)
+![Zhongji Innolight 300308.SZ structure chart](examples/300308.SZ/300308.SZ_preview.png)
 
-The red box at the top right is a risk veto: when the market regime score is below 35, the stock gets no long rating.
+The red box at the top right is a risk veto: the market regime score is below 35 and the close is below the structure's lower rail, so the stock gets no long rating.
 
 #### (2) Hong Kong: Tencent (`00700.HK` · red up / green down · breakdown and C-wave reversal scenarios)
 
@@ -184,7 +184,7 @@ The script does the following:
 
 The directory layout follows [vercel-labs/skills](https://github.com/vercel-labs/skills). If no agent is detected, the skill is registered with Claude Code and `~/.agents/skills/` by default.
 
-After installation, **start a new session** and try "Analyze 600519.SH" or "Show me Moutai's K-line".
+After installation, **start a new session** and try "Analyze NVDA.US" or "Show me NVIDIA's K-line".
 
 ### 3.2 Installer options
 
@@ -290,7 +290,7 @@ On failure the script exits non-zero: `[DATA_UNAVAILABLE]` means real data could
 
 Just ask in plain language; names, pinyin and tickers all work:
 
-- "Analyze Moutai's K-line structure and support/resistance."
+- "Analyze NVIDIA's K-line structure and support/resistance."
 - "Roughly how wide is the normal volatility range of Tencent 00700.HK over the next two weeks? Include a historical backtest."
 - "What is the risk plan for NVDA right now? My account is 100,000 USD and I risk at most 1% per trade."
 - "Show me the current structure of the SSE Composite and the ChiNext index."
