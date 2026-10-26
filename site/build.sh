@@ -5,7 +5,7 @@ set -euo pipefail
 out="${1:-_site}"
 rm -rf "$out"
 mkdir -p "$out"
-cp site/index.html site/favicon.svg "$out/"
+cp site/index.html site/favicon.svg site/dashboard-demo.gif "$out/"
 for dir in examples/*/; do
   sym="$(basename "$dir")"
   mkdir -p "$out/examples/$sym"

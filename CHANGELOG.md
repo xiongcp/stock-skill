@@ -6,6 +6,7 @@
 
 ### 文档
 
+- 新增看板演示 GIF `site/dashboard-demo.gif`（录自线上茅台示例看板：时间回放、图层开关与副图切换），README 中英两版页首与项目主页首屏改用它，茅台结构图回到 README 第 1 节。
 - 新增项目主页 <https://xiongcp.github.io/stock-skill/>：`site/` 下的中英双语单页，`.github/workflows/pages.yml` 在 push 到 main 时把它和 `examples/` 的结构图、离线交互看板一起发布到 GitHub Pages；README 顶部加入主页链接。
 - README 改为中英双语：`README.md`（中文）开头新增"快速了解"（能做什么、能带来什么、30 秒上手）与英文摘要，新增完整英文版 `README.en.md`，两者互相链接、章节编号一一对应。
 
