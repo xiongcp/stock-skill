@@ -57,6 +57,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3' y='7' width='4' height='9' rx='1' fill='%23f24444'/%3E%3Crect x='10' y='10' width='4' height='7' rx='1' fill='%2310bc84'/%3E%3Crect x='17' y='5' width='4' height='8' rx='1' fill='%2338bdf8'/%3E%3C/svg%3E" type="image/svg+xml" />
 <title>{title_str}</title>
 <style>
   :root {{
@@ -65,19 +66,23 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     --card: #161f30;
     --border: #2a364f;
     --text: #eef2f8;
-    --muted: #94a3b8;
+    --muted: #a3b1c6;
     --accent: #38bdf8;
     --bull: #f24444;
     --bear: #10bc84;
     --warn: #facc15;
   }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  @media (prefers-reduced-motion: reduce) {{ * {{ transition: none !important; }} }}
+  :focus-visible {{ outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }}
   body {{
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-    line-height: 1.45;
+    line-height: 1.5;
     padding: 16px;
+    max-width: 1680px;
+    margin: 0 auto;
   }}
   .header-banner {{
     background: linear-gradient(135deg, #131c2e 0%, #1a263d 100%);
@@ -103,7 +108,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   }}
   .badge {{
     display: inline-block;
-    padding: 3px 9px;
+    padding: 4px 10px;
     border-radius: 999px;
     font-size: 12px;
     font-weight: 600;
@@ -133,9 +138,10 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   .layer-pill {{
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
     font-size: 12px;
-    padding: 5px 10px;
+    min-height: 34px;
+    padding: 5px 11px;
     border-radius: 999px;
     background: var(--card);
     border: 1px solid var(--border);
@@ -148,6 +154,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     color: var(--text);
     border: 1px solid var(--accent);
     border-radius: 7px;
+    min-height: 34px;
     padding: 6px 12px;
     font-size: 12px;
     font-weight: 600;
@@ -156,11 +163,20 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   .btn:hover {{ background: rgba(56, 189, 248, 0.2); }}
   .workspace {{
     display: grid;
-    grid-template-columns: minmax(0, 2.35fr) minmax(320px, 1fr);
+    grid-template-columns: minmax(0, 2.25fr) minmax(340px, 1fr);
     gap: 14px;
+    align-items: start;
+  }}
+  .lower-deck {{
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 14px;
+    align-items: start;
   }}
   @media (max-width: 1100px) {{
     .workspace {{ grid-template-columns: 1fr; }}
+    .lower-deck {{ grid-template-columns: 1fr; }}
   }}
   .chart-card {{
     background: var(--panel);
@@ -173,17 +189,17 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     width: 100%;
     height: auto;
     aspect-ratio: 1440 / 760;
-    min-height: 160px;
+    min-height: 200px;
     display: block;
     border-radius: 6px;
     background: #0b0f17;
     cursor: crosshair;
   }}
   .hover-bar {{
-    min-height: 30px;
+    min-height: 32px;
     font-size: 12px;
     color: #cbd5e1;
-    padding: 6px 8px;
+    padding: 6px 10px;
     background: var(--card);
     border-radius: 6px;
     margin-bottom: 8px;
@@ -196,11 +212,12 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     border: 1px solid var(--border);
     border-radius: 8px;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
     font-size: 12px;
   }}
-  .replay-box input[type=range] {{ flex: 1; accent-color: var(--accent); }}
+  .replay-box input[type=range] {{ flex: 1; min-width: 140px; min-height: 28px; accent-color: var(--accent); }}
   .side-col {{ display: flex; flex-direction: column; gap: 12px; }}
   .side-card {{
     background: var(--panel);
@@ -215,14 +232,28 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     margin-bottom: 8px;
     border-bottom: 1px solid rgba(255,255,255,0.07);
     padding-bottom: 5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }}
+  .live-scope-tag {{
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--warn);
+    background: rgba(250, 204, 21, 0.12);
+    border: 1px solid rgba(250, 204, 21, 0.35);
+    border-radius: 999px;
+    padding: 1px 7px;
+    display: none;
   }}
   .kv-grid {{
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 7px 10px;
+    gap: 8px 10px;
     font-size: 12px;
   }}
-  .kv-item span {{ color: var(--muted); display: block; font-size: 11px; }}
+  .kv-item span {{ color: var(--muted); display: block; font-size: 12px; }}
   .kv-item strong {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }}
   .evidence-list {{ list-style: none; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }}
   .evidence-list li {{
@@ -234,14 +265,14 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   .formula-code {{
     display: block;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
+    font-size: 12px;
     color: #93c5fd;
     margin-top: 3px;
     word-break: break-all;
   }}
   .footer-note {{
     margin-top: 14px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--muted);
     text-align: center;
   }}
@@ -288,46 +319,49 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
 
 <div class="workspace">
   <div class="chart-card">
-    <div class="hover-bar" id="hoverInspector">将鼠标移至 K 线或右侧预测区查看 OHLC、均线、RSI、RVOL 与未来分位价位。</div>
-    <canvas id="klineCanvas" width="1440" height="760"></canvas>
+    <div class="hover-bar" id="hoverInspector">将鼠标移至 K 线/右侧区间或聚焦画布按 ←/→ 键查看 OHLC、均线、RSI、RVOL 与未来分位价位。</div>
+    <canvas id="klineCanvas" width="1440" height="760" tabindex="0" role="img" aria-label="K线数学结构与正常波动范围交互主图"></canvas>
     <div class="replay-box">
       <strong>时间推演回放 (Time-Travel Replay):</strong>
-      <input type="range" id="replaySlider" min="0" max="0" value="0" />
+      <input type="range" id="replaySlider" min="0" max="0" value="0" aria-label="历史截面时间回放滑块" />
       <span id="replayLabel">最新截面</span>
     </div>
   </div>
 
   <div class="side-col">
     <div class="side-card">
-      <h3>1. 大盘温度计与市场状态 (Market Regime)</h3>
+      <h3><span>1. 大盘温度计与市场状态 (Market Regime)</span></h3>
       <div class="kv-grid" id="regimeGrid"></div>
     </div>
-    <div class="side-card">
-      <h3>2. Triple-Barrier 风控与交易计划</h3>
+    <div class="side-card" data-live-only-card="1">
+      <h3><span>2. Triple-Barrier 风控与交易计划</span><span class="live-scope-tag">最新截面</span></h3>
       <div class="kv-grid" id="barrierGrid"></div>
     </div>
-    <div class="side-card">
-      <h3>3. 多情景推演</h3>
+    <div class="side-card" data-live-only-card="1">
+      <h3><span>3. 多情景推演</span><span class="live-scope-tag">最新截面</span></h3>
       <ul class="evidence-list" id="scenarioList"></ul>
     </div>
-    <div class="side-card">
-      <h3>4. 多空双向证伪 & 独立风控否决权</h3>
-      <ul class="evidence-list" id="debateList"></ul>
+  </div>
+</div>
+
+<div class="lower-deck">
+  <div class="side-card" data-live-only-card="1">
+    <h3><span>4. 多空双向证伪 &amp; 独立风控否决权</span><span class="live-scope-tag">最新截面</span></h3>
+    <ul class="evidence-list" id="debateList"></ul>
+  </div>
+  <div class="side-card" data-live-only-card="1">
+    <h3><span>5. 确定性规则形态与 SMC 公式证据</span><span class="live-scope-tag">最新截面</span></h3>
+    <ul class="evidence-list" id="patternList"></ul>
+  </div>
+  <div class="side-card" id="rrCalcCard">
+    <h3><span>6. If-Then 交互式净盈亏比与摩擦试算器</span></h3>
+    <div class="kv-grid" style="margin-bottom:8px;">
+      <label class="kv-item"><span>入场价 (Entry)</span><input id="rrEntryInput" type="number" step="0.01" style="width:100%;min-height:32px;background:#0b0f17;color:#eef2f8;border:1px solid #1e293b;border-radius:4px;padding:4px 8px;" /></label>
+      <label class="kv-item"><span>止损价 (Stop)</span><input id="rrStopInput" type="number" step="0.01" style="width:100%;min-height:32px;background:#0b0f17;color:#eef2f8;border:1px solid #1e293b;border-radius:4px;padding:4px 8px;" /></label>
+      <label class="kv-item"><span>目标价 (Target)</span><input id="rrTargetInput" type="number" step="0.01" style="width:100%;min-height:32px;background:#0b0f17;color:#eef2f8;border:1px solid #1e293b;border-radius:4px;padding:4px 8px;" /></label>
+      <label class="kv-item"><span>股数 (Shares)</span><input id="rrSharesInput" type="number" step="100" style="width:100%;min-height:32px;background:#0b0f17;color:#eef2f8;border:1px solid #1e293b;border-radius:4px;padding:4px 8px;" /></label>
     </div>
-    <div class="side-card">
-      <h3>5. 100% 数学形态与 SMC 公式证据</h3>
-      <ul class="evidence-list" id="patternList"></ul>
-    </div>
-    <div class="side-card" id="rrCalcCard">
-      <h3>6. If-Then 交互式净盈亏比与摩擦试算器</h3>
-      <div class="kv-grid" style="margin-bottom:8px;">
-        <label class="kv-item"><span>入场价 (Entry)</span><input id="rrEntryInput" type="number" step="0.01" style="width:100%;background:#0b0f17;color:#eef2f8;border:1px solid #1e293b;border-radius:4px;padding:3px 6px;" /></label>
-        <label class="kv-item"><span>止损价 (Stop)</span><input id="rrStopInput" type="number" step="0.01" style="width:100%;background:#0b0f17;color:#eef2f8;border:1px solid #1e293b;border-radius:4px;padding:3px 6px;" /></label>
-        <label class="kv-item"><span>目标价 (Target)</span><input id="rrTargetInput" type="number" step="0.01" style="width:100%;background:#0b0f17;color:#eef2f8;border:1px solid #1e293b;border-radius:4px;padding:3px 6px;" /></label>
-        <label class="kv-item"><span>股数 (Shares)</span><input id="rrSharesInput" type="number" step="100" style="width:100%;background:#0b0f17;color:#eef2f8;border:1px solid #1e293b;border-radius:4px;padding:3px 6px;" /></label>
-      </div>
-      <div class="kv-grid" id="rrResultGrid"></div>
-    </div>
+    <div class="kv-grid" id="rrResultGrid"></div>
   </div>
 </div>
 
@@ -420,13 +454,16 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   b1.textContent = '大盘基准: ' + bench.index_name + ' (' + bench.regime_label_cn + ' ' + bench.regime_score + '分)';
   const b2 = document.createElement('span');
   b2.className = 'badge';
-  b2.textContent = '多周期规则分: ' + mtf.rule_score + '/100 (' + dec.action_cn + ')';
+  const isMeanRevScore = !!(V.rule_detail && V.rule_detail.regime_adjustment && V.rule_detail.regime_adjustment.applied);
+  const liveScoreLabel = isMeanRevScore ? '均值回归规则分: ' : '综合规则分: ';
+  b2.textContent = liveScoreLabel + mtf.rule_score + '/100 (' + dec.action_cn + ')';
   badgeWrap.appendChild(b1);
   badgeWrap.appendChild(b2);
   const vetoPrefix = debate.risk_officer_veto
     ? ('【风控否决：' + (debate.veto_reasons || []).join('；') + ' · 以下点位仅用于观察，不构成做多建议】 ')
     : '';
-  document.getElementById('headerVerdict').textContent = vetoPrefix + debate.final_verdict_cn;
+  const liveVerdictText = vetoPrefix + debate.final_verdict_cn;
+  document.getElementById('headerVerdict').textContent = liveVerdictText;
 
   function addKv(container, label, value) {{
     const div = document.createElement('div');
@@ -455,9 +492,26 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
       ? snap.benchmark_relative_strength
       : bench.relative_strength_vs_index;
     const snapLastBar = (snap && snap.bars_window && snap.bars_window.length) ? snap.bars_window[snap.bars_window.length - 1] : null;
-    const rvolVal = snapLastBar && snapLastBar.rvol20 !== undefined && snapLastBar.rvol20 !== null ? snapLastBar.rvol20 : (ind.momentum.rvol20 || '--');
-    const adxVal = snap ? '--(历史截面)' : (ind.trend.adx14 || '--');
-    addKv(regGrid, snap ? ('截面 Regime (' + snap.as_of + ')') : '当前标的 Regime', regLabel);
+    if (snap) {{
+      const rvolSnap = snapLastBar && snapLastBar.rvol20 !== undefined && snapLastBar.rvol20 !== null ? (snapLastBar.rvol20 + 'x') : '--';
+      const rsiSnap = snapLastBar && snapLastBar.rsi14 !== undefined && snapLastBar.rsi14 !== null ? snapLastBar.rsi14 : '--';
+      const endReal = (snap.realized_closes && snap.realized_closes.length)
+        ? fmtPrice(snap.realized_closes[snap.realized_closes.length - 1])
+        : '待到期';
+      const hitSnap = (snap.terminal_within_80pct_band === null || snap.terminal_within_80pct_band === undefined)
+        ? '待到期'
+        : (snap.terminal_within_80pct_band ? '落在80%区间内' : '超出80%区间');
+      addKv(regGrid, '历史截面 Regime (' + snap.as_of + ')', regLabel);
+      addKv(regGrid, '当时大盘相对强弱 (RS)', rsVal);
+      addKv(regGrid, '当时 RSI(14) / RVOL(20)', rsiSnap + ' / ' + rvolSnap);
+      addKv(regGrid, '当时规则分 / 评级', (snap.rule_score !== undefined ? snap.rule_score : '--') + ' / ' + (snap.rating || '--'));
+      addKv(regGrid, '截面收盘 / 15日后收盘', fmtPrice(snap.base_close) + ' → ' + endReal);
+      addKv(regGrid, '15日到期区间检验', hitSnap);
+      return;
+    }}
+    const rvolVal = ind.momentum.rvol20 || '--';
+    const adxVal = ind.trend.adx14 || '--';
+    addKv(regGrid, '当前标的 Regime', regLabel);
     addKv(regGrid, '大盘相对强弱 (RS)', rsVal);
     addKv(regGrid, 'ADX(14) / RVOL(20)', adxVal + ' / ' + rvolVal + 'x');
     addKv(regGrid, 'BBW分位 / HV比值', (ind.volatility.bbw_percentile_120 || '--') + '% / ' + (ind.qlib_factors.hv_ratio_20_60 || '--'));
@@ -599,10 +653,15 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
         cb.parentElement.style.opacity = isLive ? '1' : '0.45';
       }}
     }});
+    document.querySelectorAll('.live-scope-tag').forEach(function(tag) {{
+      tag.style.display = isLive ? 'none' : 'inline-block';
+      tag.textContent = '最新截面 ' + meta.as_of;
+    }});
     if (activeReplayIdx === replays.length) {{
       replayLabel.textContent = '最新截面 (' + meta.as_of + ')';
       b1.textContent = '大盘基准: ' + bench.index_name + ' (' + bench.regime_label_cn + ' ' + bench.regime_score + '分)';
-      b2.textContent = '多周期规则分: ' + mtf.rule_score + '/100 (' + dec.action_cn + ')';
+      b2.textContent = liveScoreLabel + mtf.rule_score + '/100 (' + dec.action_cn + ')';
+      document.getElementById('headerVerdict').textContent = liveVerdictText;
       renderRegimeGrid(null);
     }} else {{
       const snap = replays[activeReplayIdx];
@@ -610,9 +669,12 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
         ? '待到期'
         : (snap.terminal_within_80pct_band ? '是' : '否');
       const rsTxt = snap.rule_score !== undefined ? (' · 当时规则分 ' + snap.rule_score + '/100') : '';
-      replayLabel.textContent = '历史回放: ' + snap.as_of + rsTxt + ' (80%扇形命中: ' + hitTxt + ')';
+      replayLabel.textContent = '历史回放: ' + snap.as_of + rsTxt + ' (第15日收盘落入80%区间: ' + hitTxt + ')';
       b1.textContent = '大盘基准(' + snap.as_of + '): ' + bench.index_name + ' (' + (snap.benchmark_regime_score !== undefined ? snap.benchmark_regime_score : bench.regime_score) + '分)';
       b2.textContent = '当时规则分(' + snap.as_of + '): ' + snap.rule_score + '/100 (' + (snap.rating || '') + ')';
+      document.getElementById('headerVerdict').textContent =
+        '【历史截面回放：' + snap.as_of + ' · 当时收盘 ' + fmtPrice(snap.base_close) +
+        ' · 当时规则分 ' + snap.rule_score + '/100 (' + (snap.rating || '') + ')】 主图与15日波动区间已切回该历史日；标有「最新截面」的卡片固定展示 ' + meta.as_of + ' 数据。';
       renderRegimeGrid(snap);
     }}
     drawChart();
@@ -668,18 +730,29 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
       addKv(rrGridEl, '试算', '请输入入场、止损、目标与股数');
       return;
     }}
-    const notional = e * sh;
-    const stampBps = rrMm.stamp_duty_buy_bps + rrMm.stamp_duty_sell_bps;
-    const leviesBps = rrMm.regulatory_levies_buy_bps + rrMm.regulatory_levies_sell_bps;
-    const commTotal = 2.0 * Math.max(rrMm.min_commission_per_leg, notional * (rrMm.commission_bps / 10000.0));
-    const totalCost = commTotal + notional * ((stampBps + leviesBps) / 10000.0);
-    const feePerShare = totalCost / sh;
+    if ((s - e) * (t - e) >= 0) {{
+      addKv(rrGridEl, '试算错误', '点位方向矛盾：做多需「止损 < 入场 < 目标」，做空需「目标 < 入场 < 止损」');
+      return;
+    }}
+    const notionalEntry = e * sh;
+    const notionalTarget = t * sh;
+    const notionalStop = s * sh;
+    const buyFee = Math.max(rrMm.min_commission_per_leg, notionalEntry * (rrMm.commission_bps / 10000.0)) +
+      notionalEntry * ((rrMm.stamp_duty_buy_bps + rrMm.regulatory_levies_buy_bps) / 10000.0);
+    const sellFeeTarget = Math.max(rrMm.min_commission_per_leg, notionalTarget * (rrMm.commission_bps / 10000.0)) +
+      notionalTarget * ((rrMm.stamp_duty_sell_bps + rrMm.regulatory_levies_sell_bps) / 10000.0);
+    const sellFeeStop = Math.max(rrMm.min_commission_per_leg, notionalStop * (rrMm.commission_bps / 10000.0)) +
+      notionalStop * ((rrMm.stamp_duty_sell_bps + rrMm.regulatory_levies_sell_bps) / 10000.0);
+    const totalCostTarget = buyFee + sellFeeTarget;
+    const totalCostStop = buyFee + sellFeeStop;
+    const feePerShareTarget = totalCostTarget / sh;
+    const feePerShareStop = totalCostStop / sh;
     const grossRisk = Math.abs(e - s);
     const grossReward = Math.abs(t - e);
-    const netReward = Math.max(0, grossReward - feePerShare);
-    const netRr = netReward / (grossRisk + feePerShare);
-    addKv(rrGridEl, '往返总摩擦 (含规费/最低佣金)', totalCost.toFixed(2) + ' ' + (meta.currency || '') + ' (' + ((totalCost / notional) * 100).toFixed(2) + '%)');
-    addKv(rrGridEl, '保本价 (Breakeven)', (s < e ? e + feePerShare : e - feePerShare).toFixed(pDec));
+    const netReward = Math.max(0, grossReward - feePerShareTarget);
+    const netRr = netReward / (grossRisk + feePerShareStop);
+    addKv(rrGridEl, '往返总摩擦 (含规费/最低佣金)', totalCostTarget.toFixed(2) + ' ' + (meta.currency || '') + ' (' + ((totalCostTarget / notionalEntry) * 100).toFixed(2) + '%)');
+    addKv(rrGridEl, '保本价 (Breakeven)', (s < e ? e + feePerShareTarget : e - feePerShareTarget).toFixed(pDec));
     addKv(rrGridEl, '毛盈亏比 / 扣费净盈亏比', (grossReward / grossRisk).toFixed(2) + 'R / ' + netRr.toFixed(2) + 'R');
     if (rrMm.min_commission_note) addKv(rrGridEl, '费率口径', rrMm.min_commission_note);
   }}
@@ -839,7 +912,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     ctx.setLineDash([]);
     ctx.fillStyle = '#38bdf8';
     ctx.font = 'bold 12px sans-serif';
-    ctx.fillText('右侧: 未来 ' + hBars + ' Bar 预测演进区', divX + 10, padT + 18);
+    ctx.fillText('右侧: 未来 ' + hBars + ' 日正常波动范围与条件路径', divX + 10, padT + 18);
 
     // Layer: Volume Profile POC / Value Area
     if (layers.poc && REPORT.volume_profile && activeReplayIdx === replays.length) {{
@@ -1247,14 +1320,52 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
       const fIdx = Math.max(0, Math.min(chartGeom.hBars - 1, Math.floor((x - chartGeom.padL - chartGeom.histW) / chartGeom.stepF)));
       const fd = chartGeom.activeFp.horizon_dates[fIdx];
       insp.textContent =
-        '[未来预测 Step +' + (fIdx + 1) + ' (' + fd + ')] ' +
+        '[未来正常波动范围 Step +' + (fIdx + 1) + ' (' + fd + ')] ' +
         'q10:' + fmtPrice(chartGeom.activeFp.q10[fIdx]) +
-        ' | 悲观q25:' + fmtPrice(chartGeom.activeFp.q25[fIdx]) +
-        ' | 基准q50:' + fmtPrice(chartGeom.activeFp.base_median_q50[fIdx]) +
-        ' | 乐观q75:' + fmtPrice(chartGeom.activeFp.optimistic_q75[fIdx]) +
+        ' | 下沿q25:' + fmtPrice(chartGeom.activeFp.q25[fIdx]) +
+        ' | 中枢q50:' + fmtPrice(chartGeom.activeFp.base_median_q50[fIdx]) +
+        ' | 上沿q75:' + fmtPrice(chartGeom.activeFp.optimistic_q75[fIdx]) +
         ' | q90:' + fmtPrice(chartGeom.activeFp.q90[fIdx]);
     }}
     drawChart(x, y);
+  }});
+
+  let kbStepIdx = -1;
+  canvas.addEventListener('keydown', function(ev) {{
+    if (!chartGeom || showRsMode) return;
+    const totalSteps = chartGeom.nBars + chartGeom.hBars;
+    if (ev.key === 'ArrowRight') {{
+      ev.preventDefault();
+      kbStepIdx = kbStepIdx < 0 ? chartGeom.nBars - 1 : Math.min(totalSteps - 1, kbStepIdx + 1);
+    }} else if (ev.key === 'ArrowLeft') {{
+      ev.preventDefault();
+      kbStepIdx = kbStepIdx < 0 ? chartGeom.nBars - 1 : Math.max(0, kbStepIdx - 1);
+    }} else {{
+      return;
+    }}
+    const insp = document.getElementById('hoverInspector');
+    if (kbStepIdx < chartGeom.nBars) {{
+      const b = chartGeom.activeBars[kbStepIdx];
+      const x = chartGeom.padL + (kbStepIdx + 0.5) * chartGeom.stepH;
+      insp.textContent =
+        '[历史K线 ' + b.day + '] O:' + fmtPrice(b.open) + ' H:' + fmtPrice(b.high) +
+        ' L:' + fmtPrice(b.low) + ' C:' + fmtPrice(b.close) +
+        ' | MA20:' + (b.ma20 !== null && b.ma20 !== undefined ? fmtPrice(b.ma20) : '--') +
+        ' | RSI14:' + (b.rsi14 || '--') + ' | RVOL:' + (b.rvol20 || '--') + 'x';
+      drawChart(x, 260);
+    }} else {{
+      const fIdx = kbStepIdx - chartGeom.nBars;
+      const fd = chartGeom.activeFp.horizon_dates[fIdx];
+      const x = chartGeom.padL + chartGeom.histW + (fIdx + 1) * chartGeom.stepF;
+      insp.textContent =
+        '[未来正常波动范围 Step +' + (fIdx + 1) + ' (' + fd + ')] ' +
+        'q10:' + fmtPrice(chartGeom.activeFp.q10[fIdx]) +
+        ' | 下沿q25:' + fmtPrice(chartGeom.activeFp.q25[fIdx]) +
+        ' | 中枢q50:' + fmtPrice(chartGeom.activeFp.base_median_q50[fIdx]) +
+        ' | 上沿q75:' + fmtPrice(chartGeom.activeFp.optimistic_q75[fIdx]) +
+        ' | q90:' + fmtPrice(chartGeom.activeFp.q90[fIdx]);
+      drawChart(x, 260);
+    }}
   }});
 
   drawChart();

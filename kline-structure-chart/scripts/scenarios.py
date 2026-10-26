@@ -109,19 +109,35 @@ def detect_impulse_wave(
     if len(confirmed) < 3 or not sview:
         return None
     last_c = float(sview[-1]["close"])
-    last_hi = max(float(b["high"]) for b in sview[-5:])
-    last_lo = min(float(b["low"]) for b in sview[-5:])
     min_leg = max(0.015, 1.1 * atr)
+
+    def _slice_since_pivot(piv: dict[str, Any], next_piv: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        if "idx" in piv:
+            start_idx = max(0, min(len(sview) - 1, int(piv["idx"])))
+            end_idx = (
+                max(start_idx + 1, min(len(sview), int(next_piv["idx"]) + 1))
+                if (next_piv is not None and "idx" in next_piv)
+                else len(sview)
+            )
+            return sview[start_idx:end_idx]
+        p_day = str(piv.get("day") or "")
+        n_day = str(next_piv.get("day") or "") if next_piv is not None else ""
+        sub = [b for b in sview if str(b.get("day") or "") >= p_day and (not n_day or str(b.get("day") or "") <= n_day)]
+        return sub if sub else sview[-5:]
 
     # 1) 检查 5 个已确认拐点 (p0..p4) + 当前进行中的第 5 浪
     if len(confirmed) >= 5:
         for start_i in range(len(confirmed) - 5, max(-1, len(confirmed) - 8), -1):
             seq = confirmed[start_i : start_i + 5]
             p0, p1, p2, p3, p4 = seq
+            next_after_p4 = confirmed[start_i + 5] if start_i + 5 < len(confirmed) else None
+            seg_p4 = _slice_since_pivot(p4, next_after_p4)
+            hi_since_p4 = max(float(b["high"]) for b in seg_p4)
+            lo_since_p4 = min(float(b["low"]) for b in seg_p4)
             if [p["kind"] for p in seq] == ["L", "H", "L", "H", "L"]:
                 w1 = p1["price"] - p0["price"]
                 w3 = p3["price"] - p2["price"]
-                w5 = max(last_hi, last_c) - p4["price"]
+                w5 = max(hi_since_p4, last_c) - p4["price"]
                 rule_w2 = p2["price"] > p0["price"]
                 rule_w3 = w3 >= w1 * 0.95 and (w5 <= 0 or w3 >= min(w1, w5))
                 rule_w4 = p4["price"] > p1["price"]
@@ -149,7 +165,7 @@ def detect_impulse_wave(
             if [p["kind"] for p in seq] == ["H", "L", "H", "L", "H"]:
                 w1 = p0["price"] - p1["price"]
                 w3 = p2["price"] - p3["price"]
-                w5 = p4["price"] - min(last_lo, last_c)
+                w5 = p4["price"] - min(lo_since_p4, last_c)
                 rule_w2 = p2["price"] < p0["price"]
                 rule_w3 = w3 >= w1 * 0.95 and (w5 <= 0 or w3 >= min(w1, w5))
                 rule_w4 = p4["price"] < p1["price"]
@@ -176,12 +192,16 @@ def detect_impulse_wave(
                     }
 
     # 2) 检查最近 3 个已确认拐点 (p0, p1, p2) + 当前正在推进的第 3 浪主升/主跌
-    for start_i in range(len(confirmed) - 3, max(-1, len(confirmed) - 6), -1):
+    for start_i in range(len(confirmed) - 3, max(-1, len(confirmed) - 4), -1):
         p0, p1, p2 = confirmed[start_i : start_i + 3]
+        next_after_p2 = confirmed[start_i + 3] if start_i + 3 < len(confirmed) else None
+        seg_p2 = _slice_since_pivot(p2, next_after_p2)
+        hi_since_p2 = max(float(b["high"]) for b in seg_p2)
+        lo_since_p2 = min(float(b["low"]) for b in seg_p2)
         if [p0["kind"], p1["kind"], p2["kind"]] == ["L", "H", "L"]:
             w1 = p1["price"] - p0["price"]
             retrace = (p1["price"] - p2["price"]) / max(w1, 1e-6)
-            w3_now = max(last_hi, last_c) - p2["price"]
+            w3_now = max(hi_since_p2, last_c) - p2["price"]
             if w1 / max(p0["price"], 1e-6) >= min_leg and 0.236 <= retrace < 0.95 and last_c > p1["price"] and w3_now >= 0.8 * w1:
                 t1618 = _money(p2["price"] + 1.618 * w1)
                 for mult in (2.0, 2.618, 3.618):
@@ -208,7 +228,7 @@ def detect_impulse_wave(
         if [p0["kind"], p1["kind"], p2["kind"]] == ["H", "L", "H"]:
             w1 = p0["price"] - p1["price"]
             retrace = (p2["price"] - p1["price"]) / max(w1, 1e-6)
-            w3_now = p2["price"] - min(last_lo, last_c)
+            w3_now = p2["price"] - min(lo_since_p2, last_c)
             if w1 / max(p0["price"], 1e-6) >= min_leg and 0.236 <= retrace < 0.95 and last_c < p1["price"] and w3_now >= 0.8 * w1:
                 t1618 = _money(max(0.01, p2["price"] - 1.618 * w1))
                 for mult in (2.0, 2.618, 3.618):
@@ -629,12 +649,16 @@ def build_scenarios(
         a_e_p = float(c_cand["a_end"]["price"])
         a_span = abs(a_e_p - a_s_p)
         near_100 = 0.72 <= c_ratio <= 1.62
-        exhaustion = (c_dir == "down" and (rsi_now <= 44.0 or float(sview[-1]["close"]) >= float(sview[-1]["open"]))) or (
-            c_dir == "up" and (rsi_now >= 56.0 or float(sview[-1]["close"]) <= float(sview[-1]["open"]))
+        rev_bar = (c_dir == "down" and float(sview[-1]["close"]) >= float(sview[-1]["open"])) or (
+            c_dir == "up" and float(sview[-1]["close"]) <= float(sview[-1]["open"])
+        )
+        exhaustion = (c_dir == "down" and (rsi_now <= 44.0 or rev_bar)) or (
+            c_dir == "up" and (rsi_now >= 56.0 or rev_bar)
         )
         strict_6 = bool(near_100 and exhaustion)
         if strict_6 or (0.65 <= c_ratio <= 1.75):
             rev_dir = "BULLISH" if c_dir == "down" else "BEARISH"
+            exh_desc = "出现企稳/反转K线" if rev_bar else f"RSI14={rsi_now:.1f} 进入动能衰竭区"
             lvl_1618 = (
                 _money(min(b_end_p - 1.618 * a_span, ref * (1.0 - 0.5 * atr)))
                 if c_dir == "down"
@@ -668,7 +692,7 @@ def build_scenarios(
                         if rev_dir == "BULLISH"
                         else f"C 浪在 1.0×A 附近受阻并收盘跌破 {fp(raw_trig_6)}"
                     ),
-                    active_trigger_text=f"已在进行中（C/A={c_ratio:.2f} 已在 1.0×A 附近出现反转K线）",
+                    active_trigger_text=f"已在进行中（C/A={c_ratio:.2f} 已在 1.0×A 附近{exh_desc}）",
                     mid_waypoint_price=_money(0.5 * (ref + tgt_6)),
                     mid_step_label=f"反抽 {fp(0.5 * (ref + tgt_6))}",
                     target_price=tgt_6,

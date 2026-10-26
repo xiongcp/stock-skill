@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import urllib.request
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -690,9 +691,9 @@ def render(
         leg_widths = [18 + text_size(draw, name, leg_face)[0] for name, _, _ in legend]
         total_leg_w = sum(leg_widths) + leg_gap * (len(legend) - 1) + 24
     leg_x1 = width - 24 - total_leg_w
-    # 标题必须在图例左侧结束；长资产名（美股/港股全称）动态截断，禁止压到图例胶囊下方。
+    # 标题必须在图例左侧结束；去除 "英伟达 (NVDA) (NVDA.US)" 这类重复代码括号，长资产名动态截断。
     max_title_w = max(120, leg_x1 - left - 16)
-    fit_title = title
+    fit_title = re.sub(r"\(([A-Za-z0-9._-]+)\)\s+\(\1\.[A-Z]+\)", lambda m: m.group(0).split()[-1], title)
     if text_size(draw, fit_title, f_title)[0] > max_title_w:
         parts = fit_title.split(" · ", 1)
         if len(parts) == 2:
@@ -722,7 +723,7 @@ def render(
     # ---------------- 顶部 5 卡片 KPI 仪表盘 (Y: 76 ~ 142) ----------------
     if scenario:
         scen_title = f"④ {scenario['label']}（B点 {scenario['b_end']['day'][5:]} {fp(scenario['b_end']['price'])}）"
-        scen_line1 = " | ".join(f"{l['ratio']:.3f}位 {fp(l['price'])}" for l in scenario["levels"][:3])
+        scen_line1 = " | ".join(f"{l['ratio']:g}:{fp(l['price'])}" for l in scenario["levels"][:3])
         scen_line2 = (
             f"A {scenario['a_start']['day'][5:]}→{scenario['a_end']['day'][5:]}  |  "
             f"C/A 已走 {scenario['c_progress']['c_over_a']:.2f}"
@@ -1208,17 +1209,30 @@ def render(
     draw.line((nx, main_bottom, nx, main_bottom + 6), fill=INTRA, width=2)
     draw.text((nx - tw // 2, main_bottom + 8), now_label, font=f_tiny_sm, fill=INTRA)
 
-    # 预判区未来时间刻度（只跳过周末，未扣除节假日，故标「≈」）
+    # 预判区未来时间刻度：优先读取 conformal_forecast.horizon_dates 的交易所日历，无则回退周末估算；确保终点刻度始终可读
     base_day = plot[-1]["day"]
     prev_right = nx + tw // 2
-    # 刻度按预测期等分（约 1/3、2/3 与终点），与各路径的折点时间无关
     horizon_ticks = int(projections.get("horizon_bars") or projections["bull"]["waypoints_offset"][-1][0])
-    for f_off in sorted({max(1, round(horizon_ticks * k / 3)) for k in (1, 2, 3)}):
+    h_dates = (conformal_forecast or {}).get("horizon_dates") if isinstance(conformal_forecast, dict) else None
+
+    def _future_tick_label(f_off: int) -> str:
+        if isinstance(h_dates, list) and len(h_dates) >= f_off and isinstance(h_dates[f_off - 1], str):
+            return f"+{f_off}日({h_dates[f_off - 1][5:]})"
+        return f"≈+{f_off}日({add_trading_days_str(base_day, f_off)})"
+
+    tick_offsets = sorted({max(1, round(horizon_ticks * k / 3)) for k in (1, 2, 3)})
+    term_off = tick_offsets[-1]
+    term_fx = x_of(last_bar_idx + term_off)
+    term_tw, _ = text_size(draw, _future_tick_label(term_off), f_tiny_sm)
+    term_left = term_fx - term_tw // 2
+    for f_off in tick_offsets:
         fx = x_of(last_bar_idx + f_off)
-        f_date_str = f"≈+{f_off}日({add_trading_days_str(base_day, f_off)})"
+        f_date_str = _future_tick_label(f_off)
         tw, _ = text_size(draw, f_date_str, f_tiny_sm)
         draw.line((fx, main_bottom, fx, main_bottom + 5), fill=PROJ_NEUTRAL, width=1.2)
-        if fx - tw // 2 > prev_right + 4:  # 刻度文字放不下就只留刻度线
+        if f_off != term_off and fx + tw // 2 + 4 >= term_left:
+            continue  # 预留终点 (+15日) 标签空间，避免中段刻度把终点挤掉
+        if fx - tw // 2 > prev_right + 4:
             draw.text((fx - tw // 2, main_bottom + 8), f_date_str, font=f_tiny_sm, fill=PROJ_NEUTRAL)
             prev_right = fx + tw // 2
 

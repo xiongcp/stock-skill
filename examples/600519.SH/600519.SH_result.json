@@ -1125,7 +1125,7 @@
         "required_evidence": "日线收盘站稳 1425.15 且 RVOL20 >= 1.35 (当前 2.07)",
         "false_breakout_rule": "突破后收盘跌回 1416.29 下方视为假突破"
       },
-      "time_stop_rule": "持仓满 15 根K线未触及 TP1(1359.27) 且偏离成本不足 0.5*ATR 时触发时间屏障离场",
+      "time_stop_rule": "持仓满 15 根K线仍未触及止损(1284.83)或 TP1(1359.27) 时，于到期日收盘触发时间屏障离场（若遇一字跌停封死则顺延至开板日）",
       "market_microstructure": {
         "market": "CN",
         "board": "MAIN",

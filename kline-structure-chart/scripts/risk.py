@@ -430,7 +430,8 @@ def compute_triple_barrier_plan(
         final_shares = max(0, min(lot_shares, max_cash_shares))
         price_loss_per_share = (entry_high - stop_loss) / adj_factor
         cost_info = compute_round_trip_cost_detail(final_shares * entry_high_raw, rules, shares=final_shares)
-        if cost_info["min_commission_applied"] and final_shares > 0:
+        had_min_comm = bool(cost_info["min_commission_applied"])
+        if final_shares > 0:
             while final_shares > 0:
                 ci = compute_round_trip_cost_detail(final_shares * entry_high_raw, rules, shares=final_shares)
                 if final_shares * price_loss_per_share + ci["total_cost_amount"] <= risk_budget + 1e-6:
@@ -438,14 +439,15 @@ def compute_triple_barrier_plan(
                     break
                 final_shares = round_shares_to_lot(final_shares - step, rules)
             cost_info = compute_round_trip_cost_detail(final_shares * entry_high_raw, rules, shares=final_shares)
-            gap_risk_note = (
-                gap_risk_note
-                + f"；小额单笔最低佣金/规费生效（双边最低佣金下往返固定摩擦至少约 { compute_round_trip_cost_detail(lot * entry_high_raw, rules)['total_cost_amount']:.2f} {meta.get('currency', '')}）"
-            )
+            if had_min_comm or cost_info["min_commission_applied"]:
+                gap_risk_note = (
+                    gap_risk_note
+                    + f"；小额单笔最低佣金/规费生效（双边最低佣金下往返固定摩擦至少约 {compute_round_trip_cost_detail(lot * entry_high_raw, rules)['total_cost_amount']:.2f} {meta.get('currency', '')}）"
+                )
         max_loss_val = (
             round(final_shares * price_loss_per_share + cost_info["total_cost_amount"], 2)
-            if (cost_info["min_commission_applied"] and final_shares > 0)
-            else round(final_shares * worst_unit_risk, 2)
+            if final_shares > 0
+            else 0.0
         )
         # 风控否决或评级不是做多确认/条件观察时不给股数：股数本身就是买入建议，与"否决时只给观察位"冲突
         long_allowed = not vetoed and action in ("LONG_CONFIRMED", "WATCH_LONG_SETUP")
@@ -559,7 +561,7 @@ def compute_triple_barrier_plan(
             "required_evidence": right_req_ev,
             "false_breakout_rule": right_false_brk,
         },
-        "time_stop_rule": f"持仓满 {horizon_bars} 根K线未触及 TP1({tp1:.{p_dec}f}) 且偏离成本不足 0.5*ATR 时触发时间屏障离场",
+        "time_stop_rule": f"持仓满 {horizon_bars} 根K线仍未触及止损({stop_loss:.{p_dec}f})或 TP1({tp1:.{p_dec}f}) 时，于到期日收盘触发时间屏障离场（若遇一字跌停封死则顺延至开板日）",
         "market_microstructure": rules,
         "position_sizing": position_sizing,
         "holder_defense_plan": holder_defense,

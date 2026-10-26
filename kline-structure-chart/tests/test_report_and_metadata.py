@@ -368,6 +368,68 @@ def test_delisted_or_stale_ticker_and_delisting_period_trigger_risk_veto(
     assert _causal_is_st_at_cutoff(st_bars, len(st_bars) - 1, "CN", "600289.SH", base_is_st=True) is True
 
 
+@pytest.mark.slow
+def test_backtest_does_not_backfill_current_delisting_name_into_history(replay_recorded) -> None:
+    """退市整理期简称只反映当下：回测历史截面不得因当前简称/厂商快照简称含「退市」而全部被 DELISTING_RISK 否决。"""
+    from evaluation import run_plan_backtest
+    from market_rules import is_delisting_instrument, strip_delisting_marks
+
+    assert strip_delisting_marks("退市金钰") == "金钰"
+    assert strip_delisting_marks("雏鹰退") == "雏鹰"
+    assert strip_delisting_marks("ACME (DELISTED)") == "ACME"
+    assert strip_delisting_marks("贵州茅台") == "贵州茅台"
+    assert not is_delisting_instrument("", strip_delisting_marks("*ST退市X"))
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ_BASE}
+    bundle = load_bundle(req, now=NOW)
+    base = run_plan_backtest(bundle, req, horizon_bars=15, step=10)
+    delisted = copy.deepcopy(bundle)
+    delisted["target"]["instrument"]["name"] = "退市茅台"
+    delisted["provenance"]["instrument_meta"] = {**(delisted["provenance"].get("instrument_meta") or {}), "vendor_name": "退市茅台"}
+    bt = run_plan_backtest(delisted, req, horizon_bars=15, step=10)
+    assert "DELISTING_RISK" not in bt["veto_reason_counts"]
+    assert bt["actions_seen"] == base["actions_seen"]
+
+
+def test_backtest_suspension_uses_benchmark_sessions_not_calendar() -> None:
+    """停牌判定以基准的下一个交易日为准：休市表覆盖范围外（2021 年前）的节假日不得误判为停牌。"""
+    from evaluation import _suspended_after
+
+    # 2019 年国庆：基准 09-30 之后的下一个交易日是 10-08，标的同日开盘不算停牌
+    bench_2019 = ["2019-09-27", "2019-09-30", "2019-10-08", "2019-10-09"]
+    assert _suspended_after("2019-09-30", "2019-10-08", bench_2019, "CN") is False
+    assert _suspended_after("2019-09-30", "2019-10-09", bench_2019, "CN") is True
+    # 无基准时：覆盖范围外不判停牌，覆盖范围内按交易日历
+    assert _suspended_after("2019-09-30", "2019-10-08", [], "CN") is False
+    assert _suspended_after("2026-09-30", "2026-10-08", [], "CN") is False
+    assert _suspended_after("2026-09-30", "2026-10-09", [], "CN") is True
+
+
+def test_vix_fetch_range_only_widens_for_historical_as_of(monkeypatch: pytest.MonkeyPatch) -> None:
+    """最新截面只拉 3 个月 VIX；只有 as_of 早于 60 天前的历史截面才拉 10 年。"""
+    ranges: list[str] = []
+
+    def fake_yahoo(symbol: str, range_str: str = "5y", datalen: int | None = None) -> list[dict]:
+        ranges.append(range_str)
+        return [{"day": "2024-06-14", "open": 12.0, "high": 12.5, "low": 11.8, "close": 12.2, "volume": 0}]
+
+    monkeypatch.setattr(data_gateway, "fetch_yahoo_daily_bars", fake_yahoo)
+    data_gateway._fetch_vix("2026-10-15", True, now=NOW)
+    data_gateway._fetch_vix("2024-06-14", True, now=NOW)
+    assert ranges == ["3mo", "10y"]
+
+
+@pytest.mark.slow
+def test_report_md_translates_delisting_veto_codes(cn_pipeline) -> None:
+    report, _, backtest = cn_pipeline
+    bt = copy.deepcopy(backtest)
+    bt["backtest"]["veto_reason_counts"] = {"DELISTING_RISK": 2, "STALE_OR_DELISTED": 1}
+    md = render_report_markdown(load_v6(report)[0], bt)
+    assert "退市整理期或已终止上市 2 次" in md
+    assert "行情长期断更（疑似退市或长期停牌） 1 次" in md
+    assert "DELISTING_RISK" not in md and "STALE_OR_DELISTED" not in md
+
+
 def test_win_rate_interval_does_not_collapse_on_small_samples() -> None:
     from evaluation import _summarize_returns, _wilson_ci
 

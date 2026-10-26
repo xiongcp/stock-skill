@@ -264,6 +264,17 @@ def is_delisting_instrument(symbol: str = "", name: str = "") -> bool:
     return bool(_DELISTING_NAME_RE.search(cleaned))
 
 
+_DELISTING_MARK_RE = re.compile(r"[\(（](?:退市|DELISTED)[\)）]|DELISTED|退市|(?<=\S\S)退$", re.IGNORECASE)
+
+
+def strip_delisting_marks(name: str = "") -> str:
+    """去掉简称里的退市整理期标记（'退市金钰'→'金钰'、'雏鹰退'→'雏鹰'、'ACME (DELISTED)'→'ACME'）。
+
+    退市标记只反映取数当下的状态，回测历史截面时不能回填到过去（与 ST 状态同理）。
+    """
+    return re.sub(r"\s+", " ", _DELISTING_MARK_RE.sub("", name or "")).strip()
+
+
 def _cn_lot_rules(asset_type: str, board: str) -> tuple[int, int, int]:
     """返回 A 股 (lot_size, min_order_shares, lot_step)。
 
@@ -818,10 +829,12 @@ def compute_round_trip_cost_detail(
     notional: float,
     rules: dict[str, Any],
     shares: int | None = None,
+    exit_notional: float | None = None,
+    exit_rules: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """计算含单笔最低佣金与交易所/监管规费的往返成本明细。
+    """计算含单笔最低佣金与交易所/监管规费的往返成本明细（支持买卖两腿不同成交额与跨日规则）。
 
-    费率只读 rules 里的 min_commission_per_leg、regulatory_levies_{buy,sell}_bps（由 get_market_microstructure_rules 按日期给出），
+    费率只读 rules / exit_rules 里的 min_commission_per_leg、regulatory_levies_{buy,sell}_bps（由 get_market_microstructure_rules 按日期给出），
     本函数不另设常量。
     """
     prop_rate = round_trip_cost_rate(rules)
@@ -834,16 +847,27 @@ def compute_round_trip_cost_detail(
             "min_commission_applied": False,
             "breakeven_price_delta": 0.0,
         }
-    comm_bps = float(rules.get("commission_bps") or 0.0)
-    stamp_bps = float(rules.get("stamp_duty_buy_bps") or 0.0) + float(rules.get("stamp_duty_sell_bps") or 0.0)
-    prop_comm_leg = notional * (comm_bps / 10000.0)
-    min_comm_leg = float(rules["min_commission_per_leg"])
-    levies_bps = float(rules["regulatory_levies_buy_bps"]) + float(rules["regulatory_levies_sell_bps"])
-    actual_comm_leg = max(min_comm_leg, prop_comm_leg)
-    min_comm_applied = prop_comm_leg + 1e-9 < min_comm_leg
-    commission_total = 2.0 * actual_comm_leg
-    stamp_total = notional * (stamp_bps / 10000.0)
-    levies_total = notional * (levies_bps / 10000.0)
+    sell_notional = float(notional if exit_notional is None else exit_notional)
+    s_rules = rules if exit_rules is None else exit_rules
+    buy_comm_bps = float(rules.get("commission_bps") or 0.0)
+    sell_comm_bps = float(s_rules.get("commission_bps") or 0.0)
+    buy_stamp_bps = float(rules.get("stamp_duty_buy_bps") or 0.0)
+    sell_stamp_bps = float(s_rules.get("stamp_duty_sell_bps") or 0.0)
+    buy_levies_bps = float(rules["regulatory_levies_buy_bps"])
+    sell_levies_bps = float(s_rules["regulatory_levies_sell_bps"])
+    buy_min_comm = float(rules["min_commission_per_leg"])
+    sell_min_comm = float(s_rules["min_commission_per_leg"])
+
+    buy_prop_comm = notional * (buy_comm_bps / 10000.0)
+    sell_prop_comm = sell_notional * (sell_comm_bps / 10000.0)
+    buy_actual_comm = max(buy_min_comm, buy_prop_comm)
+    sell_actual_comm = max(sell_min_comm, sell_prop_comm)
+    min_comm_applied = (buy_prop_comm + 1e-9 < buy_min_comm) or (sell_prop_comm + 1e-9 < sell_min_comm)
+
+    commission_total = buy_actual_comm + sell_actual_comm
+    stamp_total = notional * (buy_stamp_bps / 10000.0) + sell_notional * (sell_stamp_bps / 10000.0)
+    levies_total = notional * (buy_levies_bps / 10000.0) + sell_notional * (sell_levies_bps / 10000.0)
+    levies_bps = buy_levies_bps + sell_levies_bps
     total_cost = commission_total + stamp_total + levies_total
     eff_rate = total_cost / notional
     be_delta = (total_cost / int(shares)) if (shares and int(shares) > 0) else 0.0

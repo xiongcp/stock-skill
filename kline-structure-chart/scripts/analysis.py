@@ -417,7 +417,10 @@ def analyze_bundle(
         else 0
     )
     stale_ref_day = prov.get("stale_reference_day") if stale_sessions > 0 else None
-    is_delisting = is_delisting_instrument(inst["symbol"], str(meta["name"]))
+    vendor_name = str((prov.get("instrument_meta") or {}).get("vendor_name") or "")
+    is_delisting = is_delisting_instrument(inst["symbol"], str(meta["name"])) or is_delisting_instrument(inst["symbol"], vendor_name)
+    if is_delisting and not is_delisting_instrument(inst["symbol"], str(meta["name"])) and vendor_name:
+        meta["name"] = vendor_name
 
     # 6. 二阶段过滤、三重屏障风控与多空辩论
     meta_decision, tb_plan, debate = compute_triple_barrier_plan(

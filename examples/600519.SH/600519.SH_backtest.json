@@ -7,13 +7,27 @@
     "modules_audited": [
       "nadaraya_watson",
       "structure_layer_pivots",
+      "structure_and_scenarios",
       "candlestick_patterns",
       "smc_structures",
-      "conformal_forecast"
+      "conformal_forecast",
+      "pit_rescaling",
+      "triple_barrier_decision"
     ],
-    "mismatches_count": 0,
-    "mismatches": [],
-    "passed": true
+    "mismatches_count": 16,
+    "mismatches": [
+      "Triple-barrier decision mutated at cut=140",
+      "Structure or scenarios mutated at cut=140",
+      "Triple-barrier decision mutated at cut=250",
+      "Structure or scenarios mutated at cut=250",
+      "Triple-barrier decision mutated at cut=360",
+      "Structure or scenarios mutated at cut=360",
+      "Triple-barrier decision mutated at cut=470",
+      "Structure or scenarios mutated at cut=470",
+      "Triple-barrier decision mutated at cut=580",
+      "Structure or scenarios mutated at cut=580"
+    ],
+    "passed": false
   },
   "backtest": {
     "symbol": "600519.SH",
@@ -38,7 +52,7 @@
     "no_fill_outside_entry_zone": 2,
     "all_long_signals": {
       "trades": 13,
-      "cumulative_return_pct": 1.72,
+      "cumulative_return_pct": 1.7,
       "win_rate_pct": 46.15,
       "win_rate_95ci_pct": [
         23.21,
@@ -46,7 +60,7 @@
       ],
       "mean_return_95ci_pct": [
         -1.35,
-        1.81
+        1.8
       ],
       "sharpe": 0.18,
       "max_drawdown_pct": 6.75,
@@ -54,7 +68,7 @@
     },
     "long_confirmed": {
       "trades": 6,
-      "cumulative_return_pct": 10.82,
+      "cumulative_return_pct": 10.81,
       "win_rate_pct": 83.33,
       "win_rate_95ci_pct": [
         43.65,
@@ -65,12 +79,12 @@
         3.73
       ],
       "sharpe": 1.28,
-      "max_drawdown_pct": 3.68,
-      "profit_factor": 3.88
+      "max_drawdown_pct": 3.69,
+      "profit_factor": 3.87
     },
     "watch_long_setup": {
       "trades": 13,
-      "cumulative_return_pct": -4.27,
+      "cumulative_return_pct": -4.29,
       "win_rate_pct": 38.46,
       "win_rate_95ci_pct": [
         17.71,
@@ -81,7 +95,7 @@
         1.29
       ],
       "sharpe": -0.32,
-      "max_drawdown_pct": 11.35,
+      "max_drawdown_pct": 11.36,
       "profit_factor": 0.8
     },
     "buy_and_hold_return_pct": -6.99,
@@ -180,7 +194,7 @@
         "outcome": "SL_BARRIER",
         "barrier_label": -1,
         "gross_return": -0.03565,
-        "net_return": -0.03685,
+        "net_return": -0.03687,
         "signal_day": "2026-06-03",
         "action": "LONG_CONFIRMED",
         "setup_type": "LEFT_SIDE_PULLBACK",
@@ -213,7 +227,7 @@
         "outcome": "SL_BARRIER",
         "barrier_label": -1,
         "gross_return": -0.03058,
-        "net_return": -0.03178,
+        "net_return": -0.0318,
         "signal_day": "2026-06-22",
         "action": "WATCH_LONG_SETUP",
         "setup_type": "LEFT_SIDE_PULLBACK",
@@ -246,7 +260,7 @@
         "outcome": "TP_BARRIER",
         "barrier_label": 1,
         "gross_return": 0.05393,
-        "net_return": 0.05273,
+        "net_return": 0.05271,
         "signal_day": "2026-06-29",
         "action": "WATCH_LONG_SETUP",
         "setup_type": "LEFT_SIDE_PULLBACK",

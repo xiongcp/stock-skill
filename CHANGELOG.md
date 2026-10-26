@@ -29,10 +29,22 @@
   - `scripts/doctor.py` 与 `install.sh` 支持探测 `~/.hermes/skills` 分类子目录、Profile 路径与脚本集合一致性校验。
 - **退市/长期停牌断更识别、连续跌停至样本末尾保护与全链路因果回放审计扩展**：
   - `scripts/market_rules.py` 新增 `is_delisting_instrument` 与 `count_missing_trading_sessions`；`scripts/data_gateway.py` 与 `scripts/risk.py` 在标的相较同市场基准缺失超过 5 个已收盘交易日（`STALE_OR_DELISTED`）或处于退市整理期（`DELISTING_RISK`）时自动将 `quality.status` 降为 `PARTIAL` 并触发风控一票否决（`DEFENSIVE_AVOID`、清空推荐股数）。
-  - `scripts/evaluation.py` 在回测中对连续一字跌停锁死至数据末尾的持仓标记为 `LOCKED_LIMIT_DOWN_UNTIL_END` / `PENDING`（拒绝按最后一根 K 线收盘价假装平仓），并在 `2026-07-06` 主板 ST 新规前的历史切点按因果 60 日波动幅度校验历史 ST 状态（`_causal_is_st_at_cutoff`），消除未来戴帽向历史回溯的前视偏差。
-  - `scripts/evaluation.py` 的 `run_causal_replay_audit` 新增 `pit_rescaling`（未来拆股因子不污染历史复权价）与 `triple_barrier_decision`（三重屏障风控与评级零前视）两项回放审计。
+  - `scripts/evaluation.py` 在回测中对连续一字跌停锁死至数据末尾的持仓记为 `outcome = LOCKED_LIMIT_DOWN_UNTIL_END`，按最后一个锁定日收盘价计入亏损（不再从成交样本中剔除，避免高估回测表现；`reconcile_trade_ideas` 的对账仍记为 `PENDING`），并在 `2026-07-06` 主板 ST 新规前的历史切点按因果 60 日波动幅度校验历史 ST 状态（`_causal_is_st_at_cutoff`），消除未来戴帽向历史回溯的前视偏差。
+  - `scripts/evaluation.py` 的 `run_causal_replay_audit` 新增 `pit_rescaling`（未来拆股因子不污染历史复权价）、`triple_barrier_decision`（三重屏障风控与评级零前视）与 `structure_and_scenarios`（浪型计数、情景与推动浪零前视）三项回放审计。
+- **成本与回测撮合口径对齐**：
+  - `compute_round_trip_cost_detail` 支持买卖两腿不同成交额与不同日期规则；`scripts/risk.py` 始终按含规费的真实往返成本下调股数，`max_loss_at_stop` 改为"止损亏损 + 往返成本"。
+  - 回测买入腿按入场日、卖出腿按出场日的佣金、印花税与规费计费（另加 2 bps 滑点）；涨跌停幅度按每根K线当日规则取值；保本棘轮价按价位表取整；回放复权改用完整序列，跌停锁仓可延续到决策切片之后；`t+1` 停牌时不成交。
+  - `plan.long.time_stop_rule` 文案与回测时间屏障一致（到期日收盘离场，一字跌停顺延至开板日）。
+- **数据入口加固**：`validate_bars` 拦截 NaN/Infinity 价量与非法日期；本地行情包截断到更早的 `--as-of` 时按截面重新复权，并清空 VIX、财报日与盘中K线；未声明复权状态的行情包标为 `raw`；VIX 剔除未收盘K线。
+- **报告与看板**：`report.md` 把风控否决放到数据备注之前，结构破位类型改为中文；HTML 看板改为"主图 + 侧栏 + 下层三栏"布局，历史回放时标题与"最新截面"卡片标签明确区分两个截面，画布支持 ←/→ 键查看，试算器拒绝方向矛盾的点位并按买卖两腿分别计费，术语统一为"正常波动范围"；PNG 未来刻度优先使用交易所日历并保证终点刻度可见，标题去掉重复的代码括号。三市场示例报告纳入 `lint_response` 测试。
+- **推动浪识别**：第 3/5 浪进度改为从 p2/p4 拐点开始的全段高低点计算（此前只看最近 5 根）。
 
 ### 修复（合入后代码审查）
+
+- 回测前视：当前退市整理期简称（含厂商快照简称）此前会被带进每个历史截面，导致全部决策被 `DELISTING_RISK` 否决；现在回放历史截面时去掉退市标记（`market_rules.strip_delisting_marks`）。
+- 回测停牌判定改为对照基准的下一个交易日，不再依赖只覆盖 2021 年起的休市表，2021 年前的节假日不会再被误判为停牌。
+- VIX 只在 `--as-of` 早于 60 天前时拉取 10 年历史，最新截面只拉 3 个月（此前每次都拉 10 年）。
+- `report.md` 的否决原因统计补齐 `DELISTING_RISK` / `STALE_OR_DELISTED` 的中文说明；`references/` 同步两个新否决编码与 `LOCKED_LIMIT_DOWN_UNTIL_END` 结局。
 
 - 交互看板时间回放：拖到"最新截面"时图形不再变形。
   1. 最新截面与历史回放显示同样根数（回放快照窗口长度，默认 60 根），K 线宽度不再在两种视图间减半；完整序列仍在 `chart_data.json` 中。

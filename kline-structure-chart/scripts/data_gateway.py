@@ -21,6 +21,7 @@ from market_rules import (
     is_daily_bar_complete,
     latest_closed_session,
     is_st_instrument,
+    rescale_bars_as_of,
     resolve_instrument,
     tencent_quote_code_for,
     yahoo_events_symbol_for,
@@ -490,13 +491,16 @@ def split_incomplete_last_bar(
     return bars[:-1], live
 
 
-def _fetch_vix(as_of: str | None, allow_network: bool) -> tuple[float | None, str]:
-    """拉取 CBOE VIX 最近收盘值（Yahoo ^VIX）；拿不到就返回 None，绝不填默认值。"""
+def _fetch_vix(as_of: str | None, allow_network: bool, now: datetime | None = None) -> tuple[float | None, str]:
+    """拉取 CBOE VIX 最近已收盘值（Yahoo ^VIX）；拿不到就返回 None，绝不填默认值。"""
     if not allow_network:
         return None, "NOT_FETCHED(offline)"
     try:
-        # 历史截面需要覆盖 as_of 之前 10 年，避免 3 个月窗口过滤后为空。
-        bars = fetch_yahoo_daily_bars("^VIX", range_str="10y" if as_of else "3mo", datalen=None)
+        # 历史截面（as_of 早于 60 天前）才拉 10 年，避免 3 个月窗口过滤后为空；最新截面只拉 3 个月。
+        today = (now or datetime.now(timezone.utc)).date()
+        is_historical = bool(as_of) and (today - date.fromisoformat(str(as_of)[:10])).days > 60
+        bars = fetch_yahoo_daily_bars("^VIX", range_str="10y" if is_historical else "3mo", datalen=None)
+        bars, _ = split_incomplete_last_bar(bars, "US", now)
         if as_of:
             bars = [b for b in bars if b["day"] <= as_of[:10]]
         if not bars:
@@ -529,6 +533,7 @@ def load_bundle(
                 raise ValueError("input bundle target.instrument.market is required")
             target_bars = [dict(b) for b in target.get("bars") or []]
             validate_bars(target_bars, "bundle.target.bars")
+            orig_last_day = str(target_bars[-1]["day"])[:10]
             as_of = request.get("as_of")
             if as_of:
                 target_bars = [b for b in target_bars if str(b["day"]) <= str(as_of)[:10]]
@@ -537,8 +542,16 @@ def load_bundle(
                 raise InsufficientHistoryError(
                     f"历史长度不足 ({inst.get('symbol') or '输入行情包标的'}: {len(target_bars)} < {MIN_LIVE_BARS})" + _SHORT_LOCAL_HINT
                 )
+            truncated_earlier = bool(as_of and str(target_bars[-1]["day"])[:10] < orig_last_day)
+            if truncated_earlier and any("adj_factor" in b for b in target_bars):
+                target_bars = rescale_bars_as_of(target_bars, len(target_bars) - 1)
             out = dict(raw_data)
-            out["target"] = {**target, "bars": target_bars, "intraday": intraday or target.get("intraday")}
+            out["target"] = {**target, "bars": target_bars, "intraday": intraday if not truncated_earlier else None}
+            if truncated_earlier:
+                extra_local = dict(out.get("extra_context") or {})
+                extra_local["vix"] = None
+                extra_local["earnings_date"] = None
+                out["extra_context"] = extra_local
             benchmark = raw_data.get("benchmark")
             bench_latest_local: str | None = None
             if benchmark and benchmark.get("bars"):
@@ -550,14 +563,30 @@ def load_bundle(
                 if bench_bars:
                     bench_latest_local = bench_bars[-1]["day"]
                 out["benchmark"] = {**benchmark, "bars": [b for b in bench_bars if str(b["day"]) <= target_bars[-1]["day"]]}
-            stale_ref_local = bench_latest_local or (str(as_of)[:10] if (as_of and intraday is None) else None)
+            as_of_cap = str(as_of)[:10] if (as_of and intraday is None) else None
+            if bench_latest_local and as_of_cap:
+                stale_ref_local: str | None = max(bench_latest_local, as_of_cap)
+            else:
+                stale_ref_local = bench_latest_local or as_of_cap
             stale_local = (
                 count_missing_trading_sessions(target_bars[-1]["day"], stale_ref_local, inst["market"])
                 if stale_ref_local
                 else 0
             )
             prov_local = dict(out.get("provenance") or {})
-            prov_local.setdefault("as_of", target_bars[-1]["day"])
+            prov_local["as_of"] = target_bars[-1]["day"]
+            if not prov_local.get("adjustment"):
+                prov_local["adjustment"] = "raw"
+                prov_local.setdefault(
+                    "adjustment_status",
+                    {
+                        "requested": request.get("adjustment", "raw"),
+                        "applied": "raw",
+                        "events_used": 0,
+                        "source": None,
+                        "error": "输入行情包未声明复权状态，按原始价格使用",
+                    },
+                )
             if stale_local > 0:
                 prov_local["stale_sessions"] = stale_local
                 prov_local["stale_reference_day"] = stale_ref_local
@@ -701,8 +730,9 @@ def load_bundle(
             }
 
     stale_reference_day: str | None = bench_latest_day
-    if stale_reference_day is None and as_of and intraday is None:
-        stale_reference_day = min(str(as_of)[:10], latest_closed)
+    if as_of and intraday is None:
+        as_of_ref = min(str(as_of)[:10], latest_closed)
+        stale_reference_day = max(stale_reference_day, as_of_ref) if stale_reference_day else as_of_ref
     stale_sessions = (
         count_missing_trading_sessions(target_bars[-1]["day"], stale_reference_day, market)
         if stale_reference_day
@@ -713,7 +743,7 @@ def load_bundle(
 
     vix_value, vix_source = (None, "NOT_APPLICABLE")
     if market == "US":
-        vix_value, vix_source = _fetch_vix(as_of or target_bars[-1]["day"], allow_network)
+        vix_value, vix_source = _fetch_vix(target_bars[-1]["day"], allow_network, now=now)
 
     return {
         "schema_version": "6.0.0",
