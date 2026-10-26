@@ -1,0 +1,2269 @@
+{
+  "schema_version": "6.0.0",
+  "meta": {
+    "symbol": "300308.SZ",
+    "name": "中际旭创",
+    "market": "CN",
+    "asset_type": "equity",
+    "is_st": false,
+    "is_ipo_no_limit": false,
+    "board_lot": null,
+    "currency": "CNY",
+    "timeframe": "1D",
+    "as_of": "2026-10-15",
+    "adjustment": "total_return",
+    "color_scheme": "cn_red_up",
+    "price_decimals": 2,
+    "data_source": "SINA_LIVE_DAILY",
+    "timezone": "Asia/Shanghai",
+    "engine_version": "6.0.0",
+    "request": {
+      "symbol": "300308.SZ",
+      "market": "CN",
+      "asset_type": "equity",
+      "display_bars": 120,
+      "structure_bars": 120,
+      "horizon_bars": 15,
+      "max_risk_pct": 0.01,
+      "color_scheme": "auto",
+      "as_of": "2026-10-15"
+    }
+  },
+  "quality": {
+    "data_source": "SINA_LIVE_DAILY",
+    "status": "OK",
+    "data_source_class": "LIVE",
+    "benchmark_source": "SINA_LIVE_DAILY",
+    "benchmark_source_class": "LIVE",
+    "warnings": [],
+    "notes": [
+      "证券简称未能从行情快照获取（HISTORICAL_AS_OF_LIVE_METADATA_DISABLED），ST 风险警示状态只依据 --st / --name 判断"
+    ],
+    "provenance_errors": [],
+    "completed_bars_total": 2594,
+    "display_bars": 120,
+    "structure_bars": 120,
+    "forecast_promotion_status": "PROMOTED",
+    "placeholder_bars_removed": {
+      "target": [],
+      "benchmark": []
+    }
+  },
+  "verdict": {
+    "action": "DEFENSIVE_AVOID",
+    "action_cn": "防守回避/破位警惕",
+    "setup_type": "WAIT_CONFIRMATION",
+    "setup_label_cn": "区间观察/等待右侧收盘突破",
+    "risk_veto": true,
+    "veto_reasons": [
+      "大盘环境评分偏弱 (16.0<35)，压降个股做多评级",
+      "日线收盘处于结构下轨下方（破位状态未修复）"
+    ],
+    "veto_codes": [
+      "BENCHMARK_WEAK",
+      "BELOW_LOWER_RAIL"
+    ],
+    "rule_score": 12.5,
+    "rating": "BEARISH_PRESSURE",
+    "rating_cn": "多周期空头承压",
+    "headline_cn": "【防守回避/破位警惕】综合规则分 12.5/100，当前属于「区间观察/等待右侧收盘突破」；关键突破位 761.54，关键防守/止损位 606.79，TP1 761.54（净盈亏比 1.43）。",
+    "overextended": true,
+    "rule_detail": {
+      "components": {
+        "macro_trend_25": 2.5,
+        "structure_pattern_25": 1.5,
+        "strategy_trigger_25": 5.5,
+        "volume_benchmark_25": 3.0
+      },
+      "components_total": 12.5,
+      "regime_adjustment": {
+        "applied": false
+      },
+      "timeframes_aligned": {
+        "weekly_trend": "BEARISH_OR_FLAT",
+        "daily_structure": "below",
+        "active_bull_strategies": 1,
+        "active_bear_strategies": 3,
+        "causal_momentum_ic_15d": 0.306,
+        "scoring_regime": "MOMENTUM_TREND",
+        "weekly_60w_position_pct": 35.6
+      },
+      "scoring_method": "DETERMINISTIC_MULTI_FACTOR_RULE_V5",
+      "note": "rule_score 为确定性多维度规则加权分（0~100），不代表统计胜率或预测概率。"
+    },
+    "strategy_signals": [
+      {
+        "strategy_id": "supertrend_ema_trend",
+        "name_cn": "Supertrend + EMA200 趋势追踪",
+        "family": "TREND_FOLLOWING",
+        "direction": "BEARISH",
+        "state": "SHORT_ACTIVE",
+        "as_of": "2026-10-15",
+        "formula_verified": "SupertrendDir=-1 (Line=805.71) AND Close(656.94) vs EMA200(811.95)"
+      },
+      {
+        "strategy_id": "ema_ribbon_channel",
+        "name_cn": "EMA 20/50/200 均线丝带",
+        "family": "TREND_FOLLOWING",
+        "direction": "BEARISH",
+        "state": "SHORT_ACTIVE",
+        "as_of": "2026-10-15",
+        "formula_verified": "Close(656.94), EMA20(806.68), EMA50(876.92), EMA200(811.95)"
+      },
+      {
+        "strategy_id": "bollinger_squeeze_breakout",
+        "name_cn": "Bollinger Squeeze 波动率突破",
+        "family": "VOLATILITY_BREAKOUT",
+        "direction": "NEUTRAL",
+        "state": "NEUTRAL",
+        "as_of": "2026-10-15",
+        "formula_verified": "PrevBBW_Pct(69.2%) <= 25% AND Close(656.94) vs BB[668.97, 1006.32] AND RVOL(1.40)"
+      },
+      {
+        "strategy_id": "rsi_stoch_mean_reversion",
+        "name_cn": "RSI + Stochastic 极值回归",
+        "family": "MEAN_REVERSION",
+        "direction": "BULLISH",
+        "state": "LONG_TRIGGERED",
+        "as_of": "2026-10-15",
+        "formula_verified": "RSI14=25.8 (prev=28.5), StochK=6.9 (prev=5.9)"
+      },
+      {
+        "strategy_id": "macd_zero_accel",
+        "name_cn": "MACD 零轴动量加速",
+        "family": "MOMENTUM",
+        "direction": "BEARISH",
+        "state": "SHORT_ACTIVE",
+        "as_of": "2026-10-15",
+        "formula_verified": "DIF=-53.883, Hist=[-15.539 -> -17.522 -> -19.877]"
+      }
+    ],
+    "anti_quant_traps": {
+      "bull_trap_churn": false,
+      "ignition_bull_trap_downgraded": false,
+      "gates_active": {
+        "ignition_trap_downgrade": false,
+        "algo_bleed_gate": true,
+        "bull_trap_churn": false,
+        "momentum_crowding": false
+      },
+      "algo_grinding_bleed": true,
+      "right_turn_confirmed": false,
+      "momentum_crowding": false,
+      "liquidity_sweep_reclaim": false,
+      "vpa_pullback_dryup": false,
+      "vpa_upthrust_distribution": false,
+      "close_in_range": 0.385,
+      "upper_wick_ratio": 0.4779,
+      "body_to_range": 0.1371,
+      "effort_vs_result": -0.5307,
+      "warnings_cn": [
+        "【防阴跌接飞刀】收盘低于 EMA20 且 EMA20 不高于 EMA50（中短期均线走弱）；未见右侧微观破位收回（Micro-BOS）或放量吞没前，左侧回踩计划不予确认",
+        "【过热降级】偏离 EMA20 -3.09 ATR、RSI14 25.8 或高位派发结构触发过热条件，已不给出做多确认"
+      ]
+    },
+    "bull_case": [
+      "结构触发：若在支撑 630.99 上方企稳（入场/观察区 660.81~678.72，防守位 606.79），修复空间指向 TP1 761.54，放量突破 761.54（已跌破的下轨(反压)）后指向 TP2 800.26。",
+      "数学形态证据：看涨锤头线 (LowerWick(45.22) >= 2.0*Body(0.35) AND UpperWick/Range(0.09) <= 0.18 AND Range(49.92) >= 0.75*ATR(47.50) AND LowRank20(0.18))。"
+    ],
+    "bear_case": [
+      "空头证伪/失效线：若日线收盘跌破 630.99（前高 2026-03-20）或跌穿硬止损屏障 606.79，多头结构立即失效，下方风险指向 597.41。",
+      "反向形态警示：看跌吞没形态 (PrevBull(C1=939.54>O1=938.05) AND BearBody(40.22) >= 1.08*PrevBody(1.50) AND C(926.28) <= O1(938.05) AND RVOL(0.92))。",
+      "独立风控否决项：大盘环境评分偏弱 (16.0<35)，压降个股做多评级",
+      "独立风控否决项：日线收盘处于结构下轨下方（破位状态未修复）"
+    ]
+  },
+  "market_context": {
+    "index_symbol": "000300.SH",
+    "index_name": "沪深300",
+    "regime": "TRENDING_BEAR",
+    "regime_label_cn": "空头趋势承压",
+    "regime_score": 16.0,
+    "relative_strength_vs_index": 0.7946,
+    "benchmark_missing": false,
+    "source": "SINA_LIVE_DAILY",
+    "bench_ret1": -0.01225,
+    "bench_ret5": -0.03347
+  },
+  "structure": {
+    "last_close": 656.94,
+    "regime": {
+      "regime": "HIGH_VOLATILITY_CHAOS",
+      "label_cn": "高波失序/极端波动",
+      "regime_score": 16.0,
+      "routed_strategy_family": "DEFENSIVE_WAIT",
+      "evidence": {
+        "adx14": 21.17,
+        "bbw_percentile_120": 90.0,
+        "hv_ratio_20_60": 0.728,
+        "vix": null,
+        "close_vs_ema60_pct": -26.18,
+        "close_vs_ema200_pct": -19.09
+      },
+      "formula_verified": "ADX14=21.2, BBW_Pct120=90.0%, HV20/60=0.73, +DI=13.9/-DI=36.9 -> HIGH_VOLATILITY_CHAOS"
+    },
+    "key_levels": {
+      "resistances": [
+        {
+          "price": 676.0,
+          "sources": [
+            "缺口下沿 10-15"
+          ]
+        },
+        {
+          "price": 689.5,
+          "sources": [
+            "缺口上沿 10-15"
+          ]
+        },
+        {
+          "price": 761.54,
+          "sources": [
+            "已跌破的下轨(反压)"
+          ]
+        },
+        {
+          "price": 791.8,
+          "sources": [
+            "前低 07-30"
+          ]
+        },
+        {
+          "price": 794.35,
+          "sources": [
+            "ABC 0.382倍位"
+          ]
+        },
+        {
+          "price": 802.78,
+          "sources": [
+            "前低 09-03"
+          ]
+        },
+        {
+          "price": 814.0,
+          "sources": [
+            "前低 04-29"
+          ]
+        },
+        {
+          "price": 828.72,
+          "sources": [
+            "前低 08-26"
+          ]
+        },
+        {
+          "price": 833.71,
+          "sources": [
+            "前低 08-10"
+          ]
+        },
+        {
+          "price": 837.64,
+          "sources": [
+            "MA20"
+          ]
+        },
+        {
+          "price": 856.67,
+          "sources": [
+            "前低 09-15"
+          ]
+        },
+        {
+          "price": 874.51,
+          "sources": [
+            "前低 08-03"
+          ]
+        },
+        {
+          "price": 878.64,
+          "sources": [
+            "前低 08-05"
+          ]
+        },
+        {
+          "price": 886.63,
+          "sources": [
+            "缺口下沿 09-28"
+          ]
+        },
+        {
+          "price": 894.47,
+          "sources": [
+            "缺口上沿 09-28"
+          ]
+        },
+        {
+          "price": 899.79,
+          "sources": [
+            "MA60"
+          ]
+        },
+        {
+          "price": 914.46,
+          "sources": [
+            "前高 08-28"
+          ]
+        },
+        {
+          "price": 917.48,
+          "sources": [
+            "前高 04-23"
+          ]
+        },
+        {
+          "price": 933.04,
+          "sources": [
+            "前高 09-09"
+          ]
+        },
+        {
+          "price": 939.03,
+          "sources": [
+            "0.382反弹位"
+          ]
+        },
+        {
+          "price": 949.08,
+          "sources": [
+            "前低 07-17"
+          ]
+        },
+        {
+          "price": 973.48,
+          "sources": [
+            "前高 09-22"
+          ]
+        },
+        {
+          "price": 985.36,
+          "sources": [
+            "前高 07-31",
+            "前低 05-19"
+          ]
+        },
+        {
+          "price": 997.21,
+          "sources": [
+            "MA120",
+            "前高 08-07"
+          ]
+        },
+        {
+          "price": 1011.67,
+          "sources": [
+            "形态上轨",
+            "前高 08-17"
+          ]
+        },
+        {
+          "price": 1029.85,
+          "sources": [
+            "0.500反弹位",
+            "前高 08-04"
+          ]
+        },
+        {
+          "price": 1058.7,
+          "sources": [
+            "前低 07-06"
+          ]
+        },
+        {
+          "price": 1075.13,
+          "sources": [
+            "前低 07-13"
+          ]
+        },
+        {
+          "price": 1091.31,
+          "sources": [
+            "前低 06-11"
+          ]
+        },
+        {
+          "price": 1098.17,
+          "sources": [
+            "前高 05-15"
+          ]
+        },
+        {
+          "price": 1120.67,
+          "sources": [
+            "0.618反弹位"
+          ]
+        },
+        {
+          "price": 1137.12,
+          "sources": [
+            "前高 07-22"
+          ]
+        },
+        {
+          "price": 1167.68,
+          "sources": [
+            "前低 06-29"
+          ]
+        },
+        {
+          "price": 1206.11,
+          "sources": [
+            "前高 07-15"
+          ]
+        },
+        {
+          "price": 1216.11,
+          "sources": [
+            "前高 07-10"
+          ]
+        },
+        {
+          "price": 1313.53,
+          "sources": [
+            "前高 07-01"
+          ]
+        },
+        {
+          "price": 1317.96,
+          "sources": [
+            "前高 06-03"
+          ]
+        },
+        {
+          "price": 1414.69,
+          "sources": [
+            "前高 06-22",
+            "近120日最高 06-22"
+          ]
+        }
+      ],
+      "supports": [
+        {
+          "price": 647.34,
+          "sources": [
+            "ABC 0.618倍位"
+          ]
+        },
+        {
+          "price": 645.01,
+          "sources": [
+            "近期低点 10-15",
+            "近120日最低 10-15"
+          ]
+        },
+        {
+          "price": 643.24,
+          "sources": [
+            "前高 2026-03-26",
+            "前高 2026-01-16"
+          ]
+        },
+        {
+          "price": 630.99,
+          "sources": [
+            "前高 2026-03-20"
+          ]
+        },
+        {
+          "price": 625.4,
+          "sources": [
+            "前高 2025-12-11"
+          ]
+        },
+        {
+          "price": 614.92,
+          "sources": [
+            "前高 2026-01-13"
+          ]
+        },
+        {
+          "price": 597.41,
+          "sources": [
+            "前高 2026-03-03"
+          ]
+        },
+        {
+          "price": 583.4,
+          "sources": [
+            "前高 2026-03-05"
+          ]
+        },
+        {
+          "price": 576.17,
+          "sources": [
+            "前高 2026-02-05",
+            "前低 2026-03-24"
+          ]
+        },
+        {
+          "price": 572.42,
+          "sources": [
+            "前高 2026-02-09"
+          ]
+        },
+        {
+          "price": 570.45,
+          "sources": [
+            "前低 2026-01-26"
+          ]
+        },
+        {
+          "price": 565.46,
+          "sources": [
+            "前低 2026-01-14"
+          ]
+        },
+        {
+          "price": 557.33,
+          "sources": [
+            "前低 2026-01-12",
+            "前高 2025-11-27",
+            "前高 2025-12-03"
+          ]
+        },
+        {
+          "price": 553.49,
+          "sources": [
+            "前低 2026-03-31"
+          ]
+        },
+        {
+          "price": 543.52,
+          "sources": [
+            "前低 2025-12-16"
+          ]
+        },
+        {
+          "price": 540.53,
+          "sources": [
+            "前高 2025-10-29"
+          ]
+        },
+        {
+          "price": 535.04,
+          "sources": [
+            "前低 2026-03-04"
+          ]
+        },
+        {
+          "price": 528.85,
+          "sources": [
+            "前低 2026-02-06"
+          ]
+        },
+        {
+          "price": 523.7,
+          "sources": [
+            "前低 2026-02-04"
+          ]
+        },
+        {
+          "price": 520.95,
+          "sources": [
+            "前高 2025-11-20"
+          ]
+        },
+        {
+          "price": 513.6,
+          "sources": [
+            "前低 2026-02-13"
+          ]
+        },
+        {
+          "price": 510.94,
+          "sources": [
+            "前低 2025-12-04"
+          ]
+        },
+        {
+          "price": 507.21,
+          "sources": [
+            "前低 2025-11-28",
+            "前高 2025-11-06"
+          ]
+        },
+        {
+          "price": 504.62,
+          "sources": [
+            "前低 2026-03-09"
+          ]
+        },
+        {
+          "price": 502.91,
+          "sources": [
+            "前高 2025-11-04"
+          ]
+        },
+        {
+          "price": 498.3,
+          "sources": [
+            "前高 2025-11-11"
+          ]
+        },
+        {
+          "price": 458.75,
+          "sources": [
+            "前低 2025-11-10"
+          ]
+        },
+        {
+          "price": 457.54,
+          "sources": [
+            "前低 2025-11-05"
+          ]
+        },
+        {
+          "price": 456.26,
+          "sources": [
+            "前低 2025-11-03",
+            "前高 2025-09-23"
+          ]
+        },
+        {
+          "price": 448.78,
+          "sources": [
+            "前低 2025-11-12"
+          ]
+        },
+        {
+          "price": 446.32,
+          "sources": [
+            "前高 2025-09-04"
+          ]
+        },
+        {
+          "price": 442.32,
+          "sources": [
+            "前高 2025-09-11"
+          ]
+        },
+        {
+          "price": 440.64,
+          "sources": [
+            "前高 2025-09-26"
+          ]
+        },
+        {
+          "price": 435.77,
+          "sources": [
+            "前低 2025-11-24"
+          ]
+        },
+        {
+          "price": 409.4,
+          "sources": [
+            "ABC 1.000倍位"
+          ]
+        },
+        {
+          "price": 402.48,
+          "sources": [
+            "前低 2025-09-25"
+          ]
+        },
+        {
+          "price": 387.75,
+          "sources": [
+            "前低 2025-09-18"
+          ]
+        },
+        {
+          "price": 342.71,
+          "sources": [
+            "前低 2025-09-08"
+          ]
+        },
+        {
+          "price": 336.08,
+          "sources": [
+            "前低 2025-10-15"
+          ]
+        },
+        {
+          "price": 227.74,
+          "sources": [
+            "前高 2025-07-31"
+          ]
+        },
+        {
+          "price": 196.46,
+          "sources": [
+            "前低 2025-08-07",
+            "前高 2025-07-22"
+          ]
+        },
+        {
+          "price": 175.34,
+          "sources": [
+            "前低 2025-07-23"
+          ]
+        },
+        {
+          "price": 146.23,
+          "sources": [
+            "前高 2025-07-01"
+          ]
+        },
+        {
+          "price": 133.63,
+          "sources": [
+            "前高 2025-01-23"
+          ]
+        },
+        {
+          "price": 129.72,
+          "sources": [
+            "前低 2025-07-07"
+          ]
+        },
+        {
+          "price": 119.77,
+          "sources": [
+            "前高 2025-02-21"
+          ]
+        },
+        {
+          "price": 109.84,
+          "sources": [
+            "前低 2025-01-16"
+          ]
+        },
+        {
+          "price": 109.02,
+          "sources": [
+            "前高 2025-03-18"
+          ]
+        },
+        {
+          "price": 100.31,
+          "sources": [
+            "前高 2025-05-14"
+          ]
+        },
+        {
+          "price": 97.04,
+          "sources": [
+            "前低 2025-03-04"
+          ]
+        },
+        {
+          "price": 95.08,
+          "sources": [
+            "前低 2025-02-05"
+          ]
+        },
+        {
+          "price": 88.19,
+          "sources": [
+            "前低 2025-05-27"
+          ]
+        },
+        {
+          "price": 83.85,
+          "sources": [
+            "前高 2025-04-14"
+          ]
+        },
+        {
+          "price": 76.07,
+          "sources": [
+            "前低 2025-04-16"
+          ]
+        },
+        {
+          "price": 66.68,
+          "sources": [
+            "前低 2025-04-09"
+          ]
+        }
+      ]
+    },
+    "support_zone": [
+      645.01,
+      647.34
+    ],
+    "resistance_zone": [
+      676.0,
+      689.5
+    ],
+    "channel": {
+      "pattern": "扩散喇叭形",
+      "fitted": true,
+      "status": "below",
+      "status_run_bars": 4,
+      "status_text": "2026-10-12 起收盘跌破下轨，已连续 4 个交易日（向下突破）",
+      "status_short": "10-12起收盘跌破下轨·4日",
+      "upper": {
+        "start": {
+          "idx": 91,
+          "day": "2026-08-28",
+          "price": 914.46
+        },
+        "end": {
+          "idx": 108,
+          "day": "2026-09-22",
+          "price": 973.48
+        },
+        "touches": [
+          "2026-08-28",
+          "2026-09-09",
+          "2026-09-22"
+        ]
+      },
+      "lower": {
+        "start": {
+          "idx": 77,
+          "day": "2026-08-10",
+          "price": 833.71
+        },
+        "end": {
+          "idx": 95,
+          "day": "2026-09-03",
+          "price": 802.78
+        },
+        "touches": [
+          "2026-08-10",
+          "2026-08-26",
+          "2026-09-03"
+        ]
+      },
+      "h1": {
+        "idx": 91,
+        "day": "2026-08-28",
+        "price": 914.46
+      },
+      "h2": {
+        "idx": 108,
+        "day": "2026-09-22",
+        "price": 973.48
+      },
+      "l1": {
+        "idx": 77,
+        "day": "2026-08-10",
+        "price": 833.71
+      },
+      "l2": {
+        "idx": 95,
+        "day": "2026-09-03",
+        "price": 802.78
+      },
+      "slope_upper_per_day": 3.472,
+      "slope_lower_per_day": -1.718,
+      "upper_today": 1011.67,
+      "lower_today": 761.54,
+      "height_at_start": 104.81,
+      "width_ratio": 2.39,
+      "apex_bars_ahead": null,
+      "apex_day": null,
+      "expired": false,
+      "fit_check": {
+        "flat_pct_per_bar": 0.1316,
+        "upper": {
+          "rail_slope_pct_per_bar": 0.5285,
+          "theil_sen_slope_pct_per_bar": 0.5285,
+          "consistent": true
+        },
+        "lower": {
+          "rail_slope_pct_per_bar": -0.2616,
+          "theil_sen_slope_pct_per_bar": 0.0356,
+          "consistent": true
+        }
+      }
+    },
+    "fib_levels": {
+      "kind": "反弹位",
+      "from_high": {
+        "day": "2026-06-22",
+        "high": 1414.69
+      },
+      "to_low": {
+        "day": "2026-10-15",
+        "low": 645.01
+      },
+      "retracements": [
+        {
+          "ratio": 0.236,
+          "price": 826.65,
+          "dist_pts": 169.71,
+          "status": "上方压力"
+        },
+        {
+          "ratio": 0.382,
+          "price": 939.03,
+          "dist_pts": 282.09,
+          "status": "上方压力"
+        },
+        {
+          "ratio": 0.5,
+          "price": 1029.85,
+          "dist_pts": 372.91,
+          "status": "上方压力"
+        },
+        {
+          "ratio": 0.618,
+          "price": 1120.67,
+          "dist_pts": 463.73,
+          "status": "上方压力"
+        },
+        {
+          "ratio": 0.786,
+          "price": 1249.98,
+          "dist_pts": 593.04,
+          "status": "上方压力"
+        }
+      ]
+    },
+    "recent_gaps": [
+      {
+        "day": "2026-09-28",
+        "type": "下跳空缺口(上方压力)",
+        "range": [
+          886.63,
+          894.47
+        ]
+      },
+      {
+        "day": "2026-10-15",
+        "type": "下跳空缺口(上方压力)",
+        "range": [
+          676.0,
+          689.5
+        ]
+      }
+    ],
+    "abc_scenario": {
+      "direction": "down",
+      "label": "下跌ABC",
+      "reversal": 0.05,
+      "a_start": {
+        "idx": 42,
+        "day": "2026-06-22",
+        "price": 1414.69
+      },
+      "a_end": {
+        "idx": 70,
+        "day": "2026-07-30",
+        "price": 791.8
+      },
+      "b_end": {
+        "idx": 73,
+        "day": "2026-08-04",
+        "price": 1032.29
+      },
+      "a_range": 622.89,
+      "b_retrace": 0.386,
+      "c_progress": {
+        "idx": 119,
+        "day": "2026-10-15",
+        "extreme": 645.01,
+        "c_over_a": 0.622,
+        "phase": "C浪已越过A浪终点（创出新低）",
+        "deepest_level_reached": 0.618
+      },
+      "levels": [
+        {
+          "ratio": 0.382,
+          "price": 794.35,
+          "state": "收盘已跌破",
+          "intraday": null,
+          "drawn": true
+        },
+        {
+          "ratio": 0.618,
+          "price": 647.34,
+          "state": "影线触及未收破",
+          "intraday": null,
+          "drawn": true
+        },
+        {
+          "ratio": 1.0,
+          "price": 409.4,
+          "state": "未触及",
+          "intraday": null,
+          "drawn": false
+        }
+      ],
+      "intraday_note": null,
+      "invalidation": "日线收盘越过该线才算，盘中刺破不算",
+      "count_invalidation": {
+        "price": 1032.29,
+        "text": "日线收盘站上 B 浪终点 1032.29，此计数失效"
+      }
+    },
+    "wave_counts": [
+      {
+        "direction": "down",
+        "label": "下跌ABC",
+        "reversal": 0.05,
+        "a_start": {
+          "idx": 42,
+          "day": "2026-06-22",
+          "price": 1414.69
+        },
+        "a_end": {
+          "idx": 70,
+          "day": "2026-07-30",
+          "price": 791.8
+        },
+        "b_end": {
+          "idx": 73,
+          "day": "2026-08-04",
+          "price": 1032.29
+        },
+        "a_range": 622.89,
+        "b_retrace": 0.386,
+        "c_progress": {
+          "idx": 119,
+          "day": "2026-10-15",
+          "extreme": 645.01,
+          "c_over_a": 0.622,
+          "phase": "C浪已越过A浪终点（创出新低）",
+          "deepest_level_reached": 0.618
+        },
+        "levels": [
+          {
+            "ratio": 0.382,
+            "price": 794.35,
+            "state": "收盘已跌破",
+            "intraday": null,
+            "drawn": true
+          },
+          {
+            "ratio": 0.618,
+            "price": 647.34,
+            "state": "影线触及未收破",
+            "intraday": null,
+            "drawn": true
+          },
+          {
+            "ratio": 1.0,
+            "price": 409.4,
+            "state": "未触及",
+            "intraday": null,
+            "drawn": false
+          }
+        ],
+        "intraday_note": null,
+        "invalidation": "日线收盘越过该线才算，盘中刺破不算",
+        "count_invalidation": {
+          "price": 1032.29,
+          "text": "日线收盘站上 B 浪终点 1032.29，此计数失效"
+        },
+        "role": "主计数",
+        "a_range_atr": 18.0
+      },
+      {
+        "direction": "down",
+        "label": "下跌ABC",
+        "reversal": 0.05,
+        "a_start": {
+          "idx": 73,
+          "day": "2026-08-04",
+          "price": 1032.29
+        },
+        "a_end": {
+          "idx": 95,
+          "day": "2026-09-03",
+          "price": 802.78
+        },
+        "b_end": {
+          "idx": 108,
+          "day": "2026-09-22",
+          "price": 973.48
+        },
+        "a_range": 229.51,
+        "b_retrace": 0.744,
+        "c_progress": {
+          "idx": 119,
+          "day": "2026-10-15",
+          "extreme": 645.01,
+          "c_over_a": 1.431,
+          "phase": "C浪已越过A浪终点（创出新低）",
+          "deepest_level_reached": 1.0
+        },
+        "levels": [
+          {
+            "ratio": 0.382,
+            "price": 885.81,
+            "state": "收盘已跌破",
+            "intraday": null,
+            "drawn": true
+          },
+          {
+            "ratio": 0.618,
+            "price": 831.64,
+            "state": "收盘已跌破",
+            "intraday": null,
+            "drawn": true
+          },
+          {
+            "ratio": 1.0,
+            "price": 743.97,
+            "state": "收盘已跌破",
+            "intraday": null,
+            "drawn": true
+          },
+          {
+            "ratio": 1.618,
+            "price": 602.13,
+            "state": "未触及",
+            "intraday": null,
+            "drawn": true
+          }
+        ],
+        "intraday_note": null,
+        "invalidation": "日线收盘越过该线才算，盘中刺破不算",
+        "count_invalidation": {
+          "price": 973.48,
+          "text": "日线收盘站上 B 浪终点 973.48，此计数失效"
+        },
+        "role": "备选计数",
+        "a_range_atr": 6.6
+      },
+      {
+        "direction": "down",
+        "label": "下跌ABC",
+        "reversal": 0.05,
+        "a_start": {
+          "idx": 71,
+          "day": "2026-07-31",
+          "price": 985.36
+        },
+        "a_end": {
+          "idx": 89,
+          "day": "2026-08-26",
+          "price": 828.72
+        },
+        "b_end": {
+          "idx": 91,
+          "day": "2026-08-28",
+          "price": 914.46
+        },
+        "a_range": 156.64,
+        "b_retrace": 0.547,
+        "c_progress": {
+          "idx": 119,
+          "day": "2026-10-15",
+          "extreme": 645.01,
+          "c_over_a": 1.72,
+          "phase": "C浪已越过A浪终点（创出新低）",
+          "deepest_level_reached": 1.618
+        },
+        "levels": [
+          {
+            "ratio": 0.382,
+            "price": 854.62,
+            "state": "收盘已跌破",
+            "intraday": null,
+            "drawn": true
+          },
+          {
+            "ratio": 0.618,
+            "price": 817.66,
+            "state": "收盘已跌破",
+            "intraday": null,
+            "drawn": true
+          },
+          {
+            "ratio": 1.0,
+            "price": 757.82,
+            "state": "收盘已跌破",
+            "intraday": null,
+            "drawn": true
+          },
+          {
+            "ratio": 1.618,
+            "price": 661.02,
+            "state": "收盘已跌破",
+            "intraday": null,
+            "drawn": true
+          }
+        ],
+        "intraday_note": null,
+        "invalidation": "日线收盘越过该线才算，盘中刺破不算",
+        "count_invalidation": {
+          "price": 914.46,
+          "text": "日线收盘站上 B 浪终点 914.46，此计数失效"
+        },
+        "role": "备选计数",
+        "a_range_atr": 4.5
+      }
+    ],
+    "patterns": [
+      {
+        "pattern": "CDL_BEARISH_ENGULFING",
+        "name_cn": "看跌吞没形态",
+        "category": "candlestick",
+        "direction": "BEARISH",
+        "bar_idx": 108,
+        "observed_at": "2026-09-22",
+        "confirmed_at": "2026-09-22",
+        "volume_confirmed": false,
+        "formula_verified": "PrevBull(C1=939.54>O1=938.05) AND BearBody(40.22) >= 1.08*PrevBody(1.50) AND C(926.28) <= O1(938.05) AND RVOL(0.92)"
+      },
+      {
+        "pattern": "CDL_BULLISH_HAMMER",
+        "name_cn": "看涨锤头线",
+        "category": "candlestick",
+        "direction": "BULLISH",
+        "bar_idx": 115,
+        "observed_at": "2026-10-09",
+        "confirmed_at": "2026-10-09",
+        "volume_confirmed": true,
+        "formula_verified": "LowerWick(45.22) >= 2.0*Body(0.35) AND UpperWick/Range(0.09) <= 0.18 AND Range(49.92) >= 0.75*ATR(47.50) AND LowRank20(0.18)"
+      }
+    ],
+    "smc": {
+      "fvgs": [
+        {
+          "kind": "BEARISH_FVG",
+          "day": "2026-09-28",
+          "idx": 111,
+          "zone": [
+            821.73,
+            894.47
+          ],
+          "status": "MITIGATED",
+          "formula_verified": "Low[2026-09-24](894.47) - High[2026-09-29](821.73) > 0.2*ATR(48.12)"
+        }
+      ],
+      "order_blocks": [
+        {
+          "kind": "BEARISH_ORDER_BLOCK",
+          "day": "2026-09-21",
+          "idx": 107,
+          "zone": [
+            930.22,
+            957.38
+          ],
+          "status": "ACTIVE",
+          "formula_verified": "LastBullBar[2026-09-21] before Breakdown(856.67), Close stays <= 957.38"
+        }
+      ],
+      "structure_breaks": [
+        {
+          "type": "BEARISH_BOS",
+          "day": "2026-09-28",
+          "idx": 111,
+          "broken_level": 856.67,
+          "pivot_day": "2026-09-15",
+          "formula_verified": "Close[2026-09-28](813.74) < SwingLow[2026-09-15](856.67)"
+        }
+      ],
+      "note": "SMC 区域由 OHLCV 代数规则确定性计算，代表算法结构区而非逐笔机构持仓。"
+    },
+    "volume_profile": {
+      "poc_price": 885.53,
+      "vah_price": 1126.06,
+      "val_price": 805.36,
+      "value_area_coverage": 0.7,
+      "lookback_bars": 120,
+      "approximation_method": "ohlcv_range_partition_v1",
+      "note": "由 OHLCV 价格区间近似计算的成交分布，不等于真实持仓筹码成本。"
+    }
+  },
+  "indicators": {
+    "trend": {
+      "sma20": 837.64,
+      "sma60": 899.79,
+      "sma120": 997.21,
+      "sma250": 765.46,
+      "ema20": 806.68,
+      "ema50": 876.92,
+      "ema60": 889.94,
+      "ema200": 811.95,
+      "vwap20": 835.82,
+      "supertrend_line": 805.71,
+      "supertrend_dir": -1,
+      "adx14": 21.17,
+      "plus_di14": 13.95,
+      "minus_di14": 36.86
+    },
+    "momentum": {
+      "rsi14": 25.77,
+      "rsi14_prev": 28.46,
+      "macd_dif": -53.883,
+      "macd_dea": -34.007,
+      "macd_hist": -19.877,
+      "stoch_k": 6.89,
+      "stoch_d": 8.13,
+      "rvol20": 1.4
+    },
+    "volatility": {
+      "atr14": 48.401,
+      "atr20_pct": 5.26,
+      "bb_upper": 1006.32,
+      "bb_mid": 837.64,
+      "bb_lower": 668.97,
+      "bbw": 0.4027,
+      "bbw_percentile_120": 90.0
+    },
+    "qlib_factors": {
+      "close_in_range": 0.385,
+      "body_to_range": 0.1371,
+      "upper_wick_ratio": 0.4779,
+      "lower_wick_ratio": 0.385,
+      "wick_skewness": -0.0929,
+      "effort_vs_result": -0.5322,
+      "corr_close_logvol_20d": -0.1519,
+      "atr_norm_momentum_10d": -1.7257,
+      "hv20_annualized": 0.6317,
+      "hv60_annualized": 0.8672,
+      "hv_ratio_20_60": 0.728,
+      "vwap20_deviation_atr": -3.6959,
+      "vpa_pullback_dryup": false,
+      "vpa_upthrust_distribution": false
+    }
+  },
+  "scenarios": {
+    "horizon_bars": 15,
+    "atr_pct": 5.26,
+    "sigma_1d_pct": 5.463,
+    "min_trigger_distance_atr": 0.5,
+    "breakout_level": {
+      "price": 761.54,
+      "source": "已跌破的下轨(反压)"
+    },
+    "breakdown_level": {
+      "price": 630.99,
+      "source": "前高 2026-03-20"
+    },
+    "contested_levels": [
+      {
+        "price": 647.34,
+        "sources": [
+          "ABC 0.618倍位"
+        ],
+        "side": "below"
+      },
+      {
+        "price": 645.01,
+        "sources": [
+          "近期低点 10-15",
+          "近120日最低 10-15"
+        ],
+        "side": "below"
+      },
+      {
+        "price": 643.24,
+        "sources": [
+          "前高 2026-03-26",
+          "前高 2026-01-16"
+        ],
+        "side": "below"
+      }
+    ],
+    "paths": {
+      "bull": {
+        "name": "上攻突破路径",
+        "trigger": "日线放量收盘站上 761.54（已跌破的下轨(反压)）",
+        "retest_hold": 745.51,
+        "target_price": 794.35,
+        "target_source": "ABC 0.382倍位",
+        "invalidation": "突破后收盘跌回 745.51 下方视为假突破"
+      },
+      "neutral": {
+        "name": "区间震荡路径",
+        "range": [
+          636.19,
+          709.24
+        ],
+        "target_price": 672.72,
+        "condition": "收盘既未站上 761.54 也未跌破 630.99"
+      },
+      "bear": {
+        "name": "下探破位路径",
+        "trigger": "日线收盘跌破 630.99（前高 2026-03-20）",
+        "rebound_cap": 644.28,
+        "target_price": 597.41,
+        "target_source": "前高 2026-03-03",
+        "invalidation": "跌破后收盘重新站回 644.28 上方视为假跌破"
+      }
+    },
+    "active": [
+      {
+        "id": "OVERSOLD_BOUNCE",
+        "name": "超跌反弹",
+        "direction": "BULLISH",
+        "status": "PENDING_TRIGGER",
+        "status_cn": "待触发",
+        "selection_role": "PRECONDITION_MET",
+        "precondition_template": "RSI 低于 30、偏离 MA20 超过 2 个 ATR",
+        "precondition_met": true,
+        "precondition_rationale": "RSI14=25.8，收盘低于 MA20 (837.64) 达 5.23 个 ATR",
+        "applicability_score": 93.0,
+        "trigger": "超跌止跌并日线收阳站上 684.60",
+        "trigger_price": 684.6,
+        "reference_trigger_price": 684.6,
+        "trigger_distance_atr": 0.8,
+        "target_price": 761.54,
+        "target_source_template": "MA20 / 0.382 反弹位",
+        "target_source": "MA20 (837.64) / 0.382 反弹位",
+        "invalidation": "再创新低（收盘跌破 629.28）",
+        "invalidation_template": "再创新低",
+        "invalidation_price": 629.28
+      },
+      {
+        "id": "BREAKDOWN_DECLINE",
+        "name": "破位下行",
+        "direction": "BEARISH",
+        "status": "ACTIVE",
+        "status_cn": "已在进行中",
+        "selection_role": "PRECONDITION_MET",
+        "precondition_template": "收盘跌破下轨、颈线或前低",
+        "precondition_met": true,
+        "precondition_rationale": "收盘已跌破下轨/前低支撑 761.54（10-12起收盘跌破下轨·4日）",
+        "applicability_score": 91.0,
+        "trigger": "已在进行中（已收盘跌破 761.54，反抽受制于 775.37）",
+        "trigger_price": null,
+        "reference_trigger_price": 761.54,
+        "trigger_distance_atr": 3.02,
+        "target_price": 597.41,
+        "target_source_template": "形态高度 / 前低",
+        "target_source": "形态高度 / 前低（前高 2026-03-03）",
+        "invalidation": "收盘收回破位位 775.37 上方",
+        "invalidation_template": "收盘收回破位位",
+        "invalidation_price": 775.37
+      },
+      {
+        "id": "C_WAVE_REVERSAL",
+        "name": "C 浪末端反转",
+        "direction": "BULLISH",
+        "status": "PENDING_TRIGGER",
+        "status_cn": "待触发",
+        "selection_role": "PRECONDITION_MET",
+        "precondition_template": "C 浪达到 1.0×A 附近，且出现背离或反转形态",
+        "precondition_met": true,
+        "precondition_rationale": "下跌ABC C/A 已达 1.43 倍（接近 1.0×A），RSI14=25.8",
+        "applicability_score": 89.0,
+        "trigger": "C 浪在 1.0×A 附近企稳并放量站上 675.96",
+        "trigger_price": 675.96,
+        "reference_trigger_price": 675.96,
+        "trigger_distance_atr": 0.55,
+        "target_price": 973.48,
+        "target_source_template": "B 浪终点",
+        "target_source": "B 浪终点 973.48 (09-22)",
+        "invalidation": "C 浪继续创新低超过 1.618×A（跌破 602.13）",
+        "invalidation_template": "C 浪继续创新低超过 1.618×A",
+        "invalidation_price": 602.13
+      }
+    ],
+    "precondition_met_count": 3,
+    "impulse_wave": null
+  },
+  "plan": {
+    "long": {
+      "entry_zone": [
+        660.81,
+        678.72
+      ],
+      "stop_loss_barrier": 606.79,
+      "take_profit_1": 761.54,
+      "take_profit_2": 800.26,
+      "time_barrier_bars": 15,
+      "risk_reward_ratio": 1.43,
+      "breakeven_ratchet": {
+        "enabled": true,
+        "trigger_r": 0.9,
+        "confirm_close_r": 0.3,
+        "lock_r": 0.08,
+        "trigger_price": 726.44,
+        "confirm_close_price": 688.66,
+        "breakeven_stop_price": 674.8,
+        "rule_cn": "盘中最高价触及 +0.90R（以入场区中值计约 726.44）且当日收盘高于 +0.30R（约 688.66）后，自次日起将保护性止损上移至 +0.08R 保本位（约 674.80）"
+      },
+      "left_side_constraints": {
+        "required_evidence": "缩量企稳 (RVOL20 <= 1.10，当前 1.40) + RSI 底背离或下轨支撑不破",
+        "invalidation_level": 606.79,
+        "exit_rule": "盘中最低价触及硬止损屏障 606.79 无条件离场（A 股受 T+1 约束自入场次日起生效）"
+      },
+      "right_side_constraints": {
+        "required_evidence": "日线收盘站稳 761.54 且 RVOL20 >= 1.35 (当前 1.40)",
+        "false_breakout_rule": "突破后收盘跌回 745.51 下方视为假突破"
+      },
+      "time_stop_rule": "持仓满 15 根K线仍未触及止损(606.79)或 TP1(761.54) 时，于到期日收盘触发时间屏障离场（若遇一字跌停封死则顺延至开板日）",
+      "market_microstructure": {
+        "market": "CN",
+        "board": "CHINEXT",
+        "is_st": false,
+        "is_ipo_no_limit": false,
+        "settlement": "T+1",
+        "settlement_note": null,
+        "can_intraday_roundtrip": false,
+        "daily_price_limit_pct": 0.2,
+        "lot_size": 100,
+        "min_order_shares": 100,
+        "lot_step": 100,
+        "tick_size": 0.01,
+        "color_scheme": "cn_red_up",
+        "session_hours_local": "09:30-11:30, 13:00-15:00 Asia/Shanghai",
+        "commission_bps": 2.5,
+        "stamp_duty_buy_bps": 0.0,
+        "stamp_duty_sell_bps": 5.0,
+        "stamp_duty_note": "A股卖出单边印花税：2023-08-28 起 5bps，此前 10bps",
+        "min_commission_per_leg": 5.0,
+        "min_commission_note": "单笔最低佣金为券商常见收费口径假设（A股 5 元、港股 15 港元、美股 0.5 美元），非交易所规则，以实际券商为准",
+        "regulatory_levies_buy_bps": 0.1,
+        "regulatory_levies_sell_bps": 0.1,
+        "regulatory_levies_note": "中国结算过户费：2022-04-29 起成交金额 0.001% 双向收取（此前沪深 0.002%、北交所 0.0025%）"
+      },
+      "position_sizing": {
+        "tradable": true,
+        "max_risk_pct": 1.0,
+        "risk_budget_amount": 5000.0,
+        "lot_size": 100,
+        "min_order_shares": 100,
+        "lot_step": 100,
+        "sizing_basis": "ENTRY_HIGH_WORST_FILL",
+        "unit_risk_per_share": 72.6087,
+        "recommended_shares": null,
+        "estimated_notional": null,
+        "max_loss_at_stop": null,
+        "settlement_rule": "T+1",
+        "gap_risk_note": "按止损价成交估算；跳空低开、跌停封板无法卖出或流动性不足时，实际亏损可能超过风险预算；A 股 T+1，买入当日不能卖出止损",
+        "reason": "风控已否决做多（原因见 veto_reasons），不给出建议股数，以下点位只用于观察"
+      }
+    },
+    "holder_defense": {
+      "available": true,
+      "applies_to": "已持仓者",
+      "reduce_level": 630.99,
+      "exit_level": 606.79,
+      "rebound_cap": 644.28,
+      "upside_recheck_level": 761.54,
+      "downside_reference": {
+        "price": 597.41,
+        "source": "前高 2026-03-03"
+      },
+      "rules": [
+        "日线收盘跌破 630.99（前高 2026-03-20）先减仓",
+        "盘中触及硬止损屏障 606.79 无条件离场",
+        "跌破后反抽收盘未能站回 644.28 上方，不宜回补"
+      ],
+      "note": "A 股 T+1：当日买入的部分次日才能卖出"
+    },
+    "short": {
+      "available": false,
+      "reason": "A 股融券受标的名单、券源与额度限制，本技能不提供做空计划；持仓者参考防守计划"
+    }
+  },
+  "volatility_range": {
+    "method": "PER_HORIZON_SPLIT_CONFORMAL_MARTINGALE_V6",
+    "promotion_status": "PROMOTED",
+    "horizon_bars": 15,
+    "horizon_dates": [
+      "2026-10-16",
+      "2026-10-19",
+      "2026-10-20",
+      "2026-10-21",
+      "2026-10-22",
+      "2026-10-23",
+      "2026-10-26",
+      "2026-10-27",
+      "2026-10-28",
+      "2026-10-29",
+      "2026-10-30",
+      "2026-11-02",
+      "2026-11-03",
+      "2026-11-04",
+      "2026-11-05"
+    ],
+    "calendar_coverage": {
+      "covered": true,
+      "coverage_end": "2026-12-31",
+      "estimated_dates": []
+    },
+    "q10": [
+      608.88,
+      593.8,
+      580.6,
+      566.88,
+      552.68,
+      535.93,
+      524.99,
+      514.93,
+      510.54,
+      509.78,
+      503.06,
+      492.02,
+      474.42,
+      469.12,
+      469.87
+    ],
+    "q25": [
+      633.45,
+      618.13,
+      618.14,
+      605.55,
+      599.58,
+      601.18,
+      600.09,
+      600.86,
+      598.14,
+      583.8,
+      576.25,
+      565.72,
+      560.64,
+      560.34,
+      555.39
+    ],
+    "q50": [
+      656.94,
+      656.94,
+      656.94,
+      656.94,
+      656.94,
+      656.94,
+      656.94,
+      656.94,
+      656.94,
+      656.94,
+      656.94,
+      656.94,
+      656.94,
+      656.94,
+      656.94
+    ],
+    "q75": [
+      680.43,
+      695.75,
+      695.74,
+      708.33,
+      714.3,
+      712.7,
+      713.79,
+      713.02,
+      715.74,
+      730.08,
+      737.63,
+      748.16,
+      753.24,
+      753.54,
+      758.49
+    ],
+    "q90": [
+      705.0,
+      720.08,
+      733.28,
+      747.0,
+      761.2,
+      777.95,
+      788.89,
+      798.95,
+      803.34,
+      804.1,
+      810.82,
+      821.86,
+      839.46,
+      844.76,
+      844.01
+    ],
+    "q50_method": "MARTINGALE_LAST_CLOSE",
+    "q50_note": "中位数取最新收盘价（不加规则分或类比漂移）；回测显示漂移项未优于随机游走，故不使用。",
+    "band_50": [
+      [
+        633.45,
+        680.43
+      ],
+      [
+        618.13,
+        695.75
+      ],
+      [
+        618.14,
+        695.74
+      ],
+      [
+        605.55,
+        708.33
+      ],
+      [
+        599.58,
+        714.3
+      ],
+      [
+        601.18,
+        712.7
+      ],
+      [
+        600.09,
+        713.79
+      ],
+      [
+        600.86,
+        713.02
+      ],
+      [
+        598.14,
+        715.74
+      ],
+      [
+        583.8,
+        730.08
+      ],
+      [
+        576.25,
+        737.63
+      ],
+      [
+        565.72,
+        748.16
+      ],
+      [
+        560.64,
+        753.24
+      ],
+      [
+        560.34,
+        753.54
+      ],
+      [
+        555.39,
+        758.49
+      ]
+    ],
+    "band_80": [
+      [
+        608.88,
+        705.0
+      ],
+      [
+        593.8,
+        720.08
+      ],
+      [
+        580.6,
+        733.28
+      ],
+      [
+        566.88,
+        747.0
+      ],
+      [
+        552.68,
+        761.2
+      ],
+      [
+        535.93,
+        777.95
+      ],
+      [
+        524.99,
+        788.89
+      ],
+      [
+        514.93,
+        798.95
+      ],
+      [
+        510.54,
+        803.34
+      ],
+      [
+        509.78,
+        804.1
+      ],
+      [
+        503.06,
+        810.82
+      ],
+      [
+        492.02,
+        821.86
+      ],
+      [
+        474.42,
+        839.46
+      ],
+      [
+        469.12,
+        844.76
+      ],
+      [
+        469.87,
+        844.01
+      ]
+    ],
+    "daily_price_limit_pct": 0.2,
+    "volatility_scaling": {
+      "sigma_1d": 0.05463,
+      "sigma_lookback_bars": 60,
+      "overnight_gap_ratio": 0.634,
+      "vol_scale_multiplier": 1.0,
+      "vix": null,
+      "vix_source": "NOT_APPLICABLE",
+      "earnings_date": null
+    },
+    "calibration_audit": {
+      "calibrated": true,
+      "evaluation_samples": 2465,
+      "effective_independent_samples": 164,
+      "min_effective_independent_samples": 20,
+      "nominal_50pct_empirical_coverage": 0.506,
+      "nominal_80pct_empirical_coverage": 0.796,
+      "q50_mae_pct": 12.3,
+      "random_walk_mae_pct": 12.3,
+      "per_horizon_coverage": [
+        {
+          "h": 1,
+          "samples": 2493,
+          "coverage_50": 0.501,
+          "coverage_80": 0.801
+        },
+        {
+          "h": 2,
+          "samples": 2491,
+          "coverage_50": 0.502,
+          "coverage_80": 0.798
+        },
+        {
+          "h": 3,
+          "samples": 2489,
+          "coverage_50": 0.497,
+          "coverage_80": 0.804
+        },
+        {
+          "h": 4,
+          "samples": 2487,
+          "coverage_50": 0.503,
+          "coverage_80": 0.801
+        },
+        {
+          "h": 5,
+          "samples": 2485,
+          "coverage_50": 0.497,
+          "coverage_80": 0.797
+        },
+        {
+          "h": 6,
+          "samples": 2483,
+          "coverage_50": 0.509,
+          "coverage_80": 0.793
+        },
+        {
+          "h": 7,
+          "samples": 2481,
+          "coverage_50": 0.509,
+          "coverage_80": 0.795
+        },
+        {
+          "h": 8,
+          "samples": 2479,
+          "coverage_50": 0.508,
+          "coverage_80": 0.793
+        },
+        {
+          "h": 9,
+          "samples": 2477,
+          "coverage_50": 0.505,
+          "coverage_80": 0.796
+        },
+        {
+          "h": 10,
+          "samples": 2475,
+          "coverage_50": 0.506,
+          "coverage_80": 0.789
+        },
+        {
+          "h": 11,
+          "samples": 2473,
+          "coverage_50": 0.508,
+          "coverage_80": 0.789
+        },
+        {
+          "h": 12,
+          "samples": 2471,
+          "coverage_50": 0.509,
+          "coverage_80": 0.791
+        },
+        {
+          "h": 13,
+          "samples": 2469,
+          "coverage_50": 0.502,
+          "coverage_80": 0.8
+        },
+        {
+          "h": 14,
+          "samples": 2467,
+          "coverage_50": 0.502,
+          "coverage_80": 0.799
+        },
+        {
+          "h": 15,
+          "samples": 2465,
+          "coverage_50": 0.506,
+          "coverage_80": 0.796
+        }
+      ],
+      "q50_residual_multiplier": 0.731,
+      "q80_residual_multiplier": 1.346,
+      "uncalibrated_overlays": [],
+      "coverage_scope_note": "覆盖率为对实际输出区间（含涨跌停截断与最小价位取整的同一构造）的滚动样本外实测，只用当时已成熟的分数；逐期限边际覆盖，非整条路径联合概率；相邻截面结果期重叠，有效独立样本约为 evaluation_samples / H。"
+    }
+  },
+  "files": {
+    "result_json": "300308.SZ_result.json",
+    "chart_data_json": "300308.SZ_chart_data.json",
+    "preview_png": "300308.SZ_preview.png",
+    "dashboard_html": "300308.SZ_dashboard.html",
+    "report_md": "300308.SZ_report.md"
+  },
+  "reproducibility": {
+    "engine_version": "6.0.0",
+    "bars_hash": "14d1e3059b26f837",
+    "report_hash": "8290082acbc1fca7"
+  },
+  "quotable_prices": {
+    "price_decimals": 2,
+    "tolerance": 0.01,
+    "prices": [
+      66.68,
+      76.07,
+      83.85,
+      88.19,
+      95.08,
+      97.04,
+      100.31,
+      109.02,
+      109.84,
+      119.77,
+      129.72,
+      133.63,
+      146.23,
+      175.34,
+      196.46,
+      227.74,
+      336.08,
+      342.71,
+      387.75,
+      402.48,
+      409.4,
+      435.77,
+      440.64,
+      442.32,
+      446.32,
+      448.78,
+      456.26,
+      457.54,
+      458.75,
+      469.12,
+      469.87,
+      474.42,
+      492.02,
+      498.3,
+      502.91,
+      503.06,
+      504.62,
+      507.21,
+      509.78,
+      510.54,
+      510.94,
+      513.6,
+      514.93,
+      520.95,
+      523.7,
+      524.99,
+      528.85,
+      535.04,
+      535.93,
+      540.53,
+      543.52,
+      552.68,
+      553.49,
+      555.39,
+      557.33,
+      560.34,
+      560.64,
+      565.46,
+      565.72,
+      566.88,
+      570.45,
+      572.42,
+      576.17,
+      576.25,
+      580.6,
+      583.4,
+      583.8,
+      593.8,
+      597.41,
+      598.14,
+      599.58,
+      600.09,
+      600.86,
+      601.18,
+      602.13,
+      605.55,
+      606.79,
+      608.88,
+      614.92,
+      618.13,
+      618.14,
+      625.4,
+      629.28,
+      630.99,
+      633.45,
+      636.19,
+      643.24,
+      644.28,
+      645.01,
+      647.34,
+      656.94,
+      660.81,
+      661.19,
+      668.97,
+      672.72,
+      675.96,
+      676.0,
+      678.72,
+      680.43,
+      684.6,
+      689.5,
+      690.16,
+      692.9,
+      695.74,
+      695.75,
+      700.31,
+      705.0,
+      708.33,
+      709.24,
+      712.7,
+      713.02,
+      713.79,
+      714.3,
+      715.74,
+      717.0,
+      720.08,
+      723.0,
+      724.47,
+      728.87,
+      730.0,
+      730.08,
+      732.83,
+      733.28,
+      733.35,
+      734.91,
+      735.0,
+      736.86,
+      737.63,
+      738.62,
+      740.77,
+      742.73,
+      742.9,
+      744.95,
+      745.51,
+      746.0,
+      747.0,
+      747.28,
+      748.16,
+      749.45,
+      751.38,
+      753.24,
+      753.28,
+      753.54,
+      754.91,
+      756.51,
+      758.12,
+      758.49,
+      759.62,
+      761.04,
+      761.2,
+      761.54,
+      762.27,
+      762.41,
+      763.48,
+      764.56,
+      765.09,
+      765.46,
+      770.9,
+      770.98,
+      774.09,
+      774.44,
+      775.37,
+      777.95,
+      778.79,
+      781.79,
+      782.29,
+      788.89,
+      791.8,
+      794.35,
+      798.95,
+      800.26,
+      802.78,
+      803.34,
+      804.1,
+      805.36,
+      806.68,
+      806.75,
+      806.93,
+      807.19,
+      807.55,
+      808.75,
+      810.82,
+      811.75,
+      811.95,
+      812.74,
+      813.74,
+      814.0,
+      820.72,
+      821.73,
+      821.86,
+      825.06,
+      826.65,
+      828.72,
+      830.3,
+      833.25,
+      833.71,
+      835.82,
+      837.64,
+      839.46,
+      844.01,
+      844.76,
+      846.77,
+      850.17,
+      856.67,
+      860.57,
+      862.67,
+      864.66,
+      865.32,
+      867.58,
+      867.67,
+      868.68,
+      870.91,
+      871.54,
+      871.65,
+      871.74,
+      872.03,
+      872.15,
+      873.09,
+      874.45,
+      874.51,
+      874.97,
+      876.92,
+      876.94,
+      877.74,
+      878.53,
+      878.64,
+      879.48,
+      880.64,
+      881.42,
+      881.55,
+      882.1,
+      882.36,
+      882.63,
+      883.59,
+      884.13,
+      884.98,
+      885.53,
+      886.44,
+      886.63,
+      888.62,
+      888.63,
+      888.72,
+      889.79,
+      889.81,
+      889.94,
+      890.71,
+      891.13,
+      891.7,
+      892.84,
+      893.61,
+      894.47,
+      894.61,
+      894.93,
+      896.78,
+      898.91,
+      899.79,
+      906.39,
+      907.59,
+      908.3,
+      908.59,
+      910.09,
+      914.46,
+      915.54,
+      916.46,
+      916.73,
+      916.91,
+      916.96,
+      917.09,
+      917.48,
+      919.57,
+      920.15,
+      921.07,
+      922.64,
+      924.57,
+      925.0,
+      926.28,
+      926.39,
+      928.36,
+      928.77,
+      930.22,
+      933.04,
+      934.56,
+      935.13,
+      935.76,
+      937.55,
+      938.05,
+      939.03,
+      939.54,
+      941.5,
+      946.13,
+      946.72,
+      949.08,
+      951.48,
+      956.49,
+      957.38,
+      960.6,
+      965.6,
+      966.5,
+      968.39,
+      971.01,
+      971.3,
+      973.29,
+      973.48,
+      975.47,
+      975.94,
+      977.8,
+      980.15,
+      981.39,
+      982.89,
+      985.36,
+      985.82,
+      988.5,
+      988.81,
+      991.48,
+      994.1,
+      995.23,
+      995.84,
+      997.21,
+      997.46,
+      998.46,
+      998.47,
+      999.17,
+      999.22,
+      999.47,
+      999.57,
+      1002.65,
+      1006.32,
+      1011.13,
+      1011.67,
+      1018.48,
+      1029.85,
+      1032.29,
+      1058.7,
+      1075.13,
+      1091.31,
+      1098.17,
+      1120.67,
+      1126.06,
+      1137.12,
+      1167.68,
+      1206.11,
+      1216.11,
+      1249.98,
+      1313.53,
+      1317.96,
+      1414.69
+    ]
+  }
+}

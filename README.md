@@ -8,11 +8,11 @@
 
 > **English TL;DR**: An [Agent Skill](https://agentskills.io/specification) for Claude Code, Codex, Cursor, Gemini CLI and other AI agents. Ask in plain language ("analyze NVDA") and the agent runs deterministic Python on real market data (A-shares, Hong Kong, US) to produce K-line structure, a triple-barrier risk plan, a direction-free 15-day normal volatility range and a no-lookahead backtest, as JSON + PNG + offline HTML. For research only, not investment advice. Full English docs: [README.en.md](README.en.md).
 
-`kline-structure-chart` 是一个符合 [Agent Skills 开放规范](https://agentskills.io/specification) 的金融量化与 K 线数学结构分析技能包。装进 Claude Code、Codex、Hermes Agent、Cursor、Gemini CLI、OpenCode 等 AI 助手之后，你只需用自然语言提问（例如："帮我看看贵州茅台的 K 线结构和支撑压力，账户 50 万，带回测"），助手就会自动完成从**真实行情拉取 → 确定性数学结构识别 → 三重屏障风控与正常波动范围 → 离线交互看板与高清图生成 → 回复契约校验**的完整投研闭环。
+`kline-structure-chart` 是一个符合 [Agent Skills 开放规范](https://agentskills.io/specification) 的金融量化与 K 线数学结构分析技能包。装进 Claude Code、Codex、Hermes Agent、Cursor、Gemini CLI、OpenCode 等 AI 助手之后，你只需用自然语言提问（例如："帮我看看中际旭创的 K 线结构和支撑压力，账户 50 万"），助手就会自动完成从**真实行情拉取 → 确定性数学结构识别 → 三重屏障风控与正常波动范围 → 离线交互看板与高清图生成 → 回复契约校验**的完整投研闭环。
 
-![贵州茅台 600519.SH 离线交互看板演示](site/dashboard-demo.gif)
+![中际旭创 300308.SZ 离线交互看板演示](site/dashboard-demo-zh.gif)
 
-<sub>贵州茅台 `600519.SH` 离线交互看板录屏（数据截至 2026-10-15）：拖动时间回放，每个历史截面只用当时数据，白线是之后的真实收盘；再演示图层开关与副图切换。看板是技能原样输出的 HTML，可在[项目主页](https://xiongcp.github.io/stock-skill/#demos)在线打开。</sub>
+<sub>中际旭创 `300308.SZ` 离线交互看板录屏（数据截至 2026-10-15）：拖动时间回放，每个历史截面只用当时数据，白线是之后的真实收盘；再演示图层开关与副图切换。看板是技能原样输出的 HTML，可在[项目主页](https://xiongcp.github.io/stock-skill/#demos)在线打开。</sub>
 
 ---
 
@@ -42,7 +42,7 @@ macOS / Linux 一行安装（会自动注册到已安装的 Claude Code、Codex 
 curl -fsSL https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.sh | bash
 ```
 
-装好后**新开一个会话**，问"帮我分析 600519.SH"或"看看腾讯 00700.HK 的 K 线结构，带回测"。Windows、Claude Code 插件市场、`npx skills`、让 AI 助手代装和不用 uv 的方式见[第 3 节](#3-安装)，直接用命令行见[第 5 节](#5-直接用命令行)。
+装好后**新开一个会话**，问"帮我分析 300308.SZ"或"看看腾讯 00700.HK 的 K 线结构，带回测"。Windows、Claude Code 插件市场、`npx skills`、让 AI 助手代装和不用 uv 的方式见[第 3 节](#3-安装)，直接用命令行见[第 5 节](#5-直接用命令行)。
 
 > 仅供研究与学习，不构成投资建议，也不会替你下单。
 
@@ -61,7 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.sh
 
 ```mermaid
 flowchart TD
-    A["用户自然语言提问 / CLI 调用<br/>（如：分析茅台 / 00700.HK / NVDA.US）"] --> B["0. 名称解析与多市场真实行情网关<br/>resolve_symbol.py · data_gateway.py"]
+    A["用户自然语言提问 / CLI 调用<br/>（如：分析中际旭创 / 00700.HK / NVDA.US）"] --> B["0. 名称解析与多市场真实行情网关<br/>resolve_symbol.py · data_gateway.py"]
     B --> C["盘中未收盘K线剥离 + 点位时间前复权(PIT) + 大盘基准配对<br/>market_rules.py（A股沪深300 / 港股恒指 / 美股SPY）"]
     C --> D["确定性数学结构与多周期规则层<br/>单边因果NW核平滑 · 因果ZigZag · 轨道候选打分拟合<br/>主+备选ABC浪型 · 推动5浪硬规则 · 8类标准情景筛选<br/>蜡烛/双底双顶/RSI背离 · SMC(FVG/OB/BOS) · Volume Profile"]
     D --> F["Triple-Barrier 风控与正常波动范围<br/>risk.py · forecast.py · evaluation.py<br/>左右侧入场区/盘中硬止损/+0.90R移动保本/持仓防守/港美做空<br/>鞅中心15日50%&amp;80%区间 + 线上计划逐日无前视回测"]
@@ -100,11 +100,11 @@ flowchart TD
 
 以下三张 `1920×1160` 结构图全部由本技能脚本基于真实行情自动生成（数据截至 2026-10-15，完整报告、JSON 与离线交互看板见 [examples/](examples/README.md)）：
 
-#### (1) A 股示例：贵州茅台（`600519.SH` · 红涨绿跌 · 扩散喇叭形 + 三情景推演 + 15 日正常波动范围）
+#### (1) A 股示例：中际旭创（`300308.SZ` · 创业板 · 红涨绿跌 · 扩散喇叭形 + 跌破下轨 + 三情景推演 + 15 日正常波动范围）
 
-![贵州茅台 600519.SH 结构推演图](examples/600519.SH/600519.SH_preview.png)
+![中际旭创 300308.SZ 结构推演图](examples/300308.SZ/300308.SZ_preview.png)
 
-右上角红框是风控否决：大盘环境评分低于 35 时，个股不给做多评级。
+右上角红框是风控否决：大盘环境评分低于 35，且收盘跌破结构下轨，个股不给做多评级。
 
 #### (2) 港股示例：腾讯控股（`00700.HK` · 红涨绿跌 · 破位下行与 C 浪末端反转推演）
 
@@ -184,7 +184,7 @@ irm https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.ps1 | iex
 
 目录约定与 [vercel-labs/skills](https://github.com/vercel-labs/skills) 一致。一个都没探测到时，默认注册到 Claude Code 和 `~/.agents/skills/`。
 
-安装完成后**新开一个会话**，试问"帮我分析 600519.SH"或"看看茅台的 K 线"。
+安装完成后**新开一个会话**，试问"帮我分析 300308.SZ"或"看看中际旭创的 K 线"。
 
 ### 3.2 安装选项
 
@@ -290,7 +290,7 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
 
 直接用自然语言提问即可，名称、拼音、代码都可以：
 
-- "帮我分析一下茅台的 K 线结构和支撑压力。"
+- "帮我分析一下中际旭创的 K 线结构和支撑压力。"
 - "腾讯 00700.HK 未来两周大概的波动区间是多少？带上历史回测。"
 - "NVDA 现在的风控计划是什么？我的账户 10 万美元，单笔最多亏 1%。"
 - "看看上证指数和创业板指现在的结构。"

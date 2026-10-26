@@ -121,7 +121,7 @@ INSTALL_FOR_AGENTS.md                 # 给 AI 助手的对话安装指引（REA
 .claude-plugin/marketplace.json       # Claude Code 插件市场清单（source "./"，skills 指向 kline-structure-chart）
 .github/workflows/ci.yml              # CI：uv + pytest + 跨窗口不变性（只用录制数据）
 .github/workflows/pages.yml           # 项目主页：push 到 main 且改动 site/ 或 examples/ 时用 site/build.sh 组装并发布到 GitHub Pages
-site/                                 # 项目主页源文件（中英双语单页 index.html、favicon、看板演示 dashboard-demo.gif、build.sh；示例图与看板在构建时从 examples/ 复制）
+site/                                 # 项目主页源文件（中英双语单页 index.html、favicon、看板演示 dashboard-demo-zh.gif（中际旭创）与 dashboard-demo-en.gif（英伟达）、build.sh；示例图与看板在构建时从 examples/ 复制）
 examples/                             # 真实行情示例产物与标准回复
 CHANGELOG.md                          # 版本记录
 ```
