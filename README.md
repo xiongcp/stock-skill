@@ -1,6 +1,50 @@
-# kline-structure-chart：A股 / 港股 / 美股 K 线数学结构、三重屏障风控与正常波动范围技能包
+# kline-structure-chart
+
+**A股 / 港股 / 美股 K 线数学结构识别与风控研究技能，给 Claude Code、Codex 等 AI 助手使用**
+
+**中文** | [English](README.en.md)
+
+[![CI](https://github.com/xiongcp/stock-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/xiongcp/stock-skill/actions/workflows/ci.yml) ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue) ![Agent Skills](https://img.shields.io/badge/Agent%20Skills-compatible-6f42c1)
+
+> **English TL;DR**: An [Agent Skill](https://agentskills.io/specification) for Claude Code, Codex, Cursor, Gemini CLI and other AI agents. Ask in plain language ("analyze NVDA") and the agent runs deterministic Python on real market data (A-shares, Hong Kong, US) to produce K-line structure, a triple-barrier risk plan, a direction-free 15-day normal volatility range and a no-lookahead backtest, as JSON + PNG + offline HTML. For research only, not investment advice. Full English docs: [README.en.md](README.en.md).
 
 `kline-structure-chart` 是一个符合 [Agent Skills 开放规范](https://agentskills.io/specification) 的金融量化与 K 线数学结构分析技能包。装进 Claude Code、Codex、Hermes Agent、Cursor、Gemini CLI、OpenCode 等 AI 助手之后，你只需用自然语言提问（例如："帮我看看贵州茅台的 K 线结构和支撑压力，账户 50 万，带回测"），助手就会自动完成从**真实行情拉取 → 确定性数学结构识别 → 三重屏障风控与正常波动范围 → 离线交互看板与高清图生成 → 回复契约校验**的完整投研闭环。
+
+![贵州茅台 600519.SH 结构推演图](examples/600519.SH/600519.SH_preview.png)
+
+<sub>贵州茅台 `600519.SH` 结构推演图（A 股红涨绿跌 · 扩散喇叭形 + 三情景推演 + 15 日正常波动范围），由脚本基于真实行情自动生成，数据截至 2026-10-15。右上角红框是风控否决：大盘环境评分低于 35 时，个股不给做多评级。</sub>
+
+---
+
+## 快速了解
+
+### 它能做什么
+
+- **三市场覆盖**：A 股（沪深北个股、ETF、指数）、港股、美股，自动配对大盘基准（沪深300 / 恒生指数 / SPY），先看大盘、再看个股。
+- **K 线数学结构识别**：因果拐点、轨道拟合、主+备选 ABC 浪型与推动 5 浪、8 类标准情景、蜡烛 / 双底双顶 / RSI 背离、SMC（FVG / 订单块 / BOS）、成交分布（Volume Profile）。
+- **三重屏障风控计划**：入场区、止损、TP1/TP2、移动保本、持仓防守，给了账户净值就按单笔风险比例算股数；大盘极弱时一票否决做多。
+- **15 日正常波动范围**：以最新收盘价为中心的 50% / 80% 区间，只描述波动幅度、不判断方向，附样本外覆盖率与独立样本数。
+- **无前视回测**：每个历史决策日只用当日及之前的数据重跑线上同一条流水线；成交胜率附 Wilson 95% 区间与样本量。
+- **同源产物**：`*_result.json`（稳定契约）、1920×1160 PNG 结构图、离线交互 HTML 看板与中文 Markdown 报告出自同一份计算结果；`lint_response.py` 拦截助手回复里编造的价格和概率话术。
+
+### 能带来什么
+
+- **不让大模型看图猜价**：所有点位都由 Python 从真实 OHLCV 序列计算，助手只转述 JSON 里的数字。
+- **可复现、可审计**：同一份数据、同一截止日得到同样的结果；`--days` 只改显示根数，不改任何结论；离线测试全部使用录制下来的真实行情回放。
+- **不夸大**：不输出上涨概率，规则分不叫胜率；取不到行情就以 `[DATA_UNAVAILABLE]` 退出，不估算、不补数。
+- **一句话驱动**：用自然语言提问，助手自动查代码、跑脚本、按回复契约组织答案。
+
+### 30 秒上手
+
+macOS / Linux 一行安装（会自动注册到已安装的 Claude Code、Codex 等助手）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.sh | bash
+```
+
+装好后**新开一个会话**，问"帮我分析 600519.SH"或"看看腾讯 00700.HK 的 K 线结构，带回测"。Windows、Claude Code 插件市场、`npx skills`、让 AI 助手代装和不用 uv 的方式见[第 3 节](#3-安装)，直接用命令行见[第 5 节](#5-直接用命令行)。
+
+> 仅供研究与学习，不构成投资建议，也不会替你下单。
 
 ---
 
@@ -58,7 +102,7 @@ flowchart TD
 
 #### (1) A 股示例：贵州茅台（`600519.SH` · 红涨绿跌 · 扩散喇叭形 + 三情景推演 + 15 日正常波动范围）
 
-![贵州茅台 600519.SH 结构推演图](examples/600519.SH/600519.SH_preview.png)
+见页首大图。
 
 #### (2) 港股示例：腾讯控股（`00700.HK` · 红涨绿跌 · 破位下行与 C 浪末端反转推演）
 
