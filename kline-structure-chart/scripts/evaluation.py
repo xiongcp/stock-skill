@@ -662,17 +662,45 @@ def _simulate_plan_on_bars(
     stop: float,
     target: float,
     market: str = "CN",
+    asset_type: str = "equity",
+    symbol: str = "",
+    is_st: bool = False,
+    is_ipo_no_limit: bool = False,
     use_ratchet: bool = False,
+    matured: bool = True,
 ) -> dict[str, Any]:
-    """在 `as_of` 之后的真实 K 线序列上因果回放单笔 If-Then 计划（含 A 股 T+1、一字涨跌停锁死、跳空穿仓真实滑点与可选保本棘轮）。"""
+    """在 `as_of` 之后的真实 K 线序列上因果回放单笔 If-Then 计划（含 T+1、一字涨跌停锁死、跳空穿仓真实滑点与可选保本棘轮）。
+
+    matured=False 表示观察期K线还没走完：未触发屏障时返回 PENDING，不按最后一根收盘当作到期打分。
+    """
     if not future_bars:
-        return {"triggered": False, "status": "NO_FUTURE_BARS", "realized_r": 0.0}
+        return {"triggered": False, "status": "PENDING" if not matured else "NO_FUTURE_BARS", "realized_r": None}
     risk = max(1e-6, abs(entry - stop))
+
+    def _locked_at_limit(idx: int, side: str) -> bool:
+        """一字板（最高价 = 最低价 = 涨停/跌停价），涨跌幅档位与价位取整按 market_rules（科创/创业板 20%、ST、北交所等）。"""
+        if idx <= 0:
+            return False
+        b = future_bars[idx]
+        lo, hi = float(b["low"]), float(b["high"])
+        if lo != hi:
+            return False
+        day = str(b["day"])
+        limit_pct = get_daily_price_limit_pct(
+            market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=day
+        )
+        if limit_pct is None:
+            return False
+        prev = float(future_bars[idx - 1]["close"])
+        up, down = daily_limit_prices(prev, limit_pct, market, asset_type, day)
+        tick = float(tick_size_for(prev, market, asset_type, day))
+        return hi >= up - 0.5 * tick if side == "up" else lo <= down + 0.5 * tick
+
     entry_idx: int | None = None
     for idx, b in enumerate(future_bars):
         lo, hi, op = float(b["low"]), float(b["high"]), float(b["open"])
-        # A 股一字涨停无法买入成交
-        if market == "CN" and direction == "LONG" and idx > 0 and lo == hi and op > float(future_bars[idx - 1]["close"]) * 1.09:
+        # 一字涨停无法买入成交
+        if direction == "LONG" and _locked_at_limit(idx, "up"):
             continue
         if direction == "LONG" and (lo <= entry <= hi or op <= entry):
             entry_idx = idx
@@ -681,23 +709,27 @@ def _simulate_plan_on_bars(
             entry_idx = idx
             break
     if entry_idx is None:
-        return {"triggered": False, "status": "NEVER_TRIGGERED", "realized_r": 0.0}
+        return {"triggered": False, "status": "NEVER_TRIGGERED" if matured else "PENDING", "realized_r": 0.0 if matured else None}
 
     entry_day = str(future_bars[entry_idx]["day"])
+    rules = get_market_microstructure_rules(
+        market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=entry_day
+    )
+    t_plus_one = not rules["can_intraday_roundtrip"]
     active_stop = stop
     ratchet_armed = False
-    if use_ratchet and market == "CN":
+    if use_ratchet and t_plus_one:
         eb = future_bars[entry_idx]
         if direction == "LONG" and float(eb["low"]) > stop and float(eb["high"]) >= entry + 0.90 * risk and float(eb["close"]) >= entry + 0.30 * risk:
             active_stop = max(active_stop, entry + 0.08 * risk)
             ratchet_armed = True
 
-    start_exit_idx = entry_idx + 1 if market == "CN" else entry_idx
+    start_exit_idx = entry_idx + 1 if t_plus_one else entry_idx
     for idx in range(start_exit_idx, len(future_bars)):
         b = future_bars[idx]
         lo, hi, op, cl = float(b["low"]), float(b["high"]), float(b["open"]), float(b["close"])
-        # A 股一字跌停全天封死无法卖出，须顺延至开板日
-        if market == "CN" and direction == "LONG" and idx > 0 and lo == hi and hi < float(future_bars[idx - 1]["close"]) * 0.91:
+        # 一字跌停全天封死无法卖出，须顺延至开板日
+        if direction == "LONG" and _locked_at_limit(idx, "down"):
             continue
         if direction == "LONG":
             if lo <= active_stop:
@@ -724,6 +756,8 @@ def _simulate_plan_on_bars(
                 active_stop = min(active_stop, entry - 0.08 * risk)
                 ratchet_armed = True
 
+    if not matured:
+        return {"triggered": True, "entry_day": entry_day, "status": "PENDING", "realized_r": None}
     last_c = float(future_bars[-1]["close"])
     r_val = (last_c - entry) / risk if direction == "LONG" else (entry - last_c) / risk
     return {"triggered": True, "entry_day": entry_day, "exit_day": str(future_bars[-1]["day"]), "exit_price": round(last_c, 4), "status": "TIME_BARRIER_EXPIRED", "realized_r": round(r_val, 2)}
@@ -742,6 +776,7 @@ def reconcile_trade_ideas(
     ratchet_saved_count = 0
     user_wins = 0
     audited_wins = 0
+    pending_count = 0
 
     for idea in ideas:
         sym = str(idea.get("symbol") or "")
@@ -750,11 +785,33 @@ def reconcile_trade_ideas(
         direction = str(idea.get("direction") or "LONG").upper()
         all_bars = bars_by_symbol.get(sym) or []
         future_bars = [b for b in all_bars if str(b["day"]) > as_of][:horizon_bars]
+        sim_kwargs = {
+            "direction": direction,
+            "market": market,
+            "asset_type": str(idea.get("asset_type") or "equity"),
+            "symbol": sym,
+            "is_st": bool(idea.get("is_st", False)),
+            "is_ipo_no_limit": bool(idea.get("is_ipo_no_limit", False)),
+            "matured": len(future_bars) >= horizon_bars,
+        }
 
         u_plan = idea.get("user_idea") or {}
         a_plan = idea.get("recommended_adjustments") or u_plan
-        u_out = _simulate_plan_on_bars(future_bars, direction=direction, entry=float(u_plan["entry"]), stop=float(u_plan["stop"]), target=float(u_plan["target"]), market=market, use_ratchet=False)
-        a_out = _simulate_plan_on_bars(future_bars, direction=direction, entry=float(a_plan["entry"]), stop=float(a_plan["stop"]), target=float(a_plan["target"]), market=market, use_ratchet=True)
+        u_out = _simulate_plan_on_bars(future_bars, entry=float(u_plan["entry"]), stop=float(u_plan["stop"]), target=float(u_plan["target"]), use_ratchet=False, **sim_kwargs)
+        a_out = _simulate_plan_on_bars(future_bars, entry=float(a_plan["entry"]), stop=float(a_plan["stop"]), target=float(a_plan["target"]), use_ratchet=True, **sim_kwargs)
+        if "PENDING" in (u_out["status"], a_out["status"]):
+            # 观察期未走完且仍有一方未出结果：不计入任何统计，等到期后再对账
+            pending_count += 1
+            items.append({
+                "idea_id": idea.get("idea_id"),
+                "symbol": sym,
+                "as_of": as_of,
+                "direction": direction,
+                "user_outcome": u_out,
+                "audited_outcome": a_out,
+                "attribution": "PENDING",
+            })
+            continue
         if u_out["triggered"] or a_out["triggered"]:
             triggered_count += 1
         if u_out["status"] == "TP_HIT":
@@ -789,6 +846,7 @@ def reconcile_trade_ideas(
 
     return {
         "total_ideas": len(ideas),
+        "pending_count": pending_count,
         "triggered_count": triggered_count,
         "swept_stop_saved_count": swept_saved_count,
         "ratchet_saved_count": ratchet_saved_count,

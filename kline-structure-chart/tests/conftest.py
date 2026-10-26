@@ -84,6 +84,8 @@ def replay_recorded(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.Te
         analyze_and_forecast.render_png_chart,
     )
 
+    fixture_patch_count = [0]
+
     def cached_run_pipeline(
         request: dict,
         output_dir: Path,
@@ -102,7 +104,10 @@ def replay_recorded(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.Te
             analyze_and_forecast.build_chart_data,
             analyze_and_forecast.render_png_chart,
         )
-        if input_path is not None or not allow_network or current_hooks != orig_hooks:
+        # 用例在本夹具之后又 monkeypatch 了任何东西（如 test_g02 让渲染器重算结构层时报错）时不能走缓存，
+        # 否则被改写的函数根本不会执行，守护测试会随用例顺序静默失效
+        patched_after_fixture = len(monkeypatch._setattr) != fixture_patch_count[0]
+        if input_path is not None or not allow_network or current_hooks != orig_hooks or patched_after_fixture:
             return _ORIG_RUN_PIPELINE(
                 request,
                 output_dir=output_dir,
@@ -143,6 +148,7 @@ def replay_recorded(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.Te
         mod = sys.modules.get(mod_name)
         if mod is not None and "test_" in mod_name and hasattr(mod, "run_pipeline"):
             monkeypatch.setattr(mod, "run_pipeline", cached_run_pipeline)
+    fixture_patch_count[0] = len(monkeypatch._setattr)
 
 
 def load_v6(report: dict) -> tuple[dict, dict]:

@@ -553,6 +553,43 @@ def test_p1_hk_stamp_duty_both_sides() -> None:
     assert cn["stamp_duty_buy_bps"] == 0.0 and cn["stamp_duty_sell_bps"] == 5.0
 
 
+def test_p1_regulatory_levies_and_min_commission_by_date() -> None:
+    """规费按生效日期取值（references/{cn,hk,us}-market.md），最低佣金是券商口径假设；compute_round_trip_cost_detail 只读这些字段。"""
+    from market_rules import compute_round_trip_cost_detail, get_market_microstructure_rules
+
+    def levies(market: str, asset_type: str, symbol: str, day: str) -> tuple[float, float]:
+        r = get_market_microstructure_rules(market, asset_type, symbol, day_str=day)
+        return r["regulatory_levies_buy_bps"], r["regulatory_levies_sell_bps"]
+
+    # A 股过户费：2022-04-29 起 0.001% 双向（此前沪深 0.002%、北交所 0.0025%）；ETF 不收
+    assert levies("CN", "equity", "600519.SH", "2026-10-15") == (0.1, 0.1)
+    assert levies("CN", "equity", "600519.SH", "2022-04-28") == (0.2, 0.2)
+    assert levies("CN", "equity", "830799.BJ", "2022-04-28") == (0.25, 0.25)
+    assert levies("CN", "etf", "510300.SH", "2026-10-15") == (0.0, 0.0)
+    # 港股每边：交易费 0.565 + 证监会 0.27 + 会财局 0.015 + 交收费（2025-06-30 起 0.42，此前 0.20）
+    assert levies("HK", "equity", "00700.HK", "2025-06-30") == (1.27, 1.27)
+    assert levies("HK", "equity", "00700.HK", "2025-06-29") == (1.05, 1.05)
+    assert levies("HK", "equity", "00700.HK", "2022-12-30") == (0.985, 0.985)
+    # 美股 SEC Section 31 费只向卖方收取：2026-04-04 起 20.60/百万，2025-05-14~2026-04-03 为 0，此前 27.80/百万
+    assert levies("US", "equity", "NVDA.US", "2026-04-04") == (0.0, 0.206)
+    assert levies("US", "equity", "NVDA.US", "2026-04-03") == (0.0, 0.0)
+    assert levies("US", "equity", "NVDA.US", "2025-05-13") == (0.0, 0.278)
+    # 指数不可交易，不计最低佣金与规费
+    idx = get_market_microstructure_rules("CN", "index", "000300.SH", day_str="2026-10-15")
+    assert idx["min_commission_per_leg"] == 0.0 and idx["regulatory_levies_buy_bps"] == 0.0
+
+    for market, symbol, expected in (("CN", "600519.SH", 5.0), ("HK", "00700.HK", 15.0), ("US", "NVDA.US", 0.5)):
+        rules = get_market_microstructure_rules(market, "equity", symbol, day_str="2026-10-15")
+        assert rules["min_commission_per_leg"] == expected
+        assert "券商" in rules["min_commission_note"]
+        assert rules["regulatory_levies_note"]
+        # 费率只来自 rules：改 rules 字段，成本随之变化
+        tweaked = {**rules, "min_commission_per_leg": 0.0, "regulatory_levies_buy_bps": 0.0, "regulatory_levies_sell_bps": 0.0}
+        base = compute_round_trip_cost_detail(1000.0, tweaked)
+        full = compute_round_trip_cost_detail(1000.0, rules)
+        assert full["total_cost_amount"] > base["total_cost_amount"]
+
+
 def test_p1_trading_calendar_fixes_and_coverage() -> None:
     assert CALENDAR_COVERAGE_START == "2021-01-01"
     assert not is_trading_day(date(2022, 10, 3), "CN")  # 2022 国庆
@@ -1729,10 +1766,10 @@ def test_microstructure_exact_cost_detail_and_small_account_min_commission(repla
     large_cn = compute_round_trip_cost_detail(200000.0, cn_eq_rules, shares=100)
     assert large_cn["min_commission_applied"] is False
 
-    # 港股股票：双边印花税 20bps + 港交所/证监会/财汇局/结算规费 2.1bps + 最低佣金保护
+    # 港股股票：双边印花税 20bps + 交易费/证监会/会财局征费与股份交收费（2025-06-30 起每边 1.27bps，双边 2.54bps）+ 最低佣金保护
     hk_rules = get_market_microstructure_rules("HK", "equity", "00700.HK", day_str="2026-10-15", board_lot=100)
     hk_cost = compute_round_trip_cost_detail(100000.0, hk_rules, shares=200)
-    assert hk_cost["regulatory_levies_bps"] == pytest.approx(2.1, abs=0.05)
+    assert hk_cost["regulatory_levies_bps"] == pytest.approx(2.54)
     assert hk_cost["total_cost_amount"] > 100000.0 * 0.0026
 
     # 小额账户在 510300.SH (约 4.2 元/股，100 股约 420 元，往返最低佣金 10 元 > 2%) 下，含最低佣金的总止损亏损不得击穿风险预算

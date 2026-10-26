@@ -621,6 +621,57 @@ def round_shares_to_lot(raw_shares: int, rules: dict[str, Any]) -> int:
     return min_order + ((raw_shares - min_order) // step) * step
 
 
+def _regulatory_levies_bps(market: str, asset_type: str, symbol: str, day_str: str | None) -> tuple[float, float, str]:
+    """交易所/监管规费（不含佣金与印花税），返回 (买入侧 bps, 卖出侧 bps, 口径说明)。来源与生效日期见 references/{cn,hk,us}-market.md。"""
+    if asset_type == "index":
+        return 0.0, 0.0, "指数不可直接交易"
+    day = day_str or "9999-12-31"
+    if market == "CN":
+        if asset_type != "equity":
+            return 0.0, 0.0, "A股 ETF 不收过户费"
+        # 中国结算过户费：2022-04-29 起沪深京 A 股统一按成交金额 0.001% 双向收取；此前沪深 0.002%、北交所 0.0025%
+        if day >= "2022-04-29":
+            side = 0.1
+        else:
+            side = 0.25 if (symbol.upper().endswith(".BJ") or symbol.split(".")[0].startswith(("8", "4", "92"))) else 0.2
+        return side, side, "中国结算过户费：2022-04-29 起成交金额 0.001% 双向收取（此前沪深 0.002%、北交所 0.0025%）"
+    if market == "HK":
+        # 每边：港交所交易费（2023-01-01 起 0.00565%，此前 0.005%）+ 证监会交易征费 0.0027%（2014-11-01 起）
+        # + 会计及财务汇报局交易征费 0.00015%（2022-01-01 起）+ 中央结算股份交收费（2025-06-30 起 0.0042% 且取消上下限，此前 0.002%）
+        trading_fee = 0.565 if day >= "2023-01-01" else 0.5
+        afrc = 0.015 if day >= "2022-01-01" else 0.0
+        settlement = 0.42 if day >= "2025-06-30" else 0.20
+        side = round(trading_fee + 0.27 + afrc + settlement, 4)
+        return side, side, (
+            "港股每边规费：交易费 0.00565% + 证监会征费 0.0027% + 会财局征费 0.00015% + 股份交收费 0.0042%（2025-06-30 起）；"
+            "2025-06-30 前交收费 0.002% 设最低 2 港元/最高 100 港元，此处不计上下限"
+        )
+    # 美股 SEC Section 31 费只向卖方收取：2026-04-04 起每百万美元 20.60；2025-05-14~2026-04-03 为 0；此前 27.80（起始日未在本表核实）
+    if day >= "2026-04-04":
+        sell = 0.206
+    elif day >= "2025-05-14":
+        sell = 0.0
+    else:
+        sell = 0.278
+    return 0.0, sell, "美股 SEC Section 31 费仅卖方收取（2026-04-04 起每百万美元 20.60）；FINRA TAF 按股计费，未计入"
+
+
+# 单笔最低佣金是券商收费口径（各券商不同），不是交易所规则：此处取常见水平作为小额账户摩擦的保守假设
+_MIN_COMMISSION_PER_LEG = {"CN": 5.0, "HK": 15.0, "US": 0.5}
+_MIN_COMMISSION_NOTE = "单笔最低佣金为券商常见收费口径假设（A股 5 元、港股 15 港元、美股 0.5 美元），非交易所规则，以实际券商为准"
+
+
+def _fee_fields(market: str, asset_type: str, symbol: str, day_str: str | None) -> dict[str, Any]:
+    buy_bps, sell_bps, note = _regulatory_levies_bps(market, asset_type, symbol, day_str)
+    return {
+        "min_commission_per_leg": _MIN_COMMISSION_PER_LEG[market] if asset_type != "index" else 0.0,
+        "min_commission_note": _MIN_COMMISSION_NOTE,
+        "regulatory_levies_buy_bps": buy_bps,
+        "regulatory_levies_sell_bps": sell_bps,
+        "regulatory_levies_note": note,
+    }
+
+
 def get_market_microstructure_rules(
     market: str,
     asset_type: str,
@@ -675,6 +726,7 @@ def get_market_microstructure_rules(
             "stamp_duty_buy_bps": 0.0,
             "stamp_duty_sell_bps": cn_stamp_sell if asset_type == "equity" else 0.0,
             "stamp_duty_note": "A股卖出单边印花税：2023-08-28 起 5bps，此前 10bps",
+            **_fee_fields("CN", asset_type, symbol, day_str),
         }
     if market == "HK":
         # 港股印花税：2021-08-01 起买卖双方各 0.13%，2023-11-17 起降回 0.1%（此前为 0.1%）；ETF 豁免
@@ -706,6 +758,7 @@ def get_market_microstructure_rules(
             "stamp_duty_buy_bps": hk_stamp,
             "stamp_duty_sell_bps": hk_stamp,
             "stamp_duty_note": "港股双边印花税：2021-08-01~2023-11-16 为 13bps，其余 10bps；ETF 豁免",
+            **_fee_fields("HK", asset_type, symbol, day_str),
         }
     return {
         "market": "US",
@@ -725,6 +778,7 @@ def get_market_microstructure_rules(
         "commission_bps": 1.0,
         "stamp_duty_buy_bps": 0.0,
         "stamp_duty_sell_bps": 0.0,
+        **_fee_fields("US", asset_type, symbol, day_str),
     }
 
 
@@ -739,12 +793,10 @@ def compute_round_trip_cost_detail(
     rules: dict[str, Any],
     shares: int | None = None,
 ) -> dict[str, Any]:
-    """计算含单笔最低佣金、过户费与交易所规费的精确往返成本明细。
+    """计算含单笔最低佣金与交易所/监管规费的往返成本明细。
 
-    - CN：单笔最低佣金 5 元（往返 10 元）；股票另计中国结算过户费双边共 0.2 bps（买卖各 0.1 bps = 0.001%）。
-    - HK：单笔最低佣金 15 港元（往返 30 港元）；另计港交所交易费（0.565 bps/边）、证监会交易征费（0.27 bps/边）、
-          财汇局征费（0.015 bps/边）与中央结算交收费（0.20 bps/边），双边规费合计 2.10 bps。
-    - US：单笔最低佣金 0.50 美元（往返 1.00 美元）；卖方 SEC/FINRA 规费约 0.28 bps。
+    费率只读 rules 里的 min_commission_per_leg、regulatory_levies_{buy,sell}_bps（由 get_market_microstructure_rules 按日期给出），
+    本函数不另设常量。
     """
     prop_rate = round_trip_cost_rate(rules)
     if notional <= 0:
@@ -756,20 +808,11 @@ def compute_round_trip_cost_detail(
             "min_commission_applied": False,
             "breakeven_price_delta": 0.0,
         }
-    market = str(rules.get("market") or "CN")
     comm_bps = float(rules.get("commission_bps") or 0.0)
     stamp_bps = float(rules.get("stamp_duty_buy_bps") or 0.0) + float(rules.get("stamp_duty_sell_bps") or 0.0)
     prop_comm_leg = notional * (comm_bps / 10000.0)
-    if market == "CN":
-        min_comm_leg = 5.0
-        is_equity = float(rules.get("stamp_duty_sell_bps") or 0.0) > 0 or float(rules.get("tick_size") or 0.01) >= 0.01
-        levies_bps = 0.2 if is_equity else 0.0
-    elif market == "HK":
-        min_comm_leg = 15.0
-        levies_bps = 2.1
-    else:
-        min_comm_leg = 0.50
-        levies_bps = 0.28
+    min_comm_leg = float(rules["min_commission_per_leg"])
+    levies_bps = float(rules["regulatory_levies_buy_bps"]) + float(rules["regulatory_levies_sell_bps"])
     actual_comm_leg = max(min_comm_leg, prop_comm_leg)
     min_comm_applied = prop_comm_leg + 1e-9 < min_comm_leg
     commission_total = 2.0 * actual_comm_leg

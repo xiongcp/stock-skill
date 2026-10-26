@@ -66,6 +66,7 @@ def compute_triple_barrier_plan(
     horizon_bars: int = 15,
     account_equity: float | None = None,
     max_risk_pct: float = 0.01,
+    price_scale_is_tradable: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """计算：
     1. 二阶段规则过滤决策 (meta_labeling_decision)
@@ -380,7 +381,8 @@ def compute_triple_barrier_plan(
 
     # Position sizing calculation
     # 每股风险按入场区上沿（区内最差成交价）计：在入场区内任意价位成交，按止损价离场的亏损都不超过风险预算
-    adj_factor = float(last_bar.get("adj_factor", 1.0)) or 1.0
+    # 除权日盘中：当日事件已计入复权，计划价已是当天可成交的除权后口径，不能再按最后一根已收盘K线的因子换回除权前价格
+    adj_factor = 1.0 if price_scale_is_tradable else (float(last_bar.get("adj_factor", 1.0)) or 1.0)
     worst_unit_risk = ((entry_high - stop_loss) + entry_high * fee_rate) / adj_factor
     entry_high_raw = entry_high / adj_factor
     gap_risk_note = (
@@ -436,7 +438,6 @@ def compute_triple_barrier_plan(
         long_allowed = not vetoed and action in ("LONG_CONFIRMED", "WATCH_LONG_SETUP")
         position_sizing = {
             "tradable": True,
-            "account_equity": round(float(account_equity), 2),
             "max_risk_pct": round(float(max_risk_pct) * 100.0, 2),
             "risk_budget_amount": round(risk_budget, 2),
             "lot_size": lot,
@@ -717,7 +718,7 @@ def audit_trade_idea(
     shares: int | None = None,
     note: str = "",
 ) -> dict[str, Any]:
-    """对用户主观交易想法执行 6 维机械化双向风控审计（大盘否决冲突、追高延伸度、整数关口扫损陷阱、双边摩擦净盈亏比、保形区间可达性、If-Then 剧本）。"""
+    """对用户主观交易想法执行 6 维机械化双向风控审计（大盘否决冲突、追高延伸度、整数关口扫损陷阱、双边摩擦净盈亏比、目标与正常波动范围对照、If-Then 剧本）。"""
     import hashlib
     import json
 
@@ -750,13 +751,19 @@ def audit_trade_idea(
     ema20 = float(trend_ind.get("ema20") or last_close)
     atr14 = float(vol_ind.get("atr14") or max(0.01, abs(entry_f - stop_f)))
 
-    rules = long_plan.get("market_microstructure") or {
-        "market": market,
-        "commission_bps": 2.5,
-        "stamp_duty_buy_bps": 0.0,
-        "stamp_duty_sell_bps": 5.0,
-        "lot_size": 100,
-    }
+    rules = long_plan.get("market_microstructure") or {}
+    if "min_commission_per_leg" not in rules:
+        # 计划里没有制度参数（如指数或旧版 result.json）时按同一来源重建，不写死任何费率
+        rules = get_market_microstructure_rules(
+            market,
+            asset_type,
+            symbol,
+            is_st=bool(meta.get("is_st", False)),
+            is_ipo_no_limit=bool(meta.get("is_ipo_no_limit", False)),
+            day_str=as_of or None,
+            board_lot=meta.get("board_lot"),
+            name=str(meta.get("name") or ""),
+        )
     lot_size = int(rules.get("lot_size") or 100)
     eff_shares = int(shares) if (shares and int(shares) > 0) else lot_size
 
@@ -799,7 +806,7 @@ def audit_trade_idea(
 
     is_round = _is_round_number_price(stop_f, market)
     sys_stop = float(long_plan.get("stop_loss_barrier") or long_plan.get("stop_loss") or round_to_tick(entry_f - 1.5 * atr14, market, asset_type, as_of))
-    supports = [float(s["price"]) for s in ((structure.get("levels") or {}).get("supports") or []) if "price" in s]
+    supports = [float(s["price"]) for s in ((structure.get("key_levels") or {}).get("supports") or []) if "price" in s]
     nearest_sup = min(supports, key=lambda p: abs(p - stop_f)) if supports else sys_stop
     too_tight_to_support = direction_u == "LONG" and bool(supports) and abs(stop_f - nearest_sup) < 0.20 * atr14
     rec_stop = (
@@ -872,38 +879,32 @@ def audit_trade_idea(
             "note_cn": f"扣除全口径摩擦后净盈亏比 {net_rr:.2f} ≥ 1.50，满足正期望门槛",
         }
 
-    q75_list = vr.get("q75") or []
-    q90_list = vr.get("q90") or []
+    # 正常波动范围只描述未来 15 日的波动幅度：q10/q90 不是目标位，也不能据此判断能否触及目标（interpretation-guide.md）
     q10_list = vr.get("q10") or []
-    q25_list = vr.get("q25") or []
-    q75 = float(q75_list[-1]) if q75_list else entry_f + atr14
-    q90 = float(q90_list[-1]) if q90_list else entry_f + 2.0 * atr14
-    q10 = float(q10_list[-1]) if q10_list else entry_f - 2.0 * atr14
-    q25 = float(q25_list[-1]) if q25_list else entry_f - atr14
-    if direction_u == "LONG" and target_f > q90:
-        reach_check = {
-            "status": "WARN",
-            "q75_price": q75,
-            "q90_price": q90,
-            "note_cn": f"目标价 {target_f:.{p_dec}f} 超出未来 15 日正常波动范围上沿（{q90:.{p_dec}f}），建议在 q75（{q75:.{p_dec}f}）附近先分批锁定 TP1",
-        }
-    elif direction_u == "SHORT" and target_f < q10:
-        reach_check = {
-            "status": "WARN",
-            "q25_price": q25,
-            "q10_price": q10,
-            "note_cn": f"做空目标价 {target_f:.{p_dec}f} 低于未来 15 日正常波动范围下沿（{q10:.{p_dec}f}），建议在 q25（{q25:.{p_dec}f}）附近先分批锁定 TP1",
+    q90_list = vr.get("q90") or []
+    if not q10_list or not q90_list:
+        range_check = {
+            "status": "UNAVAILABLE",
+            "q10_price": None,
+            "q90_price": None,
+            "note_cn": "result.json 缺少正常波动范围（q10/q90），未做目标位置对照",
         }
     else:
-        reach_check = {
-            "status": "PASS",
-            "q25_price": q25,
-            "q75_price": q75,
+        q10, q90 = float(q10_list[-1]), float(q90_list[-1])
+        outside = (direction_u == "LONG" and target_f > q90) or (direction_u == "SHORT" and target_f < q10)
+        range_check = {
+            "status": "WARN" if outside else "PASS",
+            "q10_price": q10,
             "q90_price": q90,
-            "note_cn": f"目标价位于未来 15 日正常波动范围（{q10:.{p_dec}f}~{q90:.{p_dec}f}）可达范围内",
+            "note_cn": (
+                f"目标价 {target_f:.{p_dec}f} 在未来 15 日正常波动范围（{q10:.{p_dec}f}~{q90:.{p_dec}f}）之外，目标距离大于常见波动幅度"
+                if outside
+                else f"目标价 {target_f:.{p_dec}f} 在未来 15 日正常波动范围（{q10:.{p_dec}f}~{q90:.{p_dec}f}）之内"
+            )
+            + "；该范围只描述波动幅度，不代表能否触及目标",
         }
 
-    statuses = [regime_check["status"], anti_chase["status"], stop_trap["status"], rr_check["status"], reach_check["status"]]
+    statuses = [regime_check["status"], anti_chase["status"], stop_trap["status"], rr_check["status"], range_check["status"]]
     if regime_check["status"] == "FAIL" or rr_check["status"] == "FAIL" or anti_chase["status"] == "FAIL":
         overall = "REJECTED_BY_RISK_GATE"
     elif "WARN" in statuses:
@@ -925,13 +926,19 @@ def audit_trade_idea(
         be_trigger = round(rec_entry - 0.90 * abs(rec_stop - rec_entry), p_dec)
         be_stop = round(rec_entry - max(fee_per_share, 0.08 * abs(rec_stop - rec_entry)), p_dec)
 
+    actionable = overall != "REJECTED_BY_RISK_GATE"
     playbook = {
         "if_trigger_cn": (
             f"IF 价格回踩至 {rec_entry:.{p_dec}f} 附近缩量企稳（或 15 分钟放量突破确认且不破 VWAP）"
             if direction_u == "LONG"
             else f"IF 价格反弹受阻于 {rec_entry:.{p_dec}f} 且放量跌破支撑"
         ),
-        "then_action_cn": f"THEN 按计划分批建仓/加仓 {eff_shares} 股，初始防扫损止损设于 {rec_stop:.{p_dec}f}，第一目标 {rec_target:.{p_dec}f}",
+        # 风控否决或门禁未通过时不给股数与建仓指令：股数本身就是买入建议，与"否决时只给观察位"冲突
+        "then_action_cn": (
+            f"THEN 按计划分批建仓/加仓 {eff_shares} 股，初始防扫损止损设于 {rec_stop:.{p_dec}f}，第一目标 {rec_target:.{p_dec}f}"
+            if actionable
+            else f"THEN 当前未通过风控门禁，不建仓、不给股数；{rec_entry:.{p_dec}f} 与 {rec_stop:.{p_dec}f} 仅作观察位"
+        ),
         "invalidation_cn": f"INVALIDATION 若 5/15 分钟放量跌破 {rec_stop:.{p_dec}f} 且反抽失败（或日线收盘跌破），无条件执行风控离场，严禁死扛或向下摊平",
         "ratchet_cn": f"RATCHET 当盘中触及 {be_trigger:.{p_dec}f}（+0.9R）且收盘企稳后，自次日起将防守止损上移至真保本位 {be_stop:.{p_dec}f}，让利润奔跑",
     }
@@ -947,18 +954,25 @@ def audit_trade_idea(
         "symbol": symbol,
         "market": market,
         "asset_type": asset_type,
+        "is_st": bool(meta.get("is_st", False)),
+        "is_ipo_no_limit": bool(meta.get("is_ipo_no_limit", False)),
         "as_of": as_of,
         "direction": direction_u,
         "overall_verdict": overall,
         "note": note,
         "user_idea": {"entry": entry_f, "stop": stop_f, "target": target_f, "shares": eff_shares},
-        "recommended_adjustments": {"entry": rec_entry, "stop": rec_stop, "target": rec_target, "shares": eff_shares},
+        "recommended_adjustments": {
+            "entry": rec_entry,
+            "stop": rec_stop,
+            "target": rec_target,
+            "shares": eff_shares if actionable else None,
+        },
         "checks": {
             "regime_and_veto": regime_check,
             "anti_chase": anti_chase,
             "round_number_stop_trap": stop_trap,
             "net_rr_and_friction": rr_check,
-            "conformal_reachability": reach_check,
+            "volatility_range_position": range_check,
         },
         "if_then_playbook": playbook,
     }

@@ -301,6 +301,16 @@ def test_intraday_on_ex_dividend_split_day_aligns_historical_bars(replay_recorde
     rep = analyze_bundle(bundle, req, include_replay=False, include_forecast=False)
     assert any("除权除息日" in n for n in rep["quality"]["notes"])
 
+    # 计划价已是当日除权后可成交口径：每股风险不能再除以最后一根已收盘K线的复权因子（约 0.33）换回除权前价格
+    from market_rules import round_trip_cost_rate
+
+    sized = analyze_bundle(bundle, {**req, "account_equity": 1_000_000.0, "max_risk_pct": 0.01}, include_replay=False, include_forecast=False)
+    plan = sized["triple_barrier_plan"]
+    entry_high = float(plan["entry_zone"][1])
+    expected_unit_risk = (entry_high - float(plan["stop_loss_barrier"])) + entry_high * round_trip_cost_rate(plan["market_microstructure"])
+    assert bars[-1]["adj_factor"] < 0.5
+    assert plan["position_sizing"]["unit_risk_per_share"] == pytest.approx(expected_unit_risk, abs=1e-3)
+
 
 def test_multi_source_failover_recovers_with_real_tencent_daily_when_primary_down(
     monkeypatch: pytest.MonkeyPatch, replay_recorded

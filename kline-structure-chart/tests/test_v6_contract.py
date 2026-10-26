@@ -488,6 +488,23 @@ def test_audit_trade_idea_detects_integer_stop_chase_and_veto(replay_recorded, t
     assert checks["net_rr_and_friction"]["status"] == "FAIL"
     assert "if_trigger_cn" in audit["if_then_playbook"]
     assert "invalidation_cn" in audit["if_then_playbook"]
+    # 正常波动范围只作对照，不把 q75/q90 当目标或止盈位
+    range_check = checks["volatility_range_position"]
+    assert range_check["status"] in ("PASS", "WARN")
+    assert "q75" not in json.dumps(audit, ensure_ascii=False)
+    # 门禁未通过时不给股数、不给建仓指令
+    if audit["overall_verdict"] == "REJECTED_BY_RISK_GATE":
+        assert audit["recommended_adjustments"]["shares"] is None
+        assert "不建仓" in audit["if_then_playbook"]["then_action_cn"]
+
+    # 止损紧贴 result.json 里的结构支撑（structure.key_levels.supports）时给出提示
+    atr14 = float(result_doc["indicators"]["volatility"]["atr14"])
+    supports = [float(s["price"]) for s in result_doc["structure"]["key_levels"]["supports"] if float(s["price"]) < last_close]
+    assert supports, "录制样本应至少有一个低于现价的支撑位"
+    hug_stop = round(supports[0] + 0.05 * atr14, 2)
+    hug = audit_trade_idea(result_doc, direction="LONG", entry=last_close, stop=hug_stop, target=round(last_close + 3 * (last_close - hug_stop), 2))
+    assert hug["checks"]["round_number_stop_trap"]["too_close_to_support"] is True
+    assert hug["checks"]["round_number_stop_trap"]["status"] == "WARN"
 
     ledger_path = tmp_path / "ideas_ledger.jsonl"
     append_idea_to_ledger(audit, ledger_path)
@@ -519,27 +536,31 @@ def test_audit_trade_idea_hk_connect_t_trade_cost_floor(replay_recorded, tmp_pat
 
 
 def test_score_trade_ideas_reconciles_swept_integer_stop_vs_audited_stop() -> None:
-    """复盘对账器：验证用户整数止损被盘中假跌破扫损后拉升触达目标（STOP_SWEPT_THEN_TARGET）与审计后防扫损止损的对比。"""
+    """复盘对账器在录制的真实行情（002594.SZ）上回放：用户止损被扫后审计计划触达目标、保本棘轮保护，以及观察期未走完时不打分。"""
+    from conftest import load_recorded
     from evaluation import reconcile_trade_ideas
 
-    idea_record = {
-        "idea_id": "idea_test_001",
-        "symbol": "002281.SZ",
-        "market": "CN",
-        "as_of": "2026-10-15",
-        "direction": "LONG",
-        "user_idea": {"entry": 132.00, "stop": 130.00, "target": 145.00, "shares": 200},
-        "recommended_adjustments": {"entry": 132.00, "stop": 128.60, "target": 145.00},
-    }
-    future_bars = [
-        {"day": "2026-10-15", "open": 134.0, "high": 135.0, "low": 132.5, "close": 132.96, "volume": 100000},
-        {"day": "2026-10-16", "open": 132.5, "high": 133.2, "low": 131.5, "close": 132.80, "volume": 90000},
-        {"day": "2026-10-19", "open": 132.2, "high": 133.0, "low": 129.8, "close": 132.50, "volume": 120000},
-        {"day": "2026-10-20", "open": 133.0, "high": 138.5, "low": 132.6, "close": 137.90, "volume": 150000},
-        {"day": "2026-10-21", "open": 138.0, "high": 146.2, "low": 137.5, "close": 145.50, "volume": 180000},
-    ]
-    summary = reconcile_trade_ideas([idea_record], bars_by_symbol={"002281.SZ": future_bars}, horizon_bars=15)
+    bars = load_recorded("sina_daily/sz002594.json")
+    by_symbol = {"002594.SZ": bars}
+
+    def _idea(idea_id: str, as_of: str, entry: float, user_stop: float, audited_stop: float, target: float) -> dict:
+        return {
+            "idea_id": idea_id,
+            "symbol": "002594.SZ",
+            "market": "CN",
+            "asset_type": "equity",
+            "as_of": as_of,
+            "direction": "LONG",
+            "user_idea": {"entry": entry, "stop": user_stop, "target": target, "shares": 100},
+            "recommended_adjustments": {"entry": entry, "stop": audited_stop, "target": target},
+        }
+
+    # 2022-10-13 入场后 10-17 跌破用户止损 257.09，10-18 上冲到目标 278.08，审计计划的更宽止损 249.22 未被触及
+    summary = reconcile_trade_ideas(
+        [_idea("swept", "2022-10-12", 262.34, 257.09, 249.22, 278.08)], bars_by_symbol=by_symbol, horizon_bars=15
+    )
     assert summary["total_ideas"] == 1
+    assert summary["pending_count"] == 0
     assert summary["triggered_count"] == 1
     assert summary["swept_stop_saved_count"] == 1
     item = summary["items"][0]
@@ -547,28 +568,26 @@ def test_score_trade_ideas_reconciles_swept_integer_stop_vs_audited_stop() -> No
     assert item["audited_outcome"]["status"] == "TP_HIT"
     assert item["attribution"] == "STOP_SWEPT_THEN_TARGET"
 
-    # 验证冲高 +0.9R 且收盘 >= +0.3R 后触发保本棘轮保护（RATCHET_PROTECTED_AFTER_SURGE），以及跳空低开真实滑点 (< -1.0R)
-    ratchet_idea = {
-        "idea_id": "idea_test_002",
-        "symbol": "300604.SZ",
-        "market": "CN",
-        "as_of": "2026-10-15",
-        "direction": "LONG",
-        "user_idea": {"entry": 100.00, "stop": 90.00, "target": 125.00, "shares": 100},
-        "recommended_adjustments": {"entry": 100.00, "stop": 89.20, "target": 125.00},
-    }
-    surge_then_drop_bars = [
-        {"day": "2026-10-16", "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 100000},
-        # 次日冲高 110.5 (> 100 + 0.9*10.8) 且收盘 105.0 (> 100 + 0.3*10.8)，激活保本棘轮
-        {"day": "2026-10-19", "open": 101.0, "high": 110.5, "low": 100.5, "close": 105.0, "volume": 150000},
-        # 第三日回落至 88.0，未设棘轮的用户计划触发止损，而启用棘轮的审计计划在保本位 (+0.08R) 保护离场
-        {"day": "2026-10-20", "open": 102.0, "high": 102.5, "low": 88.0, "close": 88.5, "volume": 120000},
-    ]
-    r_sum = reconcile_trade_ideas([ratchet_idea], bars_by_symbol={"300604.SZ": surge_then_drop_bars}, horizon_bars=15)
+    # 2022-09-07 入场后先冲高 +0.9R 且收盘站上 +0.3R，09-15 回落：无棘轮的用户计划止损，审计计划在保本位 +0.08R 离场
+    r_sum = reconcile_trade_ideas(
+        [_idea("ratchet", "2022-09-06", 272.94, 267.48, 259.29, 289.32)], bars_by_symbol=by_symbol, horizon_bars=15
+    )
     assert r_sum["ratchet_saved_count"] == 1
     assert r_sum["items"][0]["attribution"] == "RATCHET_PROTECTED_AFTER_SURGE"
     assert r_sum["items"][0]["audited_outcome"]["realized_r"] > 0
 
+    # 录制数据最后 5 根K线之前下单：观察期不足 15 根，未出结果的想法标记 PENDING，不计入任何统计
+    late = bars[-6]
+    entry = round(float(late["close"]), 2)
+    p_sum = reconcile_trade_ideas(
+        [_idea("late", late["day"], entry, round(entry * 0.5, 2), round(entry * 0.4, 2), round(entry * 2.0, 2))],
+        bars_by_symbol=by_symbol,
+        horizon_bars=15,
+    )
+    assert p_sum["pending_count"] == 1
+    assert p_sum["triggered_count"] == 0
+    assert p_sum["audited_tp_hit_count"] == 0
+    assert p_sum["items"][0]["attribution"] == "PENDING"
 
 
 def test_dashboard_v2_and_cloudflare_worker_exporter(replay_recorded, tmp_path: Path) -> None:

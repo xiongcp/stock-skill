@@ -421,6 +421,7 @@ def analyze_bundle(
         horizon_bars=horizon_bars,
         account_equity=request.get("account_equity"),
         max_risk_pct=float(request.get("max_risk_pct") or 0.01),
+        price_scale_is_tradable=bool(bundle.get("provenance", {}).get("intraday_ex_date_aligned")),
     )
 
     # 7. 未来 H 步（默认 15 日）分位数预测 + 序列 split-conformal 校准

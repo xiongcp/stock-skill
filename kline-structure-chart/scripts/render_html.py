@@ -485,7 +485,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   const sizing = tb.position_sizing;
   const sharesLabel = (sizing.recommended_shares !== null && sizing.recommended_shares !== undefined)
     ? sizing.recommended_shares + '股'
-    : (sizing.account_equity ? '不给出（见报告风控）' : '需账户净值');
+    : (sizing.risk_budget_amount ? '不给出（见报告风控）' : '需账户净值');
   addKv(barGrid, '制度 / 建议股数', settleLabel + ' / ' + sharesLabel);
 
   const scenList = document.getElementById('scenarioList');
@@ -628,46 +628,56 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     drawChart();
   }});
 
-  // Interactive If-Then R/R & Exact Friction Calculator
+  // If-Then 净盈亏比试算器：费率参数与预填价位只读 result.json（plan.long），页面不设任何费率常量或默认价
   const rrEntryEl = document.getElementById('rrEntryInput');
   const rrStopEl = document.getElementById('rrStopInput');
   const rrTargetEl = document.getElementById('rrTargetInput');
   const rrSharesEl = document.getElementById('rrSharesInput');
   const rrGridEl = document.getElementById('rrResultGrid');
-  const initEntry = (tb.entry_zone && tb.entry_zone.length === 2) ? tb.entry_zone[1] : (bars.length ? bars[bars.length - 1].close : 100);
-  const initStop = tb.stop_loss_barrier || tb.stop_loss || (initEntry * 0.95);
-  const initTarget = tb.take_profit_1 || tb.take_profit_tp1 || (initEntry * 1.08);
-  const initShares = (tb.position_sizing && tb.position_sizing.recommended_shares) ? tb.position_sizing.recommended_shares : ((tb.market_microstructure && tb.market_microstructure.lot_size) || 100);
-  rrEntryEl.value = Number(initEntry).toFixed(pDec);
-  rrStopEl.value = Number(initStop).toFixed(pDec);
-  rrTargetEl.value = Number(initTarget).toFixed(pDec);
-  rrSharesEl.value = initShares;
+  const rrPlan = tb || {{}};
+  const rrMm = rrPlan.market_microstructure || {{}};
+  const rrVetoed = !!(debate && debate.risk_officer_veto);
+  function isNum(v) {{ return typeof v === 'number' && isFinite(v); }}
+  // 风控否决时不预填计划价位：价位与股数本身就是建仓建议，与"否决时只给观察位"冲突
+  if (!rrVetoed) {{
+    if (rrPlan.entry_zone && rrPlan.entry_zone.length === 2 && isNum(rrPlan.entry_zone[1])) rrEntryEl.value = Number(rrPlan.entry_zone[1]).toFixed(pDec);
+    if (isNum(rrPlan.stop_loss_barrier)) rrStopEl.value = Number(rrPlan.stop_loss_barrier).toFixed(pDec);
+    if (isNum(rrPlan.take_profit_1)) rrTargetEl.value = Number(rrPlan.take_profit_1).toFixed(pDec);
+    const sizingRec = rrPlan.position_sizing && rrPlan.position_sizing.recommended_shares;
+    if (isNum(sizingRec) && sizingRec > 0) rrSharesEl.value = sizingRec;
+    else if (isNum(rrMm.lot_size)) rrSharesEl.value = rrMm.lot_size;
+  }}
 
   function updateRrCalculator() {{
     rrGridEl.textContent = '';
-    const e = parseFloat(rrEntryEl.value) || 0;
-    const s = parseFloat(rrStopEl.value) || 0;
-    const t = parseFloat(rrTargetEl.value) || 0;
-    const sh = Math.max(1, parseInt(rrSharesEl.value, 10) || 100);
+    if (rrVetoed) addKv(rrGridEl, '风控状态', '风控否决：不预填计划价位，以下只作自行试算');
+    const feeKeys = ['commission_bps', 'stamp_duty_buy_bps', 'stamp_duty_sell_bps', 'min_commission_per_leg', 'regulatory_levies_buy_bps', 'regulatory_levies_sell_bps'];
+    if (!feeKeys.every(function(k) {{ return isNum(rrMm[k]); }})) {{
+      addKv(rrGridEl, '试算', 'result.json 缺少费率参数，无法试算');
+      return;
+    }}
+    const e = parseFloat(rrEntryEl.value);
+    const s = parseFloat(rrStopEl.value);
+    const t = parseFloat(rrTargetEl.value);
+    const sh = parseInt(rrSharesEl.value, 10);
+    if (!(e > 0 && s > 0 && t > 0 && sh > 0) || e === s) {{
+      addKv(rrGridEl, '试算', '请输入入场、止损、目标与股数');
+      return;
+    }}
     const notional = e * sh;
-    const mm = tb.market_microstructure || {{}};
-    const commBps = Number(mm.commission_bps || 2.5);
-    const stampBps = Number(mm.stamp_duty_buy_bps || 0) + Number(mm.stamp_duty_sell_bps || 0);
-    const minCommLeg = meta.market === 'CN' ? 5.0 : (meta.market === 'HK' ? 15.0 : 0.5);
-    const leviesBps = meta.market === 'CN' ? (stampBps > 0 ? 0.2 : 0.0) : (meta.market === 'HK' ? 2.1 : 0.28);
-    const commTotal = 2.0 * Math.max(minCommLeg, notional * (commBps / 10000.0));
+    const stampBps = rrMm.stamp_duty_buy_bps + rrMm.stamp_duty_sell_bps;
+    const leviesBps = rrMm.regulatory_levies_buy_bps + rrMm.regulatory_levies_sell_bps;
+    const commTotal = 2.0 * Math.max(rrMm.min_commission_per_leg, notional * (rrMm.commission_bps / 10000.0));
     const totalCost = commTotal + notional * ((stampBps + leviesBps) / 10000.0);
     const feePerShare = totalCost / sh;
-    const grossRisk = Math.max(1e-6, Math.abs(e - s));
-    const grossReward = Math.max(0, Math.abs(t - e));
+    const grossRisk = Math.abs(e - s);
+    const grossReward = Math.abs(t - e);
     const netReward = Math.max(0, grossReward - feePerShare);
-    const netRisk = grossRisk + feePerShare;
-    const netRr = netReward / Math.max(1e-6, netRisk);
-    const isRoundStop = s >= 50 ? Math.abs(s - Math.round(s)) < 1e-6 : Math.abs(s * 10 - Math.round(s * 10)) < 1e-6;
-    addKv(rrGridEl, '往返总摩擦 (含规费/最低佣金)', totalCost.toFixed(2) + ' ' + (meta.currency || '') + ' (' + ((totalCost / Math.max(1, notional)) * 100).toFixed(2) + '%)');
-    addKv(rrGridEl, '真保本价 (Breakeven)', (e + feePerShare).toFixed(pDec));
+    const netRr = netReward / (grossRisk + feePerShare);
+    addKv(rrGridEl, '往返总摩擦 (含规费/最低佣金)', totalCost.toFixed(2) + ' ' + (meta.currency || '') + ' (' + ((totalCost / notional) * 100).toFixed(2) + '%)');
+    addKv(rrGridEl, '保本价 (Breakeven)', (s < e ? e + feePerShare : e - feePerShare).toFixed(pDec));
     addKv(rrGridEl, '毛盈亏比 / 扣费净盈亏比', (grossReward / grossRisk).toFixed(2) + 'R / ' + netRr.toFixed(2) + 'R');
-    addKv(rrGridEl, '止损扫损审计', isRoundStop ? '警惕整数关口扫损!' : '非整数安全位');
+    if (rrMm.min_commission_note) addKv(rrGridEl, '费率口径', rrMm.min_commission_note);
   }}
   [rrEntryEl, rrStopEl, rrTargetEl, rrSharesEl].forEach(function(el) {{
     el.addEventListener('input', updateRrCalculator);
