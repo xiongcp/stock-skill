@@ -279,3 +279,59 @@ def test_tencent_search_failures_raise(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(data_gateway, "_http_get", lambda *a, **k: "<html>blocked</html>")
     with pytest.raises(RuntimeError, match="格式无法识别"):
         resolve_symbol.resolve("茅台")
+
+
+def test_intraday_on_ex_dividend_split_day_aligns_historical_bars(replay_recorded) -> None:
+    """除权除息/送转当日盘中运行时，已剥离的盘中K线日期已生效的除权事件必须作用于历史已收盘序列，防止3倍价格断层。"""
+    from zoneinfo import ZoneInfo
+    from analysis import analyze_bundle
+
+    sh_tz = ZoneInfo("Asia/Shanghai")
+    # 2025-07-29 是比亚迪 (002594.SZ) 10送转20（split_ratio=3.0）及分红除权除息日
+    intraday_now = datetime(2025, 7, 29, 10, 30, tzinfo=sh_tz)
+    req = {"symbol": "002594.SZ", "market": "CN", "asset_type": "equity", "as_of": "2025-07-29"}
+    bundle = load_bundle(req, now=intraday_now)
+    bars = bundle["target"]["bars"]
+    intra = bundle["target"]["intraday"]
+    assert intra is not None and intra["day"] == "2025-07-29"
+    assert bars[-1]["day"] == "2025-07-28"
+    # 除权前 2025-07-28 原始收盘价 > 300 元，对齐 2025-07-29 除权口径后应约为 ~110 元（与 07-29 盘中同量级）
+    assert bars[-1]["raw_close"] > 300.0
+    assert abs(bars[-1]["close"] - intra["open"]) < 15.0, f"除权日盘中未对齐历史价格: close={bars[-1]['close']}, intra_open={intra['open']}"
+    rep = analyze_bundle(bundle, req, include_replay=False, include_forecast=False)
+    assert any("除权除息日" in n for n in rep["quality"]["notes"])
+
+    # 计划价已是当日除权后可成交口径：每股风险不能再除以最后一根已收盘K线的复权因子（约 0.33）换回除权前价格
+    from market_rules import round_trip_cost_rate
+
+    sized = analyze_bundle(bundle, {**req, "account_equity": 1_000_000.0, "max_risk_pct": 0.01}, include_replay=False, include_forecast=False)
+    plan = sized["triple_barrier_plan"]
+    entry_high = float(plan["entry_zone"][1])
+    expected_unit_risk = (entry_high - float(plan["stop_loss_barrier"])) + entry_high * round_trip_cost_rate(plan["market_microstructure"])
+    assert bars[-1]["adj_factor"] < 0.5
+    assert plan["position_sizing"]["unit_risk_per_share"] == pytest.approx(expected_unit_risk, abs=1e-3)
+
+
+def test_multi_source_failover_recovers_with_real_tencent_daily_when_primary_down(
+    monkeypatch: pytest.MonkeyPatch, replay_recorded
+) -> None:
+    """当新浪或 Yahoo 主源限流/超时故障时，自动回退至腾讯真实日线源且标记 TENCENT_FAILOVER_DAILY（绝不合成数据）。"""
+    real_bars = load_recorded("sina_daily/sh600519.json")[-300:]
+
+    def sina_down(code: str, datalen: int = 450) -> list[dict]:
+        if code == "sh600519":
+            raise urllib.error.HTTPError("u", 502, "Bad Gateway", {}, None)
+        return [dict(b) for b in load_recorded(f"sina_daily/{code}.json")][-datalen:]
+
+    def tencent_backup(code: str, datalen: int = 760) -> list[dict]:
+        assert code == "sh600519"
+        return [dict(b) for b in real_bars][-datalen:]
+
+    monkeypatch.setattr(data_gateway, "fetch_sina_daily_bars", sina_down)
+    monkeypatch.setattr(data_gateway, "fetch_tencent_daily_bars", tencent_backup, raising=False)
+    bundle = load_bundle(REQ_CN, now=NOW)
+    assert bundle["provenance"]["source"] == "TENCENT_FAILOVER_DAILY(sh600519)"
+    assert classify_data_source(bundle["provenance"]["source"]) == "LIVE"
+    assert len(bundle["target"]["bars"]) == len(real_bars)
+
+

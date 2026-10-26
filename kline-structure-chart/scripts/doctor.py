@@ -140,7 +140,7 @@ def check_data_sources() -> list[Check]:
     ]
 
 
-def check_skill_links(home: Path, project: Path | None = None) -> list[Check]:
+def _discover_entries(home: Path, project: Path | None) -> list[tuple[str, Path]]:
     locations = [(label, home / rel) for label, rel in AGENT_SKILL_DIRS.items()]
     if project is not None:
         locations += [
@@ -148,18 +148,56 @@ def check_skill_links(home: Path, project: Path | None = None) -> list[Check]:
             ("项目 .agents/skills", project / ".agents" / "skills"),
             ("项目 .hermes/skills", project / ".hermes" / "skills"),
         ]
-    checks: list[Check] = []
+    entries: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
     for label, base in locations:
         entry = base / SKILL_NAME
-        if not entry.exists() and not entry.is_symlink():
-            continue
+        if entry.exists() or entry.is_symlink():
+            entries.append((label, entry))
+            seen.add(entry)
+        # Hermes 支持按分类子目录（如 ~/.hermes/skills/productivity/kline-structure-chart）与 Profile 存放技能
+        if "Hermes" in label and base.is_dir():
+            for cat_entry in sorted(base.glob(f"*/{SKILL_NAME}")):
+                if cat_entry not in seen and (cat_entry.exists() or cat_entry.is_symlink()):
+                    entries.append((f"{label} ({cat_entry.parent.name})", cat_entry))
+                    seen.add(cat_entry)
+    profiles_dir = home / ".hermes" / "profiles"
+    if profiles_dir.is_dir():
+        for prof_entry in sorted(profiles_dir.glob(f"*/skills/**/{SKILL_NAME}")):
+            if prof_entry not in seen and (prof_entry.exists() or prof_entry.is_symlink()):
+                entries.append(("Hermes Profile", prof_entry))
+                seen.add(prof_entry)
+    return entries
+
+
+def check_skill_links(home: Path, project: Path | None = None) -> list[Check]:
+    locations = [(label, home / rel) for label, rel in AGENT_SKILL_DIRS.items()]
+    entries = _discover_entries(home, project)
+    expected_scripts = {p.name for p in (SKILL_DIR / "scripts").glob("*.py")}
+    checks: list[Check] = []
+    for label, entry in entries:
         name = f"技能注册：{label}"
         if entry.is_symlink() and not entry.exists():
             checks.append(Check(name, False, f"{entry} 是失效软链（指向 {entry.readlink()}）", f"删除后重新注册：{INSTALL_HINT}"))
         elif not (entry / "SKILL.md").is_file():
             checks.append(Check(name, False, f"{entry} 下没有 SKILL.md", f"删除后重新注册：{INSTALL_HINT}"))
         else:
-            target = f" -> {entry.resolve()}" if entry.is_symlink() else "（复制安装）"
+            resolved = entry.resolve()
+            if resolved != SKILL_DIR.resolve():
+                actual_scripts = {p.name for p in (entry / "scripts").glob("*.py")}
+                if expected_scripts and actual_scripts != expected_scripts:
+                    missing = sorted(expected_scripts - actual_scripts)
+                    extra = sorted(actual_scripts - expected_scripts)
+                    checks.append(
+                        Check(
+                            name,
+                            False,
+                            f"{entry} 脚本与当前版本不一致（缺少 {missing[:3]}，残留旧脚本 {extra[:3]}）",
+                            f"同步或重新安装技能：{INSTALL_HINT}",
+                        )
+                    )
+                    continue
+            target = f" -> {resolved}" if entry.is_symlink() else "（复制安装）"
             checks.append(Check(name, True, f"{entry}{target}"))
     if not checks:
         checks.append(Check("技能注册", False, f"在 {', '.join(str(b) for _, b in locations)} 中都没有找到 {SKILL_NAME}", INSTALL_HINT))

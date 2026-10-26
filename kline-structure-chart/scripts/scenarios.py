@@ -236,29 +236,13 @@ def detect_impulse_wave(
 
 
 def _last_causal_state(bars: list[dict[str, Any]]) -> dict[str, float]:
-    """最后一根已收盘K线的 RSI14（Wilder）、RVOL20、MA20、MA60，口径与原历史事件研究模块一致。"""
+    """最后一根已收盘K线的 RSI14（Wilder）、RVOL20、MA20、MA60，复用 indicators 模块统一计算。"""
+    from indicators import rsi as calc_rsi
+
     closes = [float(b["close"]) for b in bars]
     vols = [float(b.get("volume") or 0.0) for b in bars]
-    n = len(closes)
-    rsi14 = 50.0
-    avg_gain = avg_loss = 0.0
-    for i in range(1, n):
-        chg = closes[i] - closes[i - 1]
-        gain, loss = max(0.0, chg), max(0.0, -chg)
-        if i <= 14:
-            avg_gain += gain / 14.0
-            avg_loss += loss / 14.0
-            if i < 14:
-                continue
-        else:
-            avg_gain = (avg_gain * 13.0 + gain) / 14.0
-            avg_loss = (avg_loss * 13.0 + loss) / 14.0
-        if avg_gain == 0.0 and avg_loss == 0.0:
-            rsi14 = 50.0
-        elif avg_loss == 0.0:
-            rsi14 = 100.0
-        else:
-            rsi14 = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    rsi_vals = calc_rsi(closes, 14)
+    rsi14 = float(rsi_vals[-1]) if (rsi_vals and rsi_vals[-1] is not None) else 50.0
     win_v = vols[-20:]
     mean_v = sum(win_v) / len(win_v) if win_v else 0.0
     return {

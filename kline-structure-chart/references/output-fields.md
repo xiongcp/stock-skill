@@ -53,7 +53,7 @@
 | `meta.engine_version` | 生成本文件的技能版本 | 如 `6.0.0` | 否 | stable | 复现时使用 |
 | `meta.is_st` / `meta.is_ipo_no_limit` | A 股风险警示标识；新股无涨跌停期 | 布尔 | 否 | stable | ST 时提醒涨跌幅与风险警示 |
 | `meta.board_lot` | 港股每手股数 | 股 | 是（非港股为空；港股未取得时为空） | stable | "每手 X 股"；为空的港股提醒以券商为准 |
-| `meta.request` | 本次运行参数：`symbol`、`market`、`asset_type`、`display_bars`（`--days`）、`structure_bars`（结构窗口，固定 120）、`horizon_bars`，以及传入时的 `account_equity`、`max_risk_pct`、`color_scheme`、`as_of`、`adjustment`、`benchmark_symbol` | 对象 | 否（子键按是否传参出现） | stable | 不需要逐项转述 |
+| `meta.request` | 本次运行参数：`symbol`、`market`、`asset_type`、`display_bars`（`--days`）、`structure_bars`（结构窗口，固定 120）、`horizon_bars`，以及传入时的 `max_risk_pct`、`color_scheme`、`as_of`、`adjustment`、`benchmark_symbol` | 对象 | 否（子键按是否传参出现） | stable | 不需要逐项转述 |
 
 ## `quality`
 
@@ -85,7 +85,7 @@
 | `verdict.overextended` | 短期是否乖离过大（追高风险） | 布尔 | 否 | experimental | 为 `true` 时提醒不要追高 |
 | `verdict.rule_detail` | 规则分明细：`components`（`macro_trend_25`、`structure_pattern_25`、`strategy_trigger_25`、`volume_benchmark_25`，各 0~25）、`components_total`（调整前合计）、`regime_adjustment`（`applied`、`scoring_regime`、`components_total`、`adjusted_rule_score`、`reversion_score_adj`、`causal_momentum_ic_15d`、`note_cn`）、`timeframes_aligned`、`scoring_method`、`note` | 对象 | 否（未调整时 `applied = false`） | experimental | 追问时解释；调整时原文转述 `note_cn`，不得把调整后的低分说成"多周期空头" |
 | `verdict.strategy_signals` | 五个规则策略的状态：`strategy_id`、`name_cn`、`family`、`direction`、`state`（如 `LONG_ACTIVE`）、`as_of`、`formula_verified` | 对象数组 | 否 | experimental | "某策略处于多头激活" |
-| `verdict.anti_quant_traps` | 反量化陷阱检查：`warnings_cn`、`gates_active`、`ignition_bull_trap_downgraded`、`momentum_crowding` 等 | 对象 | 是 | experimental | 有 `warnings_cn` 时原文转述 |
+| `verdict.anti_quant_traps` | 反量化陷阱检查：`warnings_cn`、`gates_active`、`ignition_bull_trap_downgraded`、`momentum_crowding`、`vpa_pullback_dryup`、`vpa_upthrust_distribution` 等 | 对象 | 是 | experimental | 有 `warnings_cn` 时原文转述 |
 | `verdict.bull_case` / `bear_case` | 多空两方的规则化证据句 | 文本数组 | 否（可为空数组） | experimental | 可作为证据列举 |
 
 ## `market_context`
@@ -124,7 +124,7 @@
 | `indicators.trend` | 趋势指标：`sma20` / `sma60` / `sma120` / `sma250`、`ema20` / `ema50` / `ema60` / `ema200`、`vwap20`（近 20 日成交量加权均价）、`supertrend_line` / `supertrend_dir`（1 多、-1 空）、`adx14` / `plus_di14` / `minus_di14`（0~100，ADX 高于 23 视为有趋势） | 价格 / 0~100 | 历史不足时部分可空 | stable | "MA20 X" |
 | `indicators.momentum` | 动量指标：`rsi14`（0~100，不单独作为买卖依据）、`rsi14_prev`（前一根K线的 RSI14，普通指标）、`macd_dif` / `macd_dea` / `macd_hist`、`stoch_k` / `stoch_d`、`rvol20`（当日成交量 / 近 20 日均量，倍数） | 数值 | 历史不足时可空 | stable | "量能为 20 日均量的 X 倍" |
 | `indicators.volatility` | 波动率指标：`atr14`、`atr20_pct`（占价格百分比）、`bb_upper` / `bb_mid` / `bb_lower`、`bbw`、`bbw_percentile_120`（近 120 日带宽分位，低表示收敛） | 价格 / % / 0~100 | 否 | stable | — |
-| `indicators.qlib_factors` | 量价因子：实体占比、上下影线比、量价相关、ATR 归一化动量、20/60 日年化波动及其比值等 | 比值 | 是 | experimental | 只在用户追问时解释 |
+| `indicators.qlib_factors` | 量价因子：实体占比、上下影线比、量价相关、ATR 归一化动量、20/60 日年化波动及其比值、`vwap20_deviation_atr`、`vpa_pullback_dryup`、`vpa_upthrust_distribution` 等 | 比值/布尔 | 是 | experimental | 只在用户追问时解释 |
 
 ## `scenarios`
 
@@ -173,8 +173,8 @@
 | `time_barrier_bars` | 时间屏障：持仓满 N 根仍未到 TP1 且偏离不足时离场（规则文字在 `time_stop_rule`） | 根 | 否 | stable | — |
 | `risk_reward_ratio` | 扣除佣金、印花税后的 TP1 净盈亏比 | 比值，低于 1.20 风控否决 | 否 | stable | "扣费后盈亏比 X" |
 | `breakeven_ratchet` | 移动保本规则（与回测同源）：`enabled`、`trigger_r`（0.90）、`confirm_close_r`（0.30）、`lock_r`（0.08）、`trigger_price`、`confirm_close_price`、`breakeven_stop_price`、`rule_cn` | 价格 / R 倍数 / 文本 | 否 | stable | 原文转述 `rule_cn` |
-| `market_microstructure` | 交易制度：`market`、`board`、`settlement`、`can_intraday_roundtrip`、`daily_price_limit_pct`（A 股为小数，如 0.1；港美股为空）、`lot_size` / `min_order_shares` / `lot_step`、`tick_size`、`session_hours_local`、`commission_bps`、`stamp_duty_buy_bps` / `stamp_duty_sell_bps`、`stamp_duty_note`、`is_st`、`is_ipo_no_limit`、`color_scheme`，港股另有 `lot_size_source`，美股另有 `day_trading_rule` | — | 部分可空 | stable | 按市场转述，规则来源见 `references/{cn,hk,us}-market.md` |
-| `position_sizing` | 仓位：`tradable`、`account_equity`、`max_risk_pct`（%）、`risk_budget_amount`、`sizing_basis`（`ENTRY_HIGH_WORST_FILL`：每股风险 = 入场区上沿 − 止损 + 上沿 × 往返费率，区内任意价位成交触及止损都不超预算）、`unit_risk_per_share`、`recommended_shares`、`estimated_notional`（按入场区上沿计）、`max_loss_at_stop`、`gap_risk_note`（跳空/跌停时亏损可能超预算）、`reason` | 股 / 货币 | 未传账户净值、指数、**风控否决或评级不是 `LONG_CONFIRMED` / `WATCH_LONG_SETUP`** 时 `recommended_shares` 等为 `null` 并给出 `reason` | stable | "按入场区上沿到止损的距离计算为 X 股"，同时转述 `gap_risk_note`；为 `null` 时转述 `reason`，不得自行换算股数；不是个性化建议 |
+| `market_microstructure` | 交易制度：`market`、`board`、`settlement`、`can_intraday_roundtrip`、`daily_price_limit_pct`（A 股为小数，如 0.1；港美股为空）、`lot_size` / `min_order_shares` / `lot_step`、`tick_size`、`session_hours_local`、`commission_bps`、`stamp_duty_buy_bps` / `stamp_duty_sell_bps`、`stamp_duty_note`、`min_commission_per_leg`（单笔最低佣金，券商口径假设）与 `min_commission_note`、`regulatory_levies_buy_bps` / `regulatory_levies_sell_bps`（每边交易所/监管规费，bps）与 `regulatory_levies_note`、`is_st`、`is_ipo_no_limit`、`color_scheme`，港股另有 `lot_size_source`，美股另有 `day_trading_rule` | — | 部分可空 | stable | 按市场转述，规则来源见 `references/{cn,hk,us}-market.md` |
+| `position_sizing` | 仓位：`tradable`、`max_risk_pct`（%）、`risk_budget_amount`、`sizing_basis`（`ENTRY_HIGH_WORST_FILL`：每股风险 = 入场区上沿 − 止损 + 上沿 × 往返费率，区内任意价位成交触及止损都不超预算）、`unit_risk_per_share`、`recommended_shares`、`estimated_notional`（按入场区上沿计）、`max_loss_at_stop`、`gap_risk_note`（跳空/跌停时亏损可能超预算）、`reason` | 股 / 货币 | 未传账户净值、指数、**风控否决或评级不是 `LONG_CONFIRMED` / `WATCH_LONG_SETUP`** 时 `recommended_shares` 等为 `null` 并给出 `reason` | stable | "按入场区上沿到止损的距离计算为 X 股"，同时转述 `gap_risk_note`；为 `null` 时转述 `reason`，不得自行换算股数；不是个性化建议 |
 
 另有 `left_side_constraints`（左侧回踩的必要证据、失效位与离场规则）、`right_side_constraints`（右侧突破的必要证据与假突破规则）与 `time_stop_rule`，随 `plan.long` 输出，原文转述。
 

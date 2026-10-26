@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### 新增与增强（v6.1 演进）
+
+- **契约变更（新增实验字段，`x-stability: experimental`）**：
+  - `indicators.qlib_factors` 新增 `vpa_pullback_dryup`（近 10 日高点回落未破前低、近 3 日量能萎缩且最新 K 线具备下影或日内中上半区收盘承接）、`vpa_upthrust_distribution`（近 20 日高位放量上冲回落 UTAD 派发识别）与 `vwap20_deviation_atr`（相对 20 日滚动 VWAP 的 ATR 偏离度）。
+  - `verdict.anti_quant_traps` 同步新增 `vpa_pullback_dryup` 与 `vpa_upthrust_distribution` 布尔标识及对应 `warnings_cn` 提示。
+  - `plan.long.market_microstructure` 新增 `min_commission_per_leg` / `min_commission_note`（单笔最低佣金，券商口径假设）与 `regulatory_levies_buy_bps` / `regulatory_levies_sell_bps` / `regulatory_levies_note`（每边交易所/监管规费，按生效日期取值）。
+- **契约变更（删除字段，经用户确认的 6.x 例外）**：删除 `meta.request.account_equity` 与 `plan.long.position_sizing.account_equity`，产物（含 HTML 看板与 Cloudflare 导出包）不再写出账户净值；`report.md` 的仓位句不再引用账户金额。仓位计算仍使用 `--account-equity` 参数。
+- **微观交易摩擦与小额账户保护**：
+  - `scripts/market_rules.py` 新增 `compute_round_trip_cost_detail`，只读 `market_microstructure` 的费率字段：A 股过户费（2022-04-29 起 0.001% 双向）、港股交易费/证监会/会财局征费与股份交收费（2025-06-30 起每边合计 1.27 bps）、美股 SEC Section 31 卖方费（2026-04-04 起 0.206 bps），以及券商口径的单笔最低佣金假设（A 股 5 元、港股 15 港元、美股 0.5 美元）。来源与生效日期见 `references/{cn,hk,us}-market.md`。
+  - `scripts/risk.py` 在小额账户触发单笔最低佣金时自动下调推荐整手股数，确保含固定最低佣金的最大止损金额绝不突破 `risk_budget_amount`。
+- **除权除息日盘中对齐与腾讯真实日线容灾**：
+  - `scripts/data_gateway.py` 修复除权日盘中运行时因拆分未收盘 K 线导致当日除权因子漏算的断层问题（此时计划价已是除权后可成交口径，仓位计算不再按最后一根已收盘K线的复权因子换回除权前价格），并在主源网络/限流故障时自动回退至腾讯真实未复权日线（`TENCENT_FAILOVER_DAILY`）。
+- **If-Then 交易想法 6 维双向风控审计与到期对账闭环**：
+  - `scripts/risk.py` 新增 `audit_trade_idea`、`append_idea_to_ledger` 及 CLI 入口，支持 LONG/SHORT 双向审计与整数关口/支撑位过近（读 `structure.key_levels.supports`）扫损预警；目标价只与正常波动范围（q10~q90）做对照，不把 q75/q90 当止盈位；门禁未通过时不给股数与建仓指令。
+  - `scripts/evaluation.py` 新增 `reconcile_trade_ideas` 及 CLI 入口，支持 T+1（按 `can_intraday_roundtrip`）、一字涨跌停锁死（涨跌幅档位按 `market_rules`）、跳空穿仓真实滑点与保本棘轮保护（`RATCHET_PROTECTED`）对账；观察期不足 `horizon_bars` 且未出结果的想法记为 `PENDING`，不计入统计。
+- **离线交互看板 2.0、Cloudflare Worker 导出器与 30 组对抗评测集**：
+  - `scripts/render_html.py` 新增三模态副图切换（`成交量 & RVOL` / `RSI(14)` / `MACD Hist`）、侧栏「If-Then 交互式净盈亏比与摩擦试算器」（费率参数与预填价位只读 `result.json`，风控否决时不预填价位）及 `export_cloudflare_worker_bundle`（绑定 `*.taylor-link.xyz` + WebP 压缩）。
+  - `scripts/doctor.py` 与 `install.sh` 支持探测 `~/.hermes/skills` 分类子目录、Profile 路径与脚本集合一致性校验。
+
 ### 修复（合入后代码审查）
 
 - 回复校验（`scripts/lint_response.py`）：

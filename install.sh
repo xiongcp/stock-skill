@@ -118,7 +118,9 @@ detect_agents() {
   local found=""
   command -v claude >/dev/null 2>&1 && found="$found claude"
   command -v codex >/dev/null 2>&1 && found="$found codex"
-  command -v hermes >/dev/null 2>&1 && found="$found hermes"
+  if command -v hermes >/dev/null 2>&1 || [ -d "${HOME}/.hermes/skills" ]; then
+    found="$found hermes"
+  fi
   command -v gemini >/dev/null 2>&1 && found="$found gemini"
   command -v cursor-agent >/dev/null 2>&1 && found="$found cursor"
   command -v opencode >/dev/null 2>&1 && found="$found opencode"

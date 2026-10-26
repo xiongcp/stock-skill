@@ -13,7 +13,7 @@ from price_text import collect_price_whitelist
 SCHEMA_VERSION = "6.0.0"
 
 _REQUEST_KEYS = (
-    "symbol", "market", "asset_type", "display_bars", "structure_bars", "horizon_bars", "account_equity",
+    "symbol", "market", "asset_type", "display_bars", "structure_bars", "horizon_bars",
     "max_risk_pct", "color_scheme", "as_of", "adjustment", "benchmark_symbol",
 )
 # 只用于画路径的字段放进 chart_data，不进入稳定契约

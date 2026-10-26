@@ -123,7 +123,6 @@ def _build_replay_snapshots(
         )
         sview_sub = layer_sub["sview"]
         ind_sub_win = _indicators_on_window(layer_sub["hist"], len(sview_sub))
-        ind_sub_full = compute_all_indicators(sub_bars)
         piv_sub = causal_swing_pivots(sview_sub, layer_sub["zz_thr"])
         cdl_sub = detect_candlestick_patterns(
             sview_sub, ind_sub_win["series"]["atr14"], ind_sub_win["series"]["rvol20"], lookback=12
@@ -158,7 +157,7 @@ def _build_replay_snapshots(
         mtf_sub = compute_multi_timeframe_score(
             sub_bars, ind_sub_win, wedge_sub, all_pats_sub, smc_sub, strat_sub, bench_info_sub
         )
-        fc_sub = compute_conformal_forecast(sub_bars, meta=meta, horizon_bars=horizon_bars)
+        fc_sub = compute_conformal_forecast(sub_bars, meta=meta, horizon_bars=horizon_bars, include_audit=False)
         realized_bars = pit_ext[cut_idx + 1 : min(len(pit_ext), cut_idx + 1 + horizon_bars)]
         realized_closes = [round(float(b["close"]), sub_p_dec) for b in realized_bars]
         realized_days = [b["day"] for b in realized_bars]
@@ -170,11 +169,13 @@ def _build_replay_snapshots(
 
         win_bars = layer_sub["view"]
         win_offset = len(sub_bars) - len(win_bars)
+        sview_offset = len(sview_sub) - len(win_bars)
         ma_sub = layer_sub["ma"]
         nw_sub = causal_nadaraya_watson([float(b["close"]) for b in win_bars], bandwidth=3.0)
         bars_win_export: list[dict[str, Any]] = []
         for i, b in enumerate(win_bars):
             full_i = win_offset + i
+            sv_i = sview_offset + i
             bars_win_export.append(
                 {
                     "idx": i,
@@ -189,11 +190,14 @@ def _build_replay_snapshots(
                     "ma120": round(float(ma_sub[120][full_i]), sub_p_dec) if ma_sub[120][full_i] is not None else None,
                     "ma250": round(float(ma_sub[250][full_i]), sub_p_dec) if ma_sub[250][full_i] is not None else None,
                     "kernel_smooth": round(nw_sub[i], sub_p_dec),
-                    "rsi14": round(float(ind_sub_full["series"]["rsi14"][full_i]), 2)
-                    if ind_sub_full["series"]["rsi14"][full_i] is not None
+                    "rsi14": round(float(ind_sub_win["series"]["rsi14"][sv_i]), 2)
+                    if ind_sub_win["series"]["rsi14"][sv_i] is not None
                     else None,
-                    "rvol20": round(float(ind_sub_full["series"]["rvol20"][full_i]), 2)
-                    if ind_sub_full["series"]["rvol20"][full_i] is not None
+                    "macd_hist": round(float(ind_sub_win["series"]["macd"]["hist"][sv_i]), 3)
+                    if ind_sub_win["series"]["macd"]["hist"][sv_i] is not None
+                    else None,
+                    "rvol20": round(float(ind_sub_win["series"]["rvol20"][sv_i]), 2)
+                    if ind_sub_win["series"]["rvol20"][sv_i] is not None
                     else None,
                 }
             )
@@ -417,6 +421,7 @@ def analyze_bundle(
         horizon_bars=horizon_bars,
         account_equity=request.get("account_equity"),
         max_risk_pct=float(request.get("max_risk_pct") or 0.01),
+        price_scale_is_tradable=bool(bundle.get("provenance", {}).get("intraday_ex_date_aligned")),
     )
 
     # 7. 未来 H 步（默认 15 日）分位数预测 + 序列 split-conformal 校准
@@ -573,6 +578,11 @@ def analyze_bundle(
     if adj_status.get("requested", "raw") != "raw" and adj_status.get("applied") == "raw":
         report["quality"]["notes"].append(
             f"复权未生效（{adj_status.get('error')}），价格为不复权原始价，除权除息缺口可能被误识别为跳空/FVG"
+        )
+    intraday_ex_day = bundle.get("provenance", {}).get("intraday_ex_date_aligned")
+    if intraday_ex_day:
+        report["quality"]["notes"].append(
+            f"今日（{intraday_ex_day}）为除权除息日，历史已收盘K线与计划点位已按当日除权后口径对齐"
         )
     missing_session = bundle.get("provenance", {}).get("missing_closed_session")
     if missing_session:

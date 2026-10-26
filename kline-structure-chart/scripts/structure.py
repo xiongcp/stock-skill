@@ -11,6 +11,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Callable
 
 from scenarios import build_scenarios
+from indicators import sma
 
 REVERSAL = 0.05             # ABC：B 浪至少反向 5%
 B_MIN_RETRACE = 0.382       # ABC：B 浪至少收回 A 浪的 0.382
@@ -50,18 +51,6 @@ def split_live_bar(bars: list[dict], intraday: dict | None) -> tuple[list[dict],
             return completed, None, f"今日日K由腾讯收盘快照（{intraday['stamp']}）补齐，新浪日K尚未入库"
         return completed, intraday, None
     return completed, None, None
-
-
-def sma(values: list[float], n: int) -> list[float | None]:
-    out: list[float | None] = [None] * len(values)
-    running = 0.0
-    for i, value in enumerate(values):
-        running += value
-        if i >= n:
-            running -= values[i - n]
-        if i >= n - 1:
-            out[i] = running / n
-    return out
 
 
 def money(value: float) -> Decimal:

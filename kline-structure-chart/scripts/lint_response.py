@@ -23,6 +23,11 @@ _FORBIDDEN_PROB_PHRASES = (
     re.compile(r"(?:多周期)?(?:规则(?:综合)?(?:评分|分)|过滤分|状态分)[^\n。；]{0,16}(?:胜率|上涨概率|置信度|确定性)"),
     re.compile(r"(?:胜率|上涨概率|置信度|确定性)[^\n。；]{0,12}(?:多周期)?(?:规则(?:综合)?(?:评分|分)|过滤分|状态分)"),
     re.compile(r"(?:主力|真实)?持仓筹码|主力(?:真实)?筹码|获利盘(?:比例|占比)"),
+    re.compile(
+        r"保形预测|共形分位数|Nadaraya-Watson|Qlib\s*正交因子|Meta-Labeling|Triple-Barrier"
+        r"|(?:BULLISH|BEARISH)_(?:ORDER_BLOCK|FVG|BOS)"
+        r"|(?:看涨|多头|上涨)目标(?:价|位)?[^\n。；]{0,10}q(?:75|90)"
+    ),
 )
 
 # 未经校验的概率/确定性措辞：只有回测成交胜率（同一句出现「回测」并带 95% 区间）可以带概率数字
@@ -59,12 +64,14 @@ _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?；;\n]")
 # 价格语境（比 CONTEXT_PRICE_RE 更宽）：交易动作或价位词之后 4 个字符内的数字，以及紧跟交易动作的数字
 _LINT_PRICE_AFTER_RE = re.compile(
     r"(?:目标位?|失效位?|止损位?|止盈位?|触发位?|破位价|支撑位?|压力位?|阻力位?|现价|收盘价?|POC|VAH|VAL|TP1|TP2|入场区?|买入|卖出|"
-    r"建仓|加仓|减仓|挂单|低吸|抄底|回踩|突破|跌破|站上|站稳|站回|收回|上破|下破|看至|看到|上看|下看|关注|观察位?|参考位?|价位)"
+    r"建仓|加仓|减仓|挂单|低吸|抄底|回踩|突破|跌破|站上|站稳|站回|收回|上破|下破|看至|看到|上看|下看|关注|观察位?|参考位?|价位"
+    r"|(?:止损位?|日?均线|乐观上沿|悲观下沿)(?:建议)?(?:设在|位于|可达))"
     r"[^\d\n。；，,、（）()|]{0,4}?(\d+(?:\.\d+)?)"
 )
 _LINT_PRICE_BEFORE_RE = re.compile(
-    r"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:元|港元|美元|港币)?\s*(?:附近|一线|上方|下方|左右|处|之上|之下|上下)?\s*"
-    r"(?:买入|卖出|建仓|加仓|减仓|止损|止盈|挂单|入场|抄底|离场|低吸)"
+    r"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:元|港元|美元|港币)?\s*(?:附近|一线|上方|下方|左右|处|之上|之下|上下)\s*"
+    r"(?:买入|卖出|建仓|加仓|减仓|止损|止盈|挂单|入场|抄底|离场|低吸|观察)"
+    r"|(?<![\d.])(\d+(?:\.\d+)?)\s*(?:元|港元|美元|港币)?\s*(?:买入|卖出|建仓|加仓|减仓|止损|止盈|挂单|入场|抄底|离场|低吸)"
 )
 VETO_HEAD_CHARS = 250
 # 买入/建仓语境下的股数（「每手 100 股」「最小申报 200 股」等制度描述不在此列）
@@ -243,11 +250,12 @@ def lint_agent_response(
     seen_spans: set[tuple[int, int]] = set()
     for pat in (CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_PRICE_BEFORE_RE):
         for m in pat.finditer(cleaned):
-            span = m.span(1)
+            grp_idx = 1 if m.group(1) is not None else 2
+            span = m.span(grp_idx)
             if span in seen_spans:
                 continue
             seen_spans.add(span)
-            cand = float(m.group(1))
+            cand = float(m.group(grp_idx))
             msg = f"回复中出现了不在 result.json 白名单中的价格: {m.group(0)!r} ({cand})"
             if not price_in_whitelist(cand, wl_prices, wl_tol) and msg not in errors:
                 errors.append(msg)

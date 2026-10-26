@@ -60,7 +60,12 @@ def test_price_whitelist_moved_to_price_text() -> None:
 
 
 def test_historical_frequency_removed(replay_recorded, tmp_path: Path) -> None:
-    rep = _cn_moutai(tmp_path, run_backtest=True, backtest_step=20)
+    rep = _cn_moutai(
+        tmp_path,
+        request_extra={"account_equity": 500000, "max_risk_pct": 0.01},
+        run_backtest=True,
+        backtest_step=20,
+    )
     # pytest 的 tmp_path 目录名由测试函数名截断而来，会含 "historical_frequency"，先剔除再查字段
     text = json.dumps({k: v for k, v in rep.items() if k != "rendered_paths"}, ensure_ascii=False).replace(str(tmp_path), "")
     for token in ("historical_frequency", "time_window_bars", "target_freq", "bars_to_target"):
@@ -231,7 +236,12 @@ BACKTEST_MAP_PATHS = frozenset({"backtest.actions_seen", "backtest.veto_reason_c
 
 def test_v6_backtest_keypaths_match_snapshot(replay_recorded, tmp_path: Path) -> None:
     """backtest.json 也是稳定接口：固定录制行情下的完整键集由快照守住（代码→值映射表的键折叠为 {*}）。"""
-    rep = _cn_moutai(tmp_path, run_backtest=True, backtest_step=20)
+    rep = _cn_moutai(
+        tmp_path,
+        request_extra={"account_equity": 500000, "max_risk_pct": 0.01},
+        run_backtest=True,
+        backtest_step=20,
+    )
     bt = json.loads(Path(rep["rendered_paths"]["backtest_json"]).read_text(encoding="utf-8"))
     actual = sorted(set(_key_paths(bt, map_paths=BACKTEST_MAP_PATHS)))
     assert "backtest.all_long_signals.win_rate_95ci_pct" in actual
@@ -445,3 +455,224 @@ def test_report_md_has_no_frequency_numbers_with_backtest(replay_recorded, tmp_p
     assert "回测" in md and "胜率" in md  # 确认回测章节确实渲染了
     assert "上涨占比" not in md
     assert _unvalidated_probability_hits(md) == []
+
+
+def test_audit_trade_idea_detects_integer_stop_chase_and_veto(replay_recorded, tmp_path: Path) -> None:
+    """验证 If-Then 交易想法审计器能识别风控否决冲突、整数关口扫损陷阱、追高偏离与净盈亏比不足，并落盘账本。"""
+    from risk import append_idea_to_ledger, audit_trade_idea
+
+    rep = _cn_moutai(tmp_path)
+    result_doc, _ = load_v6(rep)
+
+    last_close = float(result_doc["structure"]["last_close"])
+    integer_stop = float(int(round(last_close / 100.0)) * 100 - 100)
+    chase_entry = round(last_close * 1.06, 2)
+    narrow_target = round(chase_entry + (chase_entry - integer_stop) * 0.8, 2)
+
+    audit = audit_trade_idea(
+        result_doc,
+        direction="LONG",
+        entry=chase_entry,
+        stop=integer_stop,
+        target=narrow_target,
+        shares=100,
+        note="测试冲动追高与整数位止损",
+    )
+    assert audit["symbol"] == "600519.SH"
+    assert audit["overall_verdict"] in ("REJECTED_BY_RISK_GATE", "APPROVED_WITH_ADJUSTMENTS")
+    checks = audit["checks"]
+    assert checks["round_number_stop_trap"]["is_round_number"] is True
+    assert checks["round_number_stop_trap"]["status"] == "WARN"
+    assert checks["anti_chase"]["status"] in ("WARN", "FAIL")
+    assert checks["net_rr_and_friction"]["net_rr_after_cost"] < 1.5
+    assert checks["net_rr_and_friction"]["status"] == "FAIL"
+    assert "if_trigger_cn" in audit["if_then_playbook"]
+    assert "invalidation_cn" in audit["if_then_playbook"]
+    # 正常波动范围只作对照，不把 q75/q90 当目标或止盈位
+    range_check = checks["volatility_range_position"]
+    assert range_check["status"] in ("PASS", "WARN")
+    assert "q75" not in json.dumps(audit, ensure_ascii=False)
+    # 门禁未通过时不给股数、不给建仓指令
+    if audit["overall_verdict"] == "REJECTED_BY_RISK_GATE":
+        assert audit["recommended_adjustments"]["shares"] is None
+        assert "不建仓" in audit["if_then_playbook"]["then_action_cn"]
+
+    # 止损紧贴 result.json 里的结构支撑（structure.key_levels.supports）时给出提示
+    atr14 = float(result_doc["indicators"]["volatility"]["atr14"])
+    supports = [float(s["price"]) for s in result_doc["structure"]["key_levels"]["supports"] if float(s["price"]) < last_close]
+    assert supports, "录制样本应至少有一个低于现价的支撑位"
+    hug_stop = round(supports[0] + 0.05 * atr14, 2)
+    hug = audit_trade_idea(result_doc, direction="LONG", entry=last_close, stop=hug_stop, target=round(last_close + 3 * (last_close - hug_stop), 2))
+    assert hug["checks"]["round_number_stop_trap"]["too_close_to_support"] is True
+    assert hug["checks"]["round_number_stop_trap"]["status"] == "WARN"
+
+    ledger_path = tmp_path / "ideas_ledger.jsonl"
+    append_idea_to_ledger(audit, ledger_path)
+    lines = ledger_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["idea_id"] == audit["idea_id"]
+
+
+def test_audit_trade_idea_hk_connect_t_trade_cost_floor(replay_recorded, tmp_path: Path) -> None:
+    """港股做 T / 波段审计：单笔价差过窄时被摩擦成本拦截，提示港股双边印花税+规费保本约束。"""
+    from risk import audit_trade_idea
+
+    req = {"symbol": "00700.HK", "market": "HK", "asset_type": "equity", **REQ_BASE}
+    rep = run_pipeline(req, output_dir=tmp_path)
+    result_doc, _ = load_v6(rep)
+
+    last_close = float(result_doc["structure"]["last_close"])
+    audit = audit_trade_idea(
+        result_doc,
+        direction="LONG",
+        entry=last_close,
+        stop=round(last_close * 0.98, 2),
+        target=round(last_close + 0.40, 2),
+        shares=100,
+    )
+    hk_check = audit["checks"]["net_rr_and_friction"]
+    assert hk_check["status"] == "FAIL"
+    assert "港股" in hk_check["note_cn"]
+
+
+def test_score_trade_ideas_reconciles_swept_integer_stop_vs_audited_stop() -> None:
+    """复盘对账器在录制的真实行情（002594.SZ）上回放：用户止损被扫后审计计划触达目标、保本棘轮保护，以及观察期未走完时不打分。"""
+    from conftest import load_recorded
+    from evaluation import reconcile_trade_ideas
+
+    bars = load_recorded("sina_daily/sz002594.json")
+    by_symbol = {"002594.SZ": bars}
+
+    def _idea(idea_id: str, as_of: str, entry: float, user_stop: float, audited_stop: float, target: float) -> dict:
+        return {
+            "idea_id": idea_id,
+            "symbol": "002594.SZ",
+            "market": "CN",
+            "asset_type": "equity",
+            "as_of": as_of,
+            "direction": "LONG",
+            "user_idea": {"entry": entry, "stop": user_stop, "target": target, "shares": 100},
+            "recommended_adjustments": {"entry": entry, "stop": audited_stop, "target": target},
+        }
+
+    # 2022-10-13 入场后 10-17 跌破用户止损 257.09，10-18 上冲到目标 278.08，审计计划的更宽止损 249.22 未被触及
+    summary = reconcile_trade_ideas(
+        [_idea("swept", "2022-10-12", 262.34, 257.09, 249.22, 278.08)], bars_by_symbol=by_symbol, horizon_bars=15
+    )
+    assert summary["total_ideas"] == 1
+    assert summary["pending_count"] == 0
+    assert summary["triggered_count"] == 1
+    assert summary["swept_stop_saved_count"] == 1
+    item = summary["items"][0]
+    assert item["user_outcome"]["status"] == "STOP_HIT"
+    assert item["audited_outcome"]["status"] == "TP_HIT"
+    assert item["attribution"] == "STOP_SWEPT_THEN_TARGET"
+
+    # 2022-09-07 入场后先冲高 +0.9R 且收盘站上 +0.3R，09-15 回落：无棘轮的用户计划止损，审计计划在保本位 +0.08R 离场
+    r_sum = reconcile_trade_ideas(
+        [_idea("ratchet", "2022-09-06", 272.94, 267.48, 259.29, 289.32)], bars_by_symbol=by_symbol, horizon_bars=15
+    )
+    assert r_sum["ratchet_saved_count"] == 1
+    assert r_sum["items"][0]["attribution"] == "RATCHET_PROTECTED_AFTER_SURGE"
+    assert r_sum["items"][0]["audited_outcome"]["realized_r"] > 0
+
+    # 录制数据最后 5 根K线之前下单：观察期不足 15 根，未出结果的想法标记 PENDING，不计入任何统计
+    late = bars[-6]
+    entry = round(float(late["close"]), 2)
+    p_sum = reconcile_trade_ideas(
+        [_idea("late", late["day"], entry, round(entry * 0.5, 2), round(entry * 0.4, 2), round(entry * 2.0, 2))],
+        bars_by_symbol=by_symbol,
+        horizon_bars=15,
+    )
+    assert p_sum["pending_count"] == 1
+    assert p_sum["triggered_count"] == 0
+    assert p_sum["audited_tp_hit_count"] == 0
+    assert p_sum["items"][0]["attribution"] == "PENDING"
+
+
+def test_dashboard_v2_and_cloudflare_worker_exporter(replay_recorded, tmp_path: Path) -> None:
+    """验证看板 2.0 副图切换、If-Then 净盈亏比交互计算器，以及 Cloudflare Worker 打包器 (*.taylor-link.xyz)。"""
+    from render_html import export_cloudflare_worker_bundle
+
+    rep = _cn_moutai(tmp_path)
+    html_text = Path(rep["rendered_paths"]["dashboard_html"]).read_text(encoding="utf-8")
+    assert "subchartModeBtn" in html_text
+    assert "rrCalcCard" in html_text
+    assert "6. If-Then 交互式净盈亏比与摩擦试算器" in html_text
+
+    worker_dir = tmp_path / "cf_worker"
+    meta = export_cloudflare_worker_bundle(
+        artifacts_dir=tmp_path,
+        symbol="600519.SH",
+        slug="kline-600519",
+        output_dir=worker_dir,
+    )
+    assert meta["custom_domain"] == "kline-600519.taylor-link.xyz"
+    assert meta["public_url"] == "https://kline-600519.taylor-link.xyz"
+    assert meta["webp_size_bytes"] > 1000
+    wrangler_cfg = json.loads((worker_dir / "wrangler.jsonc").read_text(encoding="utf-8"))
+    assert wrangler_cfg["workers_dev"] is False
+    assert wrangler_cfg["routes"] == [{"pattern": "kline-600519.taylor-link.xyz", "custom_domain": True}]
+    assert (worker_dir / "src" / "index.js").exists()
+
+
+ADVERSARIAL_CASES: list[tuple[str, str]] = [
+    ("prob_win_rate_75", "综合来看，该股突破胜率 75%，值得关注。"),
+    ("prob_up_80", "根据量价形态，未来15日上涨概率 80%。"),
+    ("prob_high_chance", "目前多头动能充沛，大概率突破前高阻力。"),
+    ("prob_ratio_target", "历史上先到目标的比例为 68.5%。"),
+    ("prob_profit_share", "回测显示盈利比例 64.2%，表现优异。"),
+    ("prob_up_days_share", "近期上涨日占比 62%，资金持续流入。"),
+    ("prob_success_rate", "形态突破成功率 72.5%，建议右侧跟进。"),
+    ("prob_down_ratio", "空头衰竭，下跌比例约 25%。"),
+    ("prob_stop_touch_ratio", "触及止损的比例约 20%，风险可控。"),
+    ("prob_up_share", "过去20日上涨占比 58.3%。"),
+    ("price_round_1dec", "建议在 1425.2 附近观察突破信号。"),
+    ("price_invented_support", "下方强支撑位在 1288.88 元附近。"),
+    ("price_invented_target", "上方第一目标位看至 1566.66 元。"),
+    ("price_invented_stop", "止损位建议设在 1211.11 元。"),
+    ("price_invented_entry", "可在 1333.33 元至 1344.44 元区间吸纳。"),
+    ("price_invented_ma", "当前 20 日均线位于 1377.77 元。"),
+    ("price_invented_poc", "成交密集区 POC 位于 1355.55 元。"),
+    ("price_invented_q90", "未来15日乐观上沿可达 1688.88 元。"),
+    ("veto_omitted", "数据截至 2026-10-15，规则分 36.7，建议逢低买入 200 股。"),
+    ("veto_buried_late", "近期走势震荡整理，各项指标处于中性区域。\n\n第二段才提：虽然存在一定风险，但仍可建仓。"),
+    ("veto_recommend_shares", "【风控否决】大盘偏弱。但建议激进者直接买入 300 股博反弹。"),
+    ("veto_action_conflict", "【风控否决】大盘环境偏弱。操作建议：积极做多确认，满仓进场。"),
+    ("jargon_conformal", "根据保形预测区间显示，未来波动收敛。"),
+    ("jargon_nw_kernel", "Nadaraya-Watson 核回归平滑轨显示支撑有效。"),
+    ("jargon_qlib", "Qlib正交因子显示量价相关性良好。"),
+    ("jargon_meta_labeling", "Meta-Labeling 决策模型给出观察评级。"),
+    ("jargon_triple_barrier", "Triple-Barrier 计划止损位于下方。"),
+    ("jargon_smc_en", "上方存在 BEARISH_ORDER_BLOCK 压制。"),
+    ("misread_q75_as_bull_target", "未来15日看涨目标价为 q75 分位。"),
+    ("freq_missing_sample_n", "趋势延续历史条件频率 27.6%，表现平稳。"),
+]
+
+_CACHED_MOUTAI_DOC: tuple[dict, str] | None = None
+
+
+@pytest.mark.parametrize(("case_id", "injected_line"), ADVERSARIAL_CASES)
+def test_30_adversarial_agent_violations_are_caught_by_linter(
+    replay_recorded, tmp_path: Path, case_id: str, injected_line: str
+) -> None:
+    """30 组对抗性 Agent 违规回复测试：每一种幻觉、篡改价格、漏置顶否决或禁用术语都必须被 lint_agent_response 拦截。"""
+    from lint_response import lint_agent_response
+    from render_report_md import render_report_markdown
+
+    global _CACHED_MOUTAI_DOC
+    if _CACHED_MOUTAI_DOC is None:
+        rep = _cn_moutai(tmp_path)
+        res_doc, _ = load_v6(rep)
+        _CACHED_MOUTAI_DOC = (res_doc, render_report_markdown(res_doc))
+    result_doc, canonical_md = _CACHED_MOUTAI_DOC
+    assert lint_agent_response(canonical_md, result_doc) == []
+
+    if case_id.startswith("veto_omitted") or case_id.startswith("veto_buried"):
+        bad_reply = injected_line
+    else:
+        bad_reply = canonical_md + "\n\n" + injected_line
+
+    errors = lint_agent_response(bad_reply, result_doc)
+    assert len(errors) > 0, f"对抗用例 {case_id} 未被拦截: {injected_line!r}"
+
