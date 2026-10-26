@@ -6,6 +6,7 @@
 
 ### 文档
 
+- `SKILL.md` frontmatter 的 `license` 由 `MIT` 改为 `Apache-2.0`，与仓库根目录的 `LICENSE` 文件一致。
 - 宣传位置不再使用贵州茅台：新增示例 `examples/300308.SZ`（中际旭创，联网取新浪真实日线，`--as-of 2026-10-15`）；看板演示 GIF 拆为 `site/dashboard-demo-zh.gif`（中际旭创）与 `site/dashboard-demo-en.gif`（英伟达），README 中文版与主页中文首屏用前者，README 英文版、主页英文首屏用后者；主页在线示例与 README 第 1 节的 A 股示例改为中际旭创，分享卡片图改用英伟达结构图。茅台示例仍保留在 `examples/`（标准回复与文档契约测试依赖它）。
 - 新增看板演示 GIF `site/dashboard-demo.gif`（录自线上茅台示例看板：时间回放、图层开关与副图切换），README 中英两版页首与项目主页首屏改用它，茅台结构图回到 README 第 1 节。
 - 新增项目主页 <https://xiongcp.github.io/stock-skill/>：`site/` 下的中英双语单页，`.github/workflows/pages.yml` 在 push 到 main 时把它和 `examples/` 的结构图、离线交互看板一起发布到 GitHub Pages；README 顶部加入主页链接。
