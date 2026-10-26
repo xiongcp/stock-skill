@@ -571,6 +571,10 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   }};
   let showRsMode = false;
   let activeReplayIdx = replays.length; // replays.length === live/latest view
+  // 横轴密度固定：最新截面与历史回放显示同样根数（回放快照窗口长度），拖动滑块时K线宽度不变
+  const VIEW_BARS = (replays.length && replays[0].bars_window && replays[0].bars_window.length >= 20)
+    ? replays[0].bars_window.length
+    : bars.length;
 
   const slider = document.getElementById('replaySlider');
   const replayLabel = document.getElementById('replayLabel');
@@ -714,14 +718,14 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
       return;
     }}
 
-    let activeBars = bars;
+    let activeBars = bars.slice(-VIEW_BARS);
     let activeFp = fp;
     let realizedCloses = [];
     if (activeReplayIdx < replays.length) {{
       const snap = replays[activeReplayIdx];
       const cutDay = snap.as_of;
       const filtered = bars.filter(function(b) {{ return b.day <= cutDay; }});
-      activeBars = (snap.bars_window && snap.bars_window.length >= 20) ? snap.bars_window : filtered;
+      activeBars = ((snap.bars_window && snap.bars_window.length >= 20) ? snap.bars_window : filtered).slice(-VIEW_BARS);
       activeFp = {{
         horizon_dates: snap.horizon_dates,
         q10: snap.q10,
@@ -759,14 +763,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
       activeFp.q10.forEach(function(p) {{ prices.push(p); }});
       activeFp.q90.forEach(function(p) {{ prices.push(p); }});
     }}
-    if (layers.scenarios && activeScenarios.length > 0 && activeReplayIdx === replays.length) {{
-      activeScenarios.forEach(function(sc) {{
-        (sc.waypoints_offset || []).forEach(function(wp) {{ prices.push(wp[1]); }});
-      }});
-    }}
-    if (layers.barriers && activeReplayIdx === replays.length) {{
-      prices.push(tb.stop_loss_barrier, tb.take_profit_1, tb.take_profit_2);
-    }}
+    // 止盈止损与情景目标不参与纵轴范围，避免远端目标把K线压扁；超出画面的价位在边缘标注 ▲/▼
     realizedCloses.forEach(function(p) {{ prices.push(p); }});
 
     let pMin = Math.min.apply(null, prices);
@@ -777,6 +774,31 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
 
     function yOfPrice(p) {{
       return mainB - ((p - pMin) / (pMax - pMin)) * (mainB - padT);
+    }}
+    function edgeMark(p) {{
+      return p > pMax ? '▲ ' : (p < pMin ? '▼ ' : '');
+    }}
+    // 标签防重叠：按纵坐标排序后依次错开至少 minGap，并限制在 [top, bottom] 内
+    function spreadLabels(list, minGap, top, bottom) {{
+      list.sort(function(a, b) {{ return a.y - b.y; }});
+      for (let i = 0; i < list.length; i++) {{
+        list[i].y = Math.max(top, list[i].y);
+        if (i > 0) list[i].y = Math.max(list[i].y, list[i - 1].y + minGap);
+      }}
+      for (let i = list.length - 1; i >= 0; i--) {{
+        list[i].y = Math.min(list[i].y, i === list.length - 1 ? bottom : list[i + 1].y - minGap);
+      }}
+    }}
+    // 右侧价位标签统一收集，最后错开绘制
+    const rightLabels = [];
+    function addRightLabel(text, price, color) {{
+      rightLabels.push({{ text: edgeMark(price) + text + ' ' + fmtPrice(price), color: color, y: yOfPrice(price) }});
+    }}
+    function clipToMainPlot() {{
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(padL, padT, plotW, mainB - padT);
+      ctx.clip();
     }}
 
     chartGeom = {{
@@ -834,8 +856,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
       ctx.lineTo(W - padR, yPoc);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = '#facc15';
-      ctx.fillText('POC ' + fmtPrice(vp.poc_price), W - padR + 6, yPoc + 4);
+      addRightLabel('POC', vp.poc_price, '#facc15');
     }}
 
     // Layer: SMC Order Blocks & FVG (配色跟随 meta.color_scheme)
@@ -952,6 +973,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
 
     // Layer: Triple-Barrier Risk Boxes
     if (layers.barriers && activeReplayIdx === replays.length) {{
+      clipToMainPlot();
       const yEntry = yOfPrice((tb.entry_zone[0] + tb.entry_zone[1]) / 2);
       const yTp1 = yOfPrice(tb.take_profit_1);
       const yTp2 = yOfPrice(tb.take_profit_2);
@@ -969,12 +991,10 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
       ctx.strokeStyle = '#f24444';
       ctx.strokeRect(divX, Math.min(yEntry, ySl), futW, Math.abs(ySl - yEntry));
 
-      ctx.fillStyle = '#10bc84';
-      ctx.font = 'bold 11px monospace';
-      ctx.fillText('TP2 ' + fmtPrice(tb.take_profit_2), W - padR + 6, yTp2 + 4);
-      ctx.fillText('TP1 ' + fmtPrice(tb.take_profit_1), W - padR + 6, yTp1 + 4);
-      ctx.fillStyle = '#f24444';
-      ctx.fillText('SL  ' + fmtPrice(tb.stop_loss_barrier), W - padR + 6, ySl + 4);
+      ctx.restore();
+      addRightLabel('TP2', tb.take_profit_2, '#10bc84');
+      addRightLabel('TP1', tb.take_profit_1, '#10bc84');
+      addRightLabel('SL ', tb.stop_loss_barrier, '#f24444');
     }}
 
     // Layer: Conformal Fan (80% outer & 50% inner)
@@ -1009,11 +1029,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
           ctx.lineTo(xOfFut(i), yOfPrice(arr[i]));
         }}
         ctx.stroke();
-        const lastP = arr[arr.length - 1];
-        const endY = yOfPrice(lastP);
-        ctx.fillStyle = col;
-        ctx.font = 'bold 11px monospace';
-        ctx.fillText(labelPrefix + ' ' + fmtPrice(lastP), W - padR + 6, endY + 4);
+        addRightLabel(labelPrefix, arr[arr.length - 1], col);
       }}
       drawFutureCurve(activeFp.optimistic_q75, UP_COL, '上侧q75');
       drawFutureCurve(activeFp.base_median_q50, '#facc15', '基准q50');
@@ -1022,7 +1038,9 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
 
     // Layer: Multi-Scenario Playbook Paths (dashed = pending trigger)
     if (layers.scenarios && activeScenarios.length > 0 && activeReplayIdx === replays.length) {{
-      activeScenarios.forEach(function(sc, idxSc) {{
+      const scenarioLabels = [];
+      clipToMainPlot();
+      activeScenarios.forEach(function(sc) {{
         const pending = sc.status !== 'ACTIVE';
         const alpha = 0.85;
         const lw = 2.2;
@@ -1045,13 +1063,21 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
         if (wps.length > 0) {{
           const lastWp = wps[wps.length - 1];
           const endX = xOfFut(Math.min(hBars - 1, Math.max(0, Math.round(lastWp[0]) - 1)));
-          const endY = yOfPrice(lastWp[1]);
-          ctx.fillStyle = 'rgba(' + rgb + ', ' + Math.min(1, alpha + 0.1).toFixed(2) + ')';
-          ctx.font = 'bold 11px sans-serif';
-          const tag = sc.name + ' ' + fmtPrice(lastWp[1]);
-          ctx.fillText(tag, Math.max(divX + 6, endX - 110), endY - 6 - (idxSc % 2) * 12);
+          scenarioLabels.push({{
+            text: edgeMark(lastWp[1]) + sc.name + ' ' + fmtPrice(lastWp[1]),
+            color: 'rgba(' + rgb + ', ' + Math.min(1, alpha + 0.1).toFixed(2) + ')',
+            x: Math.max(divX + 6, endX - 110),
+            y: yOfPrice(lastWp[1]) - 6
+          }});
         }}
         ctx.restore();
+      }});
+      ctx.restore();
+      spreadLabels(scenarioLabels, 14, padT + 34, mainB - 6);
+      ctx.font = 'bold 11px sans-serif';
+      scenarioLabels.forEach(function(l) {{
+        ctx.fillStyle = l.color;
+        ctx.fillText(l.text, l.x, l.y);
       }});
     }}
 
@@ -1065,10 +1091,15 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
         ctx.lineTo(xOfFut(i), yOfPrice(rc));
       }});
       ctx.stroke();
-      const rLast = realizedCloses[realizedCloses.length - 1];
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText('真实收盘 ' + fmtPrice(rLast), W - padR + 6, yOfPrice(rLast) - 6);
+      addRightLabel('真实收盘', realizedCloses[realizedCloses.length - 1], '#ffffff');
     }}
+
+    spreadLabels(rightLabels, 14, padT + 8, mainB - 4);
+    ctx.font = 'bold 11px monospace';
+    rightLabels.forEach(function(l) {{
+      ctx.fillStyle = l.color;
+      ctx.fillText(l.text, W - padR + 6, l.y + 4);
+    }});
 
     // Subchart subplot (Volume+RVOL20, RSI14, or MACD Hist)
     ctx.fillStyle = '#0e1420';

@@ -24,8 +24,8 @@
       "display_bars": 120,
       "structure_bars": 120,
       "horizon_bars": 15,
-      "account_equity": 100000.0,
       "max_risk_pct": 0.01,
+      "color_scheme": "auto",
       "as_of": "2026-10-15"
     }
   },
@@ -147,6 +147,8 @@
       "right_turn_confirmed": false,
       "momentum_crowding": false,
       "liquidity_sweep_reclaim": false,
+      "vpa_pullback_dryup": false,
+      "vpa_upthrust_distribution": false,
       "close_in_range": 0.7794,
       "upper_wick_ratio": 0.2206,
       "body_to_range": 0.3434,
@@ -1032,7 +1034,10 @@
       "atr_norm_momentum_10d": -0.717,
       "hv20_annualized": 0.2428,
       "hv60_annualized": 0.3648,
-      "hv_ratio_20_60": 0.666
+      "hv_ratio_20_60": 0.666,
+      "vwap20_deviation_atr": -1.8859,
+      "vpa_pullback_dryup": false,
+      "vpa_upthrust_distribution": false
     }
   },
   "scenarios": {
@@ -1201,11 +1206,15 @@
         "session_hours_local": "09:30-16:00 America/New_York",
         "commission_bps": 1.0,
         "stamp_duty_buy_bps": 0.0,
-        "stamp_duty_sell_bps": 0.0
+        "stamp_duty_sell_bps": 0.0,
+        "min_commission_per_leg": 0.5,
+        "min_commission_note": "单笔最低佣金为券商常见收费口径假设（A股 5 元、港股 15 港元、美股 0.5 美元），非交易所规则，以实际券商为准",
+        "regulatory_levies_buy_bps": 0.0,
+        "regulatory_levies_sell_bps": 0.206,
+        "regulatory_levies_note": "美股 SEC Section 31 费仅卖方收取（2026-04-04 起每百万美元 20.60）；FINRA TAF 按股计费，未计入"
       },
       "position_sizing": {
         "tradable": true,
-        "account_equity": 100000.0,
         "max_risk_pct": 1.0,
         "risk_budget_amount": 1000.0,
         "lot_size": 1,
