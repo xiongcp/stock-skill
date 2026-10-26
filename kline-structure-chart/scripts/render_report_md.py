@@ -15,6 +15,7 @@ MARKET_CN = {"CN": "A股", "HK": "港股", "US": "美股"}
 ASSET_CN = {"index": "指数", "equity": "股票", "etf": "ETF"}
 ADJUSTMENT_CN = {"raw": "不复权", "split": "仅拆股复权", "total_return": "前复权（含分红送转）"}
 DIRECTION_CN = {"BULLISH": "看多", "BEARISH": "看空", "NEUTRAL": "中性"}
+BREAK_CN = {"BULLISH_BOS": "多头结构破位", "BEARISH_BOS": "空头结构破位"}
 SETTLEMENT_CN = {
     "T+1": "T+1 交易（当日买入、次日才能卖出）",
     "T+0_TRADING_T+2_CLEARING": "可当日回转交易、T+2 交收",
@@ -80,13 +81,13 @@ def render_report_markdown(
             "",
         ]
         return "\n".join(lines)
-    if quality.get("notes"):
-        lines += ["**数据备注**", ""] + [f"- {n}" for n in quality["notes"]] + [""]
-
     if verdict.get("risk_veto"):
         lines += ["> **风控否决**：以下条件触发否决，本报告不构成任何做多建议。", ">"]
         lines += [f"> - {r}" for r in verdict.get("veto_reasons", [])]
         lines += [""]
+
+    if quality.get("notes"):
+        lines += ["**数据备注**", ""] + [f"- {n}" for n in quality["notes"]] + [""]
 
     # 1. 结论速览
     bench = ctx
@@ -308,7 +309,8 @@ def render_report_markdown(
     breaks = (st.get("smc") or {}).get("structure_breaks") or []
     if breaks:
         last_break = breaks[-1]
-        lines += [f"- 最近一次结构破位：{last_break['type']}（{last_break['day']}，破位价 {price(last_break['broken_level'])}）"]
+        b_label = BREAK_CN.get(str(last_break.get("type")), str(last_break.get("type")))
+        lines += [f"- 最近一次结构破位：{b_label}（{last_break['day']}，破位价 {price(last_break['broken_level'])}）"]
     if not patterns and not breaks and not any(s.get("direction") != "NEUTRAL" for s in verdict.get("strategy_signals") or []):
         lines += ["- 当前窗口未触发蜡烛形态、背离或策略信号。"]
     lines += [""]
@@ -400,6 +402,8 @@ def render_report_markdown(
                 "RR_INSUFFICIENT": "盈亏比不足",
                 "BELOW_LOWER_RAIL": "收盘在下轨下方",
                 "BREAKOUT_LOW_VOLUME": "突破缺量",
+                "DELISTING_RISK": "退市整理期或已终止上市",
+                "STALE_OR_DELISTED": "行情长期断更（疑似退市或长期停牌）",
             }
             lines += ["- 风控否决原因统计：" + "；".join(f"{veto_cn.get(k, k)} {v} 次" for k, v in veto_counts.items()) + "。"]
         if audit_bt:

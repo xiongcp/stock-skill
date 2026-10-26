@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 import math
 import random
 import re
@@ -8,12 +9,15 @@ from typing import Any
 from forecast import _local_sigma, compute_conformal_forecast
 from indicators import atr_series, compute_all_indicators
 from market_rules import (
+    calendar_covers,
+    count_missing_trading_sessions,
     daily_limit_prices,
     get_daily_price_limit_pct,
     get_market_microstructure_rules,
     rescale_bars_as_of,
     round_to_tick,
     round_trip_cost_rate,
+    strip_delisting_marks,
     tick_size_for,
 )
 from patterns import (
@@ -216,12 +220,20 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
             or abs(float(plan_sub["stop_loss_barrier"]) - float(plan_pit["stop_loss_barrier"])) > 1e-6
         ):
             mismatches.append(f"Triple-barrier decision mutated at cut={cut}")
+        if (
+            layer_sub["scenario"] != layer_pit["scenario"]
+            or layer_sub["wave_counts"] != layer_pit["wave_counts"]
+            or layer_sub["projections"].get("scenarios") != layer_pit["projections"].get("scenarios")
+            or layer_sub["projections"].get("impulse_wave") != layer_pit["projections"].get("impulse_wave")
+        ):
+            mismatches.append(f"Structure or scenarios mutated at cut={cut}")
 
     return {
         "checked_cutoffs": checked,
         "modules_audited": [
             "nadaraya_watson",
             "structure_layer_pivots",
+            "structure_and_scenarios",
             "candlestick_patterns",
             "smc_structures",
             "conformal_forecast",
@@ -273,22 +285,23 @@ def label_triple_barrier_event(
             "note": "止损必须低于入场价、止盈必须高于入场价；拒绝用倒挂屏障产出胜场标签",
         }
 
-    limit_pct = get_daily_price_limit_pct(
-        market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=entry_bar["day"], name=name
-    )
-
     def _limit_prices(idx: int) -> tuple[float, float, float, float] | None:
         """第 idx 根K线在其原始价口径下的 (涨停价, 跌停价, 最小价位, 复权价→原始价系数)。
 
         复权序列不在价位网格上，先把前收盘换算到当根K线的原始价口径（除权日即除权参考价），再按交易所规则取整。
         """
-        if limit_pct is None or idx <= 0:
+        if idx <= 0:
             return None
         cur = bars[idx]
+        day_limit_pct = get_daily_price_limit_pct(
+            market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=cur["day"], name=name
+        )
+        if day_limit_pct is None:
+            return None
         cur_close = float(cur["close"])
         scale = float(cur.get("raw_close", cur_close)) / cur_close if cur_close > 0 else 1.0
         ref = float(bars[idx - 1]["close"]) * scale
-        up, down = daily_limit_prices(ref, limit_pct, market, asset_type, cur["day"])
+        up, down = daily_limit_prices(ref, day_limit_pct, market, asset_type, cur["day"])
         tick = float(tick_size_for(ref, market, asset_type, cur["day"]))
         return up, down, tick, scale
 
@@ -321,7 +334,7 @@ def label_triple_barrier_event(
             and highest_since_entry >= entry_open + trigger_r * unit_risk
             and e_cl >= entry_open + confirm_close_r * unit_risk
         ):
-            active_sl = max(active_sl, entry_open + lock_r * unit_risk)
+            active_sl = max(active_sl, round_to_tick(entry_open + lock_r * unit_risk, market, asset_type, entry_bar["day"]))
 
     def _is_limit_down_locked(idx: int) -> bool:
         """一字跌停（最高价 = 最低价 = 跌停价）：全天封死，无法卖出。"""
@@ -369,7 +382,22 @@ def label_triple_barrier_event(
             and highest_since_entry >= entry_open + trigger_r * unit_risk
             and cl >= entry_open + confirm_close_r * unit_risk
         ):
-            active_sl = max(active_sl, entry_open + lock_r * unit_risk)
+            active_sl = max(active_sl, round_to_tick(entry_open + lock_r * unit_risk, market, asset_type, b["day"]))
+
+    exit_rules = get_market_microstructure_rules(
+        market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=bars[exit_idx]["day"], name=name
+    )
+    buy_bps = (
+        float(rules.get("commission_bps") or 0.0)
+        + float(rules.get("stamp_duty_buy_bps") or 0.0)
+        + float(rules.get("regulatory_levies_buy_bps") or 0.0)
+    )
+    sell_bps = (
+        float(exit_rules.get("commission_bps") or 0.0)
+        + float(exit_rules.get("stamp_duty_sell_bps") or 0.0)
+        + float(exit_rules.get("regulatory_levies_sell_bps") or 0.0)
+    )
+    fee_rate = (buy_bps + sell_bps + 2.0) / 10000.0  # 含买卖当日佣金、印花税、规费 + 2bps 滑点
 
     if outcome == "TIME_BARRIER":
         while _is_limit_down_locked(exit_idx) and exit_idx + 1 < n:
@@ -379,16 +407,36 @@ def label_triple_barrier_event(
                 exit_price = min(float(b_un["open"]), active_sl) if float(b_un["low"]) <= active_sl else float(b_un["close"])
                 break
             exit_price = float(bars[exit_idx]["close"])
+        exit_rules = get_market_microstructure_rules(
+            market, asset_type, symbol, is_st=is_st, is_ipo_no_limit=is_ipo_no_limit, day_str=bars[exit_idx]["day"], name=name
+        )
+        sell_bps = (
+            float(exit_rules.get("commission_bps") or 0.0)
+            + float(exit_rules.get("stamp_duty_sell_bps") or 0.0)
+            + float(exit_rules.get("regulatory_levies_sell_bps") or 0.0)
+        )
+        fee_rate = (buy_bps + sell_bps + 2.0) / 10000.0
         if _is_limit_down_locked(exit_idx):
+            gross_lock = (exit_price / entry_open) - 1.0
+            net_lock = gross_lock - fee_rate
             return {
                 "tradable": False,
                 "reason": "LOCKED_LIMIT_DOWN_UNTIL_END",
+                "outcome": "LOCKED_LIMIT_DOWN_UNTIL_END",
+                "barrier_label": -1,
+                "entry_idx": entry_idx,
                 "entry_day": entry_bar["day"],
+                "entry_price": round(entry_open, 4),
+                "exit_idx": exit_idx,
+                "exit_day": bars[exit_idx]["day"],
+                "exit_price": round(exit_price, 4),
+                "holding_bars": exit_idx - entry_idx + 1,
                 "locked_until_day": bars[exit_idx]["day"],
+                "gross_return": round(gross_lock, 5),
+                "net_return": round(net_lock, 5),
             }
         label = 1 if exit_price > entry_open else -1
 
-    fee_rate = round_trip_cost_rate(rules) + 2.0 / 10000.0  # 另计 2bps 滑点
     gross_ret = (exit_price / entry_open) - 1.0
     net_ret = gross_ret - fee_rate
 
@@ -586,6 +634,19 @@ def _causal_is_st_at_cutoff(
     return True
 
 
+def _suspended_after(cut_day: str, next_day: str, bench_days: list[str], market: str) -> bool:
+    """cut_day 之后标的是否停牌：标的下一根K线晚于基准的下一个交易日即为停牌。
+
+    基准日序列天然包含节假日与台风等临时休市；没有基准时，只在休市表覆盖范围内按交易日历判断，范围外不判停牌。
+    """
+    k = bisect.bisect_right(bench_days, cut_day)
+    if k < len(bench_days):
+        return next_day > bench_days[k]
+    if calendar_covers(cut_day, market) and calendar_covers(next_day, market):
+        return count_missing_trading_sessions(cut_day, next_day, market) > 1
+    return False
+
+
 def run_plan_backtest(
     bundle: dict[str, Any],
     request: dict[str, Any],
@@ -603,8 +664,15 @@ def run_plan_backtest(
     bars = bundle["target"]["bars"]
     inst = bundle["target"]["instrument"]
     market, asset_type, symbol = inst["market"], inst["asset_type"], inst["symbol"]
-    inst_name = str(inst.get("name") or request.get("name") or "")
-    is_st = bool(inst.get("is_st") or request.get("is_st", False))
+    # 退市整理期简称（含厂商快照简称）只反映当下状态，回放历史截面时去掉，避免把未来的退市否决回填到过去
+    inst_name = strip_delisting_marks(str(inst.get("name") or request.get("name") or ""))
+    base_provenance = dict(bundle.get("provenance") or {})
+    if (base_provenance.get("instrument_meta") or {}).get("vendor_name"):
+        base_provenance["instrument_meta"] = {
+            **base_provenance["instrument_meta"],
+            "vendor_name": strip_delisting_marks(str(base_provenance["instrument_meta"]["vendor_name"])),
+        }
+    is_st =bool(inst.get("is_st") or request.get("is_st", False))
     is_ipo_no_limit = bool(request.get("is_ipo_no_limit") or (bundle.get("extra_context") or {}).get("is_ipo_no_limit", False))
     n = len(bars)
     if n < 250 + horizon_bars + 2:
@@ -613,6 +681,7 @@ def run_plan_backtest(
     start = max(250, n - horizon_bars - 2 - decision_window)
     end = n - horizon_bars - 1
     bench = bundle.get("benchmark")
+    bench_days = [str(b["day"]) for b in bench["bars"]] if bench else []
     sub_request_base = {**request, "display_bars": 120, "account_equity": None}
     trades: dict[str, list[dict[str, Any]]] = {"LONG_CONFIRMED": [], "WATCH_LONG_SETUP": []}
     all_trades: list[dict[str, Any]] = []
@@ -632,7 +701,7 @@ def run_plan_backtest(
         name_at_t = inst_name if st_at_t else re.sub(r"^\*?S?\*?ST", "", inst_name, flags=re.IGNORECASE)
         inst_at_t = {**inst, "is_st": st_at_t, "name": name_at_t}
         sub_request = {**sub_request_base, "is_st": st_at_t, "name": name_at_t}
-        pit_bars = rescale_bars_as_of(bars[: min(n, t + horizon_bars + 10)], t)
+        pit_bars = rescale_bars_as_of(bars, t)
         sub_bundle = {
             "schema_version": "6.0.0",
             "market": market,
@@ -640,7 +709,7 @@ def run_plan_backtest(
             "benchmark": {**bench, "bars": [b for b in bench["bars"] if b["day"] <= cut_day]} if bench else None,
             # 历史 VIX 不可得，回放中不使用当前 VIX，避免前视
             "extra_context": {"vix": None, "earnings_date": None, "is_st": st_at_t, "is_ipo_no_limit": ipo_at_t},
-            "provenance": {**bundle.get("provenance", {}), "missing_closed_session": None, "stale_sessions": 0},
+            "provenance": {**base_provenance, "missing_closed_session": None, "stale_sessions": 0},
         }
         rep = analyze_bundle(sub_bundle, sub_request, include_replay=False, include_forecast=False)
         decisions += 1
@@ -662,8 +731,9 @@ def run_plan_backtest(
             entry_low, entry_high = plan["entry_zone"]
             stop_loss = float(plan["stop_loss_barrier"])
             ratchet = plan.get("breakeven_ratchet") or {}
+            suspended_next = _suspended_after(cut_day, str(pit_bars[t + 1]["day"]), bench_days, market)
             entry_open = float(pit_bars[t + 1]["open"])
-            if entry_low <= entry_open <= entry_high and entry_open > stop_loss:
+            if not suspended_next and entry_low <= entry_open <= entry_high and entry_open > stop_loss:
                 res = label_triple_barrier_event(
                     pit_bars,
                     entry_idx=t + 1,
@@ -681,9 +751,11 @@ def run_plan_backtest(
                     lock_r=float(ratchet.get("lock_r", 0.08)),
                     name=name_at_t,
                 )
-                if res.get("tradable"):
+                if res.get("tradable") or res.get("reason") == "LOCKED_LIMIT_DOWN_UNTIL_END":
+                    clean_res = {k: v for k, v in res.items() if k not in ("reason", "locked_until_day")}
+                    clean_res["tradable"] = True
                     trade_rec = {
-                        **res,
+                        **clean_res,
                         "signal_day": cut_day,
                         "action": action,
                         "setup_type": rep["meta_labeling_decision"]["setup_type"],
@@ -698,6 +770,8 @@ def run_plan_backtest(
                     if can_open_all:
                         all_trades.append(trade_rec)
                         busy_until_all = int(res["exit_idx"])
+                elif can_open_all:
+                    no_fill += 1
             elif can_open_all:
                 no_fill += 1
         t += step

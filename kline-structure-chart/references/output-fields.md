@@ -78,7 +78,7 @@
 | `verdict.setup_type` / `setup_label_cn` | 计划类型 | `RIGHT_SIDE_BREAKOUT` 右侧顺势突破确认、`LEFT_SIDE_PULLBACK` 左侧支撑回踩观察、`WAIT_CONFIRMATION` 等待确认（标签有"区间观察/等待右侧收盘突破""冲高回落/假阳线待右侧二次确认"两种） | 否 | stable | 原文转述中文标签 |
 | `verdict.risk_veto` | 风控否决开关 | 布尔 | 否 | stable | `true` 时置顶，不给做多建议 |
 | `verdict.veto_reasons` | 否决原因文本（大盘状态分 < 35、扣费后净盈亏比 < 1.20、收盘在结构下轨下方、突破缺量、计划几何不合法等） | 文本数组 | 否（可为空数组） | stable | 否决时置顶逐条转述 |
-| `verdict.veto_codes` | 与原因一一对应的稳定编码：`BENCHMARK_MISSING`、`BENCHMARK_WEAK`、`RR_INSUFFICIENT`、`BELOW_LOWER_RAIL`、`BREAKOUT_LOW_VOLUME`、`PLAN_GEOMETRY_INVALID`（止损不低于入场区下沿或 TP1 不高于入场区上沿） | 枚举数组（可能新增取值） | 否（可为空数组） | stable | 编码不需要对外说 |
+| `verdict.veto_codes` | 与原因一一对应的稳定编码：`BENCHMARK_MISSING`、`BENCHMARK_WEAK`、`RR_INSUFFICIENT`、`BELOW_LOWER_RAIL`、`BREAKOUT_LOW_VOLUME`、`PLAN_GEOMETRY_INVALID`（止损不低于入场区下沿或 TP1 不高于入场区上沿）、`DELISTING_RISK`（简称显示退市整理期或已终止上市）、`STALE_OR_DELISTED`（最新日线落后基准超过 5 个交易日） | 枚举数组（可能新增取值） | 否（可为空数组） | stable | 编码不需要对外说 |
 | `verdict.rule_score` | 四组各 25 分的确定性规则加权分；均值回归体制（`rule_detail.regime_adjustment.applied = true`）下为反转调整后的分数，不再等于四组之和 | 0~100 | 否 | stable | "规则分 X / 100，不是胜率或概率"；体制调整时同时转述 `regime_adjustment.note_cn` |
 | `verdict.rating` / `rating_cn` | `BULLISH_RESONANCE` 多周期多头共振 / `BEARISH_PRESSURE` 多周期空头承压 / `NEUTRAL_WATCH` 多空分歧；均值回归体制下 `rating_cn` 改为"均值回归体制评分偏多/偏空/中性" | 枚举 | 否 | stable | 用中文标签 |
 | `verdict.headline_cn` | 一句话结论 | 文本 | 否 | stable | 原文引用 |
@@ -239,6 +239,6 @@
 | `backtest.rule_score_buckets[]` | 按规则分 [0,38)、[38,52)、[52,65)、[65,100] 分层的决策日数、未来 H 日平均/中位收益、上涨占比 | 个 / % | 无样本的层为空 | 不对外转述（只供维护者诊断）；上涨占比是频率数字 |
 | `backtest.action_forward_returns.*` | 各动作标签之后的未来 H 日平均/中位收益与上涨占比 | 个 / % | 无样本时为空 | 不对外转述（只供维护者诊断）；上涨占比是频率数字，不要说成上涨概率 |
 | `backtest.veto_reason_counts` | 回放期间各否决编码出现次数 | 次 | 否（可为空对象） | — |
-| `backtest.sample_trades[]` | 成交样例：入场/出场日与价、`outcome`（`TP_BARRIER` / `SL_BARRIER` / `TIME_BARRIER` 等）、`net_return` | — | 否 | — |
+| `backtest.sample_trades[]` | 成交样例：入场/出场日与价、`outcome`（`TP_BARRIER` / `SL_BARRIER` / `TIME_BARRIER` / `LOCKED_LIMIT_DOWN_UNTIL_END`（一字跌停锁到数据末尾，按锁定价计亏损）等）、`net_return` | — | 否 | — |
 | `backtest.sample_size_warning` | 成交少于 30 笔时的提示 | 文本 | 是 | 有则原文转述 |
 | `backtest.conformal_forecast_oos.*` | 正常波动范围的样本外覆盖：无重叠截面 `evaluated_cutoffs` 与覆盖率，以及与主报告一致的滚动全截面覆盖率 | 比例 | 否 | 与 `volatility_range.calibration_audit` 一起说明 |

@@ -152,17 +152,21 @@ def validate_bars(bars: list[dict[str, Any]], label: str = "bars") -> None:
         day = str(bar.get("day", ""))
         if not day:
             raise ValueError(f"{label}[{idx}]: missing day")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day[:10]):
+            raise ValueError(f"{label}[{idx}]: invalid date format {day!r}")
         if prev_day and day <= prev_day:
             raise ValueError(f"{label}[{idx}]: non-increasing timestamp {day} after {prev_day}")
         prev_day = day
         o, h, l, c = float(bar["open"]), float(bar["high"]), float(bar["low"]), float(bar["close"])
+        if not all(math.isfinite(x) for x in (o, h, l, c)):
+            raise ValueError(f"{label}[{idx}]: non-finite OHLC price on {day}")
         if min(o, h, l, c) <= 0:
             raise ValueError(f"{label}[{idx}]: non-positive OHLC price on {day}")
         if h < max(o, c, l) - 1e-6 or l > min(o, c, h) + 1e-6:
             raise ValueError(f"{label}[{idx}]: invalid OHLC envelope on {day}: O={o}, H={h}, L={l}, C={c}")
         vol = bar.get("volume")
-        if vol is not None and float(vol) < 0:
-            raise ValueError(f"{label}[{idx}]: negative volume on {day}")
+        if vol is not None and (not math.isfinite(float(vol)) or float(vol) < 0):
+            raise ValueError(f"{label}[{idx}]: negative or non-finite volume on {day}")
 
 
 REPORT_SCHEMA_PATH = Path(__file__).resolve().parent.parent / "assets" / "analysis.schema.json"

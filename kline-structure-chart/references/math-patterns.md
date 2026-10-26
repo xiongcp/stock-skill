@@ -90,7 +90,12 @@
   - `rule_score_ic.spearman`：规则分与未来收益的 Spearman 秩相关，并列取平均秩。
   - 有效独立样本 ≈ 决策数 × 步长 / $H$。只有有效独立样本 ≥ 20 且 $|\text{IC}| \ge 0.05$ 时，`informative = true`；否则报告注明"规则分只作描述"。
   - `rule_score_buckets`（按 [0,38)、[38,52)、[52,65)、[65,100] 分层）与 `action_forward_returns`（按动作分组）：给出平均、中位数前瞻收益和上涨占比。
-  - `veto_reason_counts`：按稳定编码统计风控否决原因：`BENCHMARK_MISSING`、`BENCHMARK_WEAK`、`RR_INSUFFICIENT`、`BELOW_LOWER_RAIL`、`BREAKOUT_LOW_VOLUME`、`PLAN_GEOMETRY_INVALID`。
+  - `veto_reason_counts`：按稳定编码统计风控否决原因：`BENCHMARK_MISSING`、`BENCHMARK_WEAK`、`RR_INSUFFICIENT`、`BELOW_LOWER_RAIL`、`BREAKOUT_LOW_VOLUME`、`PLAN_GEOMETRY_INVALID`、`DELISTING_RISK`（退市整理期简称）、`STALE_OR_DELISTED`（落后基准超过 5 个交易日，仅线上最新截面判定）。
+- **撮合与成本口径**（`run_plan_backtest` / `label_triple_barrier_event`）：
+  - 决策日 $t$ 收盘出信号，$t+1$ 开盘落在入场区内才成交；标的 $t+1$ 那根K线晚于基准在 $t$ 之后的第一个交易日（即中间停牌）时不成交。没有基准时只在休市表覆盖范围内按交易日历判断。
+  - 涨跌停幅度按每根K线当日的规则取值（跨越 2026-07-06 主板 ST 新规时自动切换）；一字跌停日不能卖出，时间屏障顺延到开板日。一直锁到数据末尾的持仓按最后一个锁定日收盘价计亏损，`outcome = LOCKED_LIMIT_DOWN_UNTIL_END`。
+  - 费率：买入腿按入场日规则（佣金 + 买方印花税 + 买方规费），卖出腿按出场日规则（佣金 + 卖方印花税 + 卖方规费），另加 2 bps 滑点；回测按比例费率计，不计单笔最低佣金。
+  - 历史状态不回填：当前为 ST 的标的，在 2026-07-06 之前的截面若近 60 根无除权K线内出现过单日振幅超过 5.5%，视为当时未戴帽（启发式，近期刚戴帽的标的可能被误判为非 ST）；退市整理期简称（「退市」「XX退」「DELISTED」）在历史截面一律去掉。
 
 ## 7. 持仓防守与破位做空计划（`scripts/risk.py`，第三轮复查 O3 起）
 

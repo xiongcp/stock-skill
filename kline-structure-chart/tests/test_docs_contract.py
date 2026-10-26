@@ -359,6 +359,13 @@ def test_example_reply_passes_lint_and_counterexample_is_rejected() -> None:
     assert lint_agent_response(good_body, report) == []
     counter_quote = next(line[1:].strip() for line in counter.splitlines() if line.startswith(">"))
     assert lint_agent_response(counter_quote, report)
+    for sym in ("600519.SH", "00700.HK", "NVDA.US"):
+        sym_dir = REPO_DIR / "examples" / sym
+        sym_res = json.loads((sym_dir / f"{sym}_result.json").read_text(encoding="utf-8"))
+        sym_bt_path = sym_dir / f"{sym}_backtest.json"
+        sym_bt = json.loads(sym_bt_path.read_text(encoding="utf-8")) if sym_bt_path.exists() else None
+        sym_md = (sym_dir / f"{sym}_report.md").read_text(encoding="utf-8")
+        assert lint_agent_response(sym_md, sym_res, sym_bt) == [], f"examples/{sym}/{sym}_report.md failed lint"
 
 
 def test_requirements_txt_matches_locked_runtime_dependencies() -> None:

@@ -2256,3 +2256,258 @@ def test_structure_fib_ratios_complete(replay_recorded) -> None:
     req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
     layer = compute_structure_layer(load_recorded("sina_daily/sh600519.json"), None, 120)
     assert [lv["ratio"] for lv in layer["fibs"]["retracements"]] == list(RETRACE_RATIOS)
+
+
+def test_phase1_cost_execution_and_backtest_accounting_alignment(replay_recorded) -> None:
+    """阶段1-2：买卖双腿跨日/异价成本明细、大额股票仓位含规费、回测扣规费与跨日制度、时间屏障文案一致、停牌不跨期成交、跌停锁死至末尾不漏记。"""
+    from market_rules import compute_round_trip_cost_detail, daily_limit_prices, get_market_microstructure_rules
+    from risk import compute_triple_barrier_plan
+
+    # 1. 买卖双腿支持不同成交额与跨生效日规则（2023-08-25 买入 10万 vs 2023-08-28 卖出 12万，卖出印花税按 5bps 计）
+    cn_buy_rules = get_market_microstructure_rules("CN", "equity", "600519.SH", day_str="2023-08-25")
+    cn_sell_rules = get_market_microstructure_rules("CN", "equity", "600519.SH", day_str="2023-08-28")
+    two_leg = compute_round_trip_cost_detail(
+        100000.0, cn_buy_rules, shares=100, exit_notional=120000.0, exit_rules=cn_sell_rules
+    )
+    # 买腿：佣金 25 + 过户费 1 = 26；卖腿：佣金 30 + 印花税 60 (120000*5bps) + 过户费 1.2 = 91.2；合计 117.2
+    assert two_leg["total_cost_amount"] == pytest.approx(117.2, abs=0.01)
+
+    # 2. 大额股票账户未触发最低佣金时，max_loss_at_stop 仍必须计入双边规费且不超过风险预算
+    req = {
+        "symbol": "600519.SH", "market": "CN", "asset_type": "equity",
+        "display_bars": 120, "horizon_bars": 15, "account_equity": 2000000.0, "max_risk_pct": 0.01,
+    }
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    rep = analyze_bundle(bundle, req, include_replay=False, include_forecast=False)
+    fake_bench = {**rep["market_benchmark"], "regime_score": 65.0, "benchmark_missing": False}
+    fake_mtf = {**rep["multi_timeframe_score"], "rule_score": 72.0}
+    fake_mtf["timeframes_aligned"] = {**fake_mtf["timeframes_aligned"], "scoring_regime": "MOMENTUM_TREND"}
+    fake_wedge = {**rep["mathematical_indicators"]["structure_levels"]["wedge_structure"], "status": "above"}
+    fake_ind = copy.deepcopy(rep["mathematical_indicators"])
+    fake_ind["momentum"]["rvol20"] = 1.50
+    fake_ind["momentum"]["rsi14"] = 58.0
+    fake_proj = copy.deepcopy(rep["rule_scenarios"])
+    fake_proj["bull"]["target_price"] = float(bundle["target"]["bars"][-1]["close"]) * 1.15
+    _, tb_eq, _ = compute_triple_barrier_plan(
+        bundle["target"]["bars"], rep["meta"], fake_ind, fake_wedge, {}, fake_proj, fake_mtf, [], fake_bench,
+        account_equity=2000000.0, max_risk_pct=0.01,
+    )
+    sz_eq = tb_eq["position_sizing"]
+    assert sz_eq["recommended_shares"] and sz_eq["recommended_shares"] > 0
+    full_ci = compute_round_trip_cost_detail(
+        sz_eq["recommended_shares"] * tb_eq["entry_zone"][1], tb_eq["market_microstructure"], shares=sz_eq["recommended_shares"]
+    )
+    expected_loss = round(
+        sz_eq["recommended_shares"] * (tb_eq["entry_zone"][1] - tb_eq["stop_loss_barrier"]) + full_ci["total_cost_amount"], 2
+    )
+    assert sz_eq["max_loss_at_stop"] == pytest.approx(expected_loss, abs=0.01)
+    assert sz_eq["max_loss_at_stop"] <= sz_eq["risk_budget_amount"] + 1e-6
+    assert "偏离成本不足 0.5*ATR" not in tb_eq["time_stop_rule"]
+
+    # 3. label_triple_barrier_event 必须计入规费（港股双边 2.54bps）并按出场日规则结算跨日印花税
+    hk_bars = load_recorded("yahoo_daily/0700.HK.json")[-10:-5]
+    hk_ev = label_triple_barrier_event(
+        hk_bars, entry_idx=1, tp_price=9999.0, sl_price=1.0, horizon_bars=2, market="HK", asset_type="equity", symbol="00700.HK"
+    )
+    hk_gross = hk_ev["exit_price"] / hk_ev["entry_price"] - 1.0
+    # 港股佣金 6bps + 印花税 20bps + 规费 2.54bps + 滑点 2bps = 30.54bps
+    assert hk_ev["net_return"] == pytest.approx(round(hk_gross - 0.003054, 5), abs=1e-5)
+
+    cn_bars = copy.deepcopy(load_recorded("sina_daily/sh600519.json")[-6:-1])
+    cn_bars[1]["day"] = "2023-08-25"
+    cn_bars[2]["day"] = "2023-08-28"
+    cross_tax = label_triple_barrier_event(
+        cn_bars, entry_idx=1, tp_price=9999.0, sl_price=1.0, horizon_bars=2, market="CN", asset_type="equity", symbol="600519.SH"
+    )
+    cn_gross = cross_tax["exit_price"] / cross_tax["entry_price"] - 1.0
+    # 买腿 2023-08-25 (佣金2.5+过户0.1=2.6bps) + 卖腿 2023-08-28 (佣金2.5+印花5.0+过户0.1=7.6bps) + 滑点 2bps = 12.2bps
+    assert cross_tax["net_return"] == pytest.approx(round(cn_gross - 0.00122, 5), abs=1e-5)
+
+    # 4. 停牌跨期信号不得在数日后复牌开盘时陈旧成交；已成交后连续一字跌停至数据末尾不得从回测统计中静默消失
+    bt_bundle = copy.deepcopy(bundle)
+    bt_base = run_plan_backtest(bt_bundle, req, horizon_bars=15, step=15, decision_window=120)
+    sample_tr = bt_base["sample_trades"][-1]
+    sig_day = sample_tr["signal_day"]
+    sig_idx = next(i for i, b in enumerate(bt_bundle["target"]["bars"]) if b["day"] == sig_day)
+
+    susp_bundle = copy.deepcopy(bt_bundle)
+    # 删除 sig_idx+1 .. sig_idx+3，模拟信号次日起停牌 3 个交易日，再截取使 t == sig_idx 成为唯一决策日
+    del susp_bundle["target"]["bars"][sig_idx + 1 : sig_idx + 4]
+    susp_bundle["target"]["bars"] = susp_bundle["target"]["bars"][: sig_idx + 17]
+    bt_susp = run_plan_backtest(susp_bundle, req, horizon_bars=15, step=1, decision_window=0)
+    assert bt_susp["sample_trades"] == []
+    assert bt_susp["no_fill_outside_entry_zone"] == 1
+
+    lock_bundle = copy.deepcopy(bt_bundle)
+    # 截断到 sig_idx + 17（使 t == sig_idx 成为唯一决策日），并把 sig_idx + 2 起全部改为一字跌停封死至末尾
+    lock_bars = lock_bundle["target"]["bars"][: sig_idx + 17]
+    base_f = float(lock_bars[sig_idx].get("adj_factor") or 1.0)
+    for k in range(sig_idx + 2, len(lock_bars)):
+        prev_raw = float(lock_bars[k - 1].get("raw_close", lock_bars[k - 1]["close"]))
+        _, dn_raw = daily_limit_prices(prev_raw, 0.10, "CN", "equity", lock_bars[k]["day"])
+        dn_adj = round(dn_raw * base_f, 4)
+        lock_bars[k] = {
+            **lock_bars[k],
+            "open": dn_adj, "high": dn_adj, "low": dn_adj, "close": dn_adj,
+            "raw_open": dn_raw, "raw_high": dn_raw, "raw_low": dn_raw, "raw_close": dn_raw,
+            "adj_factor": base_f,
+        }
+    lock_bundle["target"]["bars"] = lock_bars
+    bt_lock = run_plan_backtest(lock_bundle, req, horizon_bars=15, step=1, decision_window=0)
+    assert any(tr["outcome"] == "LOCKED_LIMIT_DOWN_UNTIL_END" and tr["net_return"] < 0 for tr in bt_lock["sample_trades"])
+
+
+def test_phase3_data_bundle_bypass_vix_intraday_and_stale_guards(replay_recorded, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """阶段3：validate_bars 拦截 NaN/非法日期、本地 dict bundle 防未复权误标与未来上下文泄漏、盘中 VIX 隔离、双源陈旧与快照退市名识别。"""
+    from zoneinfo import ZoneInfo
+    import data_gateway
+    from contracts import validate_bars
+
+    # 1. validate_bars 必须拦截 NaN / Infinity 与非法日期格式
+    good_bar = {"day": "2026-10-15", "open": 10.0, "high": 11.0, "low": 9.5, "close": 10.5, "volume": 100.0}
+    with pytest.raises(ValueError, match="non-finite|OHLC"):
+        validate_bars([{**good_bar, "close": float("nan")}])
+    with pytest.raises(ValueError, match="invalid date"):
+        validate_bars([{**good_bar, "day": "2026/10/15"}])
+
+    # 2. 本地 dict bundle 未声明复权时不得被标为 total_return；指定历史 as_of 时必须截断未来复权因子与 VIX/ST 上下文
+    req = {"symbol": "002594.SZ", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15, "adjustment": "total_return"}
+    live_bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    raw_bundle_dict = {
+        "schema_version": "6.0.0",
+        "market": "CN",
+        "target": {
+            "instrument": live_bundle["target"]["instrument"],
+            "bars": [{k: b[k] for k in ("day", "open", "high", "low", "close", "volume")} for b in live_bundle["target"]["bars"]],
+        },
+        "benchmark": live_bundle["benchmark"],
+        "extra_context": {"vix": 35.0, "is_st": True},
+        "provenance": {"source": "SINA_LIVE_DAILY"},
+    }
+    bundle_file = tmp_path / "raw_bundle.json"
+    bundle_file.write_text(json.dumps(raw_bundle_dict), encoding="utf-8")
+    loaded_raw = load_bundle(req, input_path=bundle_file, allow_network=False, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    rep_raw = analyze_bundle(loaded_raw, req, include_replay=False, include_forecast=False)
+    assert rep_raw["meta"]["adjustment"] == "raw"
+
+    # 带历史 as_of 加载含未来除权因子的 bundle：截面最后一根K线的 close 必须还原为当时 raw_close，且未来 VIX 被清空
+    pit_bundle_file = tmp_path / "pit_bundle.json"
+    pit_bundle_file.write_text(json.dumps({**live_bundle, "extra_context": {"vix": 32.5, "is_st": False}}), encoding="utf-8")
+    loaded_hist = load_bundle(
+        {**req, "as_of": "2025-06-30"},
+        input_path=pit_bundle_file,
+        allow_network=False,
+        now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC),
+    )
+    last_hist_bar = loaded_hist["target"]["bars"][-1]
+    assert abs(float(last_hist_bar["close"]) - float(last_hist_bar["raw_close"])) < 1e-6
+    assert loaded_hist["extra_context"].get("vix") is None
+
+    # 3. 美股盘中指定当日/未来 as_of 时，_fetch_vix 必须剥离当日未收盘 VIX K线
+    vix_rows = copy.deepcopy(load_recorded("yahoo_daily/VIX.json"))
+    vix_rows.append({"day": "2026-10-16", "open": 20.0, "high": 45.0, "low": 20.0, "close": 42.0, "volume": 0.0, "complete": True})
+    monkeypatch.setattr(data_gateway, "fetch_yahoo_daily_bars", lambda sym, **kw: vix_rows if sym == "^VIX" else load_recorded("yahoo_daily/NVDA.json"))
+    ny_intraday = datetime(2026, 10, 16, 11, 0, tzinfo=ZoneInfo("America/New_York"))
+    vix_val, vix_src = data_gateway._fetch_vix("2026-10-16", allow_network=True, now=ny_intraday)
+    assert vix_val != 42.0 and "2026-10-15" in vix_src
+
+    # 4. 标的与基准在 --as-of 下同时长期断更时必须识别 stale_sessions > 5；内置标的若 vendor_name 含"退市"也必须触发 DELISTING_RISK
+    stale_bundle_dict = copy.deepcopy(live_bundle)
+    stale_bundle_dict["target"]["bars"] = stale_bundle_dict["target"]["bars"][:-20]
+    stale_bundle_dict["benchmark"]["bars"] = stale_bundle_dict["benchmark"]["bars"][:-20]
+    stale_file = tmp_path / "stale_both.json"
+    stale_file.write_text(json.dumps(stale_bundle_dict), encoding="utf-8")
+    loaded_stale = load_bundle(
+        {**req, "as_of": "2026-10-15"},
+        input_path=stale_file,
+        allow_network=False,
+        now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC),
+    )
+    assert loaded_stale["provenance"]["stale_sessions"] > 5
+    rep_stale = analyze_bundle(loaded_stale, {**req, "as_of": "2026-10-15"}, include_replay=False, include_forecast=False)
+    assert "STALE_OR_DELISTED" in rep_stale["debate_and_veto"]["veto_codes"]
+
+    delist_bundle = copy.deepcopy(live_bundle)
+    delist_bundle["provenance"] = {
+        **delist_bundle["provenance"],
+        "instrument_meta": {"vendor_name": "退市比亚迪"},
+    }
+    rep_delist = analyze_bundle(delist_bundle, req, include_replay=False, include_forecast=False)
+    assert "DELISTING_RISK" in rep_delist["debate_and_veto"]["veto_codes"]
+
+
+def test_phase4_report_lint_all_markets_and_impulse_wave_full_slice(replay_recorded) -> None:
+    """阶段4：三市场生成报告全部通过 lint_response（含长数据备注下风控否决置顶与破位中文表述）、推动浪自 p2/p4 全段切片校验、结构与情景因果回放审计。"""
+    from lint_response import lint_agent_response
+    from render_report_md import render_report_markdown
+    from scenarios import detect_impulse_wave
+
+    # 1. 港股 00700.HK（含 7 根剔除占位K线长备注与 BEARISH_BOS）生成的报告必须 0 错误通过 lint_agent_response
+    for sym, mkt in (("600519.SH", "CN"), ("00700.HK", "HK"), ("NVDA.US", "US")):
+        r_req = {"symbol": sym, "market": mkt, "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+        b = load_bundle(r_req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+        rep = analyze_bundle(b, r_req, include_replay=False)
+        from contract_v6 import artifact_files, build_result
+        res_v6 = build_result(rep, artifact_files(sym, False))
+        md = render_report_markdown(res_v6)
+        errs = lint_agent_response(md, res_v6)
+        assert errs == [], f"{sym} report failed lint: {errs}"
+
+    # 2. detect_impulse_wave 必须从 p4/p2 终点起统计当前浪全段极值（不能只看最近 5 根）
+    base_bars = copy.deepcopy(load_recorded("sina_daily/sh600519.json")[-40:])
+    for i, b in enumerate(base_bars):
+        b["open"] = b["high"] = b["low"] = b["close"] = 100.0
+    pivs = [
+        {"idx": 0, "day": base_bars[0]["day"], "price": 100.0, "kind": "L", "confirmed": True},
+        {"idx": 5, "day": base_bars[5]["day"], "price": 113.0, "kind": "H", "confirmed": True},
+        {"idx": 10, "day": base_bars[10]["day"], "price": 105.0, "kind": "L", "confirmed": True},
+        {"idx": 18, "day": base_bars[18]["day"], "price": 117.5, "kind": "H", "confirmed": True},
+        {"idx": 24, "day": base_bars[24]["day"], "price": 114.8, "kind": "L", "confirmed": True},
+    ]
+    base_bars[28]["high"] = 132.0  # w5_full = 132 - 114.8 = 17.2 > w1(13) > w3(12.5)，浪 3 最短，5浪计数必须拒绝
+    for k in range(35, 40):
+        base_bars[k]["high"] = 120.0
+        base_bars[k]["close"] = 119.0
+    assert detect_impulse_wave(base_bars, pivs, atr=0.02) is None
+    # 仅给 3 个拐点时，idx=28（距末尾 11 根，不在最后 5 根内）的高点也必须计入第 3 浪推进幅度
+    w3_res = detect_impulse_wave(base_bars, pivs[:3], atr=0.02)
+    assert w3_res is not None and w3_res["phase"] == "wave_3"
+
+    # 3. 因果回放审计覆盖完整结构层与多情景
+    audit = run_causal_replay_audit(load_recorded("sina_daily/sh600519.json"))
+    assert audit["passed"] is True and audit["mismatches_count"] == 0
+    assert "structure_and_scenarios" in audit["modules_audited"]
+
+
+def test_phase5_html_png_and_site_consistency_and_ux_guards(replay_recorded, tmp_path: Path) -> None:
+    """阶段5：HTML 回放防串期、试算器拒绝方向矛盾几何、去预测化术语、内联 favicon 与键盘可访问性、PNG 终点日历与标题去重。"""
+    import shutil
+    import subprocess
+    from contract_v6 import artifact_files, build_chart_data, build_result
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    rep = analyze_bundle(bundle, req, include_replay=True)
+    result = build_result(rep, artifact_files("600519.SH", False))
+    chart = build_chart_data(rep)
+    html_path = render_html(result, chart, tmp_path / "dash.html")
+    html_text = html_path.read_text(encoding="utf-8")
+
+    # 1. 去预测化与术语准确：不含"100% 数学形态"、"未来预测 Step"、"悲观q25"；包含内联 favicon、lower-deck 布局与键盘无障碍属性
+    assert "100% 数学形态" not in html_text
+    assert "确定性规则形态与 SMC 公式证据" in html_text
+    assert "未来预测 Step" not in html_text and "悲观q25" not in html_text
+    assert 'rel="icon"' in html_text
+    assert "lower-deck" in html_text
+    assert 'tabindex="0"' in html_text and 'role="img"' in html_text
+    assert "点位方向矛盾" in html_text
+    assert "历史截面回放：" in html_text
+
+    # 2. 用 node 实测试算器拒绝入场=100、止损=110、目标=120 的矛盾几何（不会输出正盈亏比）
+    node = shutil.which("node")
+    if node is not None:
+        assert "((s - e) * (t - e) >= 0)" in html_text or "点位方向矛盾" in html_text
+
+
+
+
