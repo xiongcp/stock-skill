@@ -4,8 +4,10 @@ import math
 from typing import Any
 
 from market_rules import (
+    STALE_SESSIONS_VETO_THRESHOLD,
     compute_round_trip_cost_detail,
     get_market_microstructure_rules,
+    is_delisting_instrument,
     price_decimals,
     round_shares_to_lot,
     round_to_tick,
@@ -67,6 +69,7 @@ def compute_triple_barrier_plan(
     account_equity: float | None = None,
     max_risk_pct: float = 0.01,
     price_scale_is_tradable: bool = False,
+    stale_sessions: int = 0,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """计算：
     1. 二阶段规则过滤决策 (meta_labeling_decision)
@@ -272,6 +275,16 @@ def compute_triple_barrier_plan(
     # Independent Risk Officer Veto checks（veto_codes 为稳定编码，供回测统计否决原因）
     veto_reasons: list[str] = []
     veto_codes: list[str] = []
+    inst_name = str(meta.get("name") or "")
+    is_delisting = is_delisting_instrument(symbol, inst_name)
+    if is_delisting:
+        veto_codes.append("DELISTING_RISK")
+        veto_reasons.append(f"证券简称「{inst_name}」显示处于退市整理期或已终止上市，禁止给出做多计划")
+    if stale_sessions > STALE_SESSIONS_VETO_THRESHOLD:
+        veto_codes.append("STALE_OR_DELISTED")
+        veto_reasons.append(
+            f"标的最新日线停留在 {last_bar['day']}（落后当前交易日 {stale_sessions} 个交易日），疑似已退市或长期停牌，禁止给出做多计划"
+        )
     if benchmark_info.get("benchmark_missing"):
         veto_codes.append("BENCHMARK_MISSING")
         veto_reasons.append("缺少大盘基准行情，无法执行先大盘、后个股检查，禁止给出做多确认")
@@ -372,7 +385,7 @@ def compute_triple_barrier_plan(
     ):
         action = "WATCH_LONG_SETUP"
         action_cn = "条件观察（待放量/收盘确认）"
-    elif rule_score <= 38.0 or wedge.get("status") == "below":
+    elif is_delisting or stale_sessions > STALE_SESSIONS_VETO_THRESHOLD or rule_score <= 38.0 or wedge.get("status") == "below":
         action = "DEFENSIVE_AVOID"
         action_cn = "防守回避/破位警惕"
     else:

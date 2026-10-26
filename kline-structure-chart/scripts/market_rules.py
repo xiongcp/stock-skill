@@ -238,6 +238,10 @@ def latest_closed_session(market: str, now: datetime | None = None) -> str:
 
 
 _ST_NAME_PREFIX = re.compile(r"^\*?S?\*?ST")
+_DELISTING_NAME_RE = re.compile(r"(?:^|\*?S?\*?ST)退市|退市$|\(退市\)|（退市）|^.{2,}退$|DELISTED", re.IGNORECASE)
+
+STALE_SESSIONS_WARNING_THRESHOLD = 2
+STALE_SESSIONS_VETO_THRESHOLD = 5
 
 
 def is_st_instrument(symbol: str = "", name: str = "", is_st: bool = False) -> bool:
@@ -250,6 +254,14 @@ def is_st_instrument(symbol: str = "", name: str = "", is_st: bool = False) -> b
     if symbol and not symbol.strip().upper().endswith((".SH", ".SZ", ".BJ")):
         return False
     return bool(_ST_NAME_PREFIX.match(re.sub(r"\s+", "", name or "").upper()))
+
+
+def is_delisting_instrument(symbol: str = "", name: str = "") -> bool:
+    """识别处于退市整理期或已终止上市的证券（如 '退市金钰'、'雏鹰退'、'XX(退市)'、'DELISTED'）。"""
+    cleaned = re.sub(r"\s+", "", name or "")
+    if not cleaned:
+        return False
+    return bool(_DELISTING_NAME_RE.search(cleaned))
 
 
 def _cn_lot_rules(asset_type: str, board: str) -> tuple[int, int, int]:
@@ -417,6 +429,20 @@ def next_trading_dates(base_day_str: str, horizon_bars: int, market: str = "CN")
         if is_trading_day(dt, market=market):
             out.append(dt.strftime("%Y-%m-%d"))
     return out
+
+
+def count_missing_trading_sessions(last_bar_day: str, reference_day: str, market: str = "CN") -> int:
+    """计算最后一根已收盘K线 (last_bar_day) 与参考交易日 (reference_day) 之间缺失的交易所交易日数量。"""
+    if not last_bar_day or not reference_day or last_bar_day[:10] >= reference_day[:10]:
+        return 0
+    cur = datetime.strptime(last_bar_day[:10], "%Y-%m-%d").date()
+    end = datetime.strptime(reference_day[:10], "%Y-%m-%d").date()
+    missing = 0
+    while cur < end:
+        cur += timedelta(days=1)
+        if is_trading_day(cur, market=market):
+            missing += 1
+    return missing
 
 
 CHINEXT_REGISTRATION_DAY = "2020-08-24"  # 创业板注册制改革：涨跌幅 ±10% -> ±20%（含 ST）

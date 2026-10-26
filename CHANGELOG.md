@@ -27,6 +27,10 @@
 - **离线交互看板 2.0、Cloudflare Worker 导出器与 30 组对抗评测集**：
   - `scripts/render_html.py` 新增三模态副图切换（`成交量 & RVOL` / `RSI(14)` / `MACD Hist`）、侧栏「If-Then 交互式净盈亏比与摩擦试算器」（费率参数与预填价位只读 `result.json`，风控否决时不预填价位）及 `export_cloudflare_worker_bundle`（绑定 `*.taylor-link.xyz` + WebP 压缩）。
   - `scripts/doctor.py` 与 `install.sh` 支持探测 `~/.hermes/skills` 分类子目录、Profile 路径与脚本集合一致性校验。
+- **退市/长期停牌断更识别、连续跌停至样本末尾保护与全链路因果回放审计扩展**：
+  - `scripts/market_rules.py` 新增 `is_delisting_instrument` 与 `count_missing_trading_sessions`；`scripts/data_gateway.py` 与 `scripts/risk.py` 在标的相较同市场基准缺失超过 5 个已收盘交易日（`STALE_OR_DELISTED`）或处于退市整理期（`DELISTING_RISK`）时自动将 `quality.status` 降为 `PARTIAL` 并触发风控一票否决（`DEFENSIVE_AVOID`、清空推荐股数）。
+  - `scripts/evaluation.py` 在回测中对连续一字跌停锁死至数据末尾的持仓标记为 `LOCKED_LIMIT_DOWN_UNTIL_END` / `PENDING`（拒绝按最后一根 K 线收盘价假装平仓），并在 `2026-07-06` 主板 ST 新规前的历史切点按因果 60 日波动幅度校验历史 ST 状态（`_causal_is_st_at_cutoff`），消除未来戴帽向历史回溯的前视偏差。
+  - `scripts/evaluation.py` 的 `run_causal_replay_audit` 新增 `pit_rescaling`（未来拆股因子不污染历史复权价）与 `triple_barrier_decision`（三重屏障风控与评级零前视）两项回放审计。
 
 ### 修复（合入后代码审查）
 

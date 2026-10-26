@@ -196,6 +196,8 @@ def test_causal_replay_invariance_no_lookahead() -> None:
     assert audit["passed"] is True
     assert audit["mismatches_count"] == 0
     assert "conformal_forecast" in audit["modules_audited"]
+    assert "pit_rescaling" in audit["modules_audited"]
+    assert "triple_barrier_decision" in audit["modules_audited"]
 
     # C-08：历史相似 Patch 终点满足 cand_idx + H <= cur_end - L_patch（严格无重叠）
     ana = match_historical_analogues(bars, horizon_bars=15, patch_len=20, top_k=5)
@@ -262,6 +264,15 @@ def test_triple_barrier_t_plus_1_and_same_bar_conservative_sl() -> None:
     )
     assert res_lock["outcome"] == "TIME_BARRIER"
     assert res_lock["exit_idx"] == 4
+
+    # 验证若连续一字跌停封死直至序列最后一根 K 线 (idx=4 仍封死)，不得按末日跌停价假装卖出成交
+    limit_dn_2 = round(limit_dn * 0.90, 2)
+    locked_bars[4] = {**locked_bars[4], "open": limit_dn_2, "high": limit_dn_2, "low": limit_dn_2, "close": limit_dn_2}
+    res_lock_end = label_triple_barrier_event(
+        locked_bars, entry_idx=1, tp_price=2000.0, sl_price=800.0, horizon_bars=3, market="CN", asset_type="equity", symbol="600519.SH"
+    )
+    assert res_lock_end["tradable"] is False
+    assert res_lock_end["reason"] == "LOCKED_LIMIT_DOWN_UNTIL_END"
 
 
 @pytest.mark.slow

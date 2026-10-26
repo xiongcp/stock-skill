@@ -16,7 +16,10 @@ from forecast import compute_conformal_forecast
 from indicators import compute_all_indicators
 from market_rules import (
     DEFAULT_BENCHMARKS,
+    STALE_SESSIONS_VETO_THRESHOLD,
+    STALE_SESSIONS_WARNING_THRESHOLD,
     get_market_microstructure_rules,
+    is_delisting_instrument,
     price_decimals,
     rescale_bars_as_of,
     round_to_tick,
@@ -407,6 +410,15 @@ def analyze_bundle(
         "data_source": bundle.get("provenance", {}).get("source", "UNKNOWN"),
     }
 
+    prov = bundle.get("provenance") or {}
+    stale_sessions = (
+        int(prov.get("stale_sessions") or 0)
+        if prov.get("as_of", completed[-1]["day"]) == completed[-1]["day"]
+        else 0
+    )
+    stale_ref_day = prov.get("stale_reference_day") if stale_sessions > 0 else None
+    is_delisting = is_delisting_instrument(inst["symbol"], str(meta["name"]))
+
     # 6. 二阶段过滤、三重屏障风控与多空辩论
     meta_decision, tb_plan, debate = compute_triple_barrier_plan(
         sview,
@@ -421,7 +433,8 @@ def analyze_bundle(
         horizon_bars=horizon_bars,
         account_equity=request.get("account_equity"),
         max_risk_pct=float(request.get("max_risk_pct") or 0.01),
-        price_scale_is_tradable=bool(bundle.get("provenance", {}).get("intraday_ex_date_aligned")),
+        price_scale_is_tradable=bool(prov.get("intraday_ex_date_aligned")),
+        stale_sessions=stale_sessions,
     )
 
     # 7. 未来 H 步（默认 15 日）分位数预测 + 序列 split-conformal 校准
@@ -584,7 +597,29 @@ def analyze_bundle(
         report["quality"]["notes"].append(
             f"今日（{intraday_ex_day}）为除权除息日，历史已收盘K线与计划点位已按当日除权后口径对齐"
         )
-    missing_session = bundle.get("provenance", {}).get("missing_closed_session")
+    missing_session = (
+        prov.get("missing_closed_session")
+        if prov.get("as_of", completed[-1]["day"]) == completed[-1]["day"]
+        else None
+    )
+    if stale_sessions > STALE_SESSIONS_VETO_THRESHOLD:
+        if report["quality"]["status"] != "UNAVAILABLE":
+            report["quality"]["status"] = "PARTIAL"
+        report["quality"]["warnings"].append(
+            f"标的最新日线停留在 {completed[-1]['day']}，落后当前交易日 {stale_ref_day or missing_session} 共 {stale_sessions} 个交易日，疑似已退市或长期停牌"
+        )
+    elif stale_sessions >= STALE_SESSIONS_WARNING_THRESHOLD:
+        if report["quality"]["status"] != "UNAVAILABLE":
+            report["quality"]["status"] = "PARTIAL"
+        report["quality"]["warnings"].append(
+            f"标的最新日线停留在 {completed[-1]['day']}，落后当前交易日 {stale_ref_day or missing_session} 共 {stale_sessions} 个交易日（短期停牌或数据源延迟）"
+        )
+    if is_delisting:
+        if report["quality"]["status"] != "UNAVAILABLE":
+            report["quality"]["status"] = "PARTIAL"
+        report["quality"]["warnings"].append(
+            f"证券简称「{meta['name']}」显示处于退市整理期或已终止上市，风控已否决做多计划"
+        )
     if missing_session:
         report["quality"]["notes"].append(
             f"数据只到 {completed[-1]['day']}：最近已收盘的交易日 {missing_session} 的日线数据源尚未提供（或标的停牌），"

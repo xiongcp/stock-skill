@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import random
+import re
 from typing import Any
 
 from forecast import _local_sigma, compute_conformal_forecast
@@ -19,7 +20,15 @@ from patterns import (
     causal_nadaraya_watson,
     causal_swing_pivots,
     detect_candlestick_patterns,
+    detect_divergences,
+    detect_geometric_patterns,
     detect_smc_structures,
+)
+from risk import compute_triple_barrier_plan
+from strategies import (
+    classify_market_regime,
+    compute_multi_timeframe_score,
+    evaluate_five_core_strategies,
 )
 from structure import HISTORY_BARS, STRUCT_DAYS, compute_structure_layer
 
@@ -135,6 +144,79 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
         ):
             mismatches.append(f"Conformal mature scores mutated at cut={cut}")
 
+        # 5. Point-in-Time 复权回放：注入 cut 之后的未来 1拆5 除权因子，验证 rescale_bars_as_of 完全消除未来除权泄漏
+        sub_pit = rescale_bars_as_of(sub, cut - 1)
+        ext_split_leaked = [
+            {
+                **b,
+                "raw_open": float(b.get("raw_open", b["open"])),
+                "raw_high": float(b.get("raw_high", b["high"])),
+                "raw_low": float(b.get("raw_low", b["low"])),
+                "raw_close": float(b.get("raw_close", b["close"])),
+                "adj_factor": float(b.get("adj_factor", 1.0)) * 0.2,
+                "open": round(float(b["open"]) * 0.2, 4),
+                "high": round(float(b["high"]) * 0.2, 4),
+                "low": round(float(b["low"]) * 0.2, 4),
+                "close": round(float(b["close"]) * 0.2, 4),
+            }
+            for b in sub
+        ] + ext_corrupted[cut:]
+        ext_pit_restored = rescale_bars_as_of(ext_split_leaked, cut - 1)[:cut]
+        if any(abs(float(a["close"]) - float(b["close"])) > 1e-6 for a, b in zip(sub_pit, ext_pit_restored)):
+            mismatches.append(f"PIT rescaling leaked future corporate action at cut={cut}")
+
+        # 6. 策略评分与三重屏障风控决策：验证指标快照、多周期规则分、风控否决与入场/止损/止盈点位零前视
+        sview_sub = layer_sub["sview"]
+        sview_len = len(sview_sub)
+        piv_sview = causal_swing_pivots(sview_sub, thr_sub)
+        geo_sub = detect_geometric_patterns(
+            sview_sub, piv_sview, sub_ind["series"]["atr14"][-sview_len:], sub_ind["series"]["rvol20"][-sview_len:]
+        )
+        div_sub = detect_divergences(
+            sview_sub, piv_sview, sub_ind["series"]["rsi14"][-sview_len:], sub_ind["series"]["atr14"][-sview_len:]
+        )
+        pats_sub = sub_cdl + geo_sub + div_sub
+        wedge_sub = {k: v for k, v in layer_sub["wedge"].items() if not k.startswith("_")}
+        reg_sub = classify_market_regime(sview_sub, sub_ind["snapshot"])
+        strat_sub = evaluate_five_core_strategies(sview_sub, sub_ind, reg_sub)
+        bench_stub = {"index_symbol": "AUDIT.SH", "regime": reg_sub["regime"], "regime_score": reg_sub["regime_score"], "relative_strength_vs_index": 1.0, "benchmark_missing": False}
+        mtf_sub = compute_multi_timeframe_score(sub, sub_ind, wedge_sub, pats_sub, sub_smc, strat_sub, bench_stub)
+        dec_sub, plan_sub, _ = compute_triple_barrier_plan(
+            sview_sub,
+            meta={**meta_stub, "as_of": cut_day},
+            ind_snapshot=sub_ind["snapshot"],
+            wedge=wedge_sub,
+            ladder=layer_sub["ladder"],
+            projections=layer_sub["projections"],
+            mtf_score=mtf_sub,
+            algebraic_patterns=pats_sub,
+            benchmark_info=bench_stub,
+        )
+        layer_pit = compute_structure_layer(ext_pit_restored, None, 120)
+        ind_pit = compute_all_indicators(ext_pit_restored)
+        reg_pit = classify_market_regime(layer_pit["sview"], ind_pit["snapshot"])
+        strat_pit = evaluate_five_core_strategies(layer_pit["sview"], ind_pit, reg_pit)
+        mtf_pit = compute_multi_timeframe_score(ext_pit_restored, ind_pit, {k: v for k, v in layer_pit["wedge"].items() if not k.startswith("_")}, pats_sub, sub_smc, strat_pit, bench_stub)
+        dec_pit, plan_pit, _ = compute_triple_barrier_plan(
+            layer_pit["sview"],
+            meta={**meta_stub, "as_of": cut_day},
+            ind_snapshot=ind_pit["snapshot"],
+            wedge={k: v for k, v in layer_pit["wedge"].items() if not k.startswith("_")},
+            ladder=layer_pit["ladder"],
+            projections=layer_pit["projections"],
+            mtf_score=mtf_pit,
+            algebraic_patterns=pats_sub,
+            benchmark_info=bench_stub,
+        )
+        if (
+            dec_sub["action"] != dec_pit["action"]
+            or dec_sub["veto_codes"] != dec_pit["veto_codes"]
+            or abs(float(mtf_sub["rule_score"]) - float(mtf_pit["rule_score"])) > 1e-6
+            or plan_sub["entry_zone"] != plan_pit["entry_zone"]
+            or abs(float(plan_sub["stop_loss_barrier"]) - float(plan_pit["stop_loss_barrier"])) > 1e-6
+        ):
+            mismatches.append(f"Triple-barrier decision mutated at cut={cut}")
+
     return {
         "checked_cutoffs": checked,
         "modules_audited": [
@@ -143,6 +225,8 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
             "candlestick_patterns",
             "smc_structures",
             "conformal_forecast",
+            "pit_rescaling",
+            "triple_barrier_decision",
         ],
         "mismatches_count": len(mismatches),
         "mismatches": mismatches[:10],
@@ -295,6 +379,13 @@ def label_triple_barrier_event(
                 exit_price = min(float(b_un["open"]), active_sl) if float(b_un["low"]) <= active_sl else float(b_un["close"])
                 break
             exit_price = float(bars[exit_idx]["close"])
+        if _is_limit_down_locked(exit_idx):
+            return {
+                "tradable": False,
+                "reason": "LOCKED_LIMIT_DOWN_UNTIL_END",
+                "entry_day": entry_bar["day"],
+                "locked_until_day": bars[exit_idx]["day"],
+            }
         label = 1 if exit_price > entry_open else -1
 
     fee_rate = round_trip_cost_rate(rules) + 2.0 / 10000.0  # 另计 2bps 滑点
@@ -465,6 +556,36 @@ def _decision_diagnostics(rows: list[tuple[float, str, float]], horizon_bars: in
     }
 
 
+def _causal_is_st_at_cutoff(
+    bars: list[dict[str, Any]],
+    cut_idx: int,
+    market: str,
+    symbol: str,
+    base_is_st: bool,
+) -> bool:
+    """因果校验历史截面 cut_idx 时的 ST 状态：
+    若当前快照标记为 ST，但在主板 ST 适用 ±5% 涨跌停期间（2026-07-06 前），截至 cut_idx 的近 60 根无除权 K 线内
+    出现过单日真实涨跌幅超过 ±5.5%，则证明该标的在 cut_idx 当时处于非 ST（±10%）交易状态，禁止把未来的戴帽状态回填到当时。
+    """
+    if not base_is_st or market != "CN":
+        return False
+    cut_day = str(bars[cut_idx]["day"])
+    if get_daily_price_limit_pct(market, "equity", symbol, is_st=True, day_str=cut_day) != 0.05:
+        return base_is_st
+    for k in range(max(1, cut_idx - 59), cut_idx + 1):
+        prev_b, cur_b = bars[k - 1], bars[k]
+        if abs(float(cur_b.get("adj_factor", 1.0)) - float(prev_b.get("adj_factor", 1.0))) > 1e-9:
+            continue
+        prev_c = float(prev_b.get("raw_close", prev_b["close"]))
+        if prev_c <= 0:
+            continue
+        hi = float(cur_b.get("raw_high", cur_b["high"]))
+        lo = float(cur_b.get("raw_low", cur_b["low"]))
+        if max(abs(hi / prev_c - 1.0), abs(lo / prev_c - 1.0)) > 0.055:
+            return False
+    return True
+
+
 def run_plan_backtest(
     bundle: dict[str, Any],
     request: dict[str, Any],
@@ -492,7 +613,7 @@ def run_plan_backtest(
     start = max(250, n - horizon_bars - 2 - decision_window)
     end = n - horizon_bars - 1
     bench = bundle.get("benchmark")
-    sub_request = {**request, "display_bars": 120, "account_equity": None}
+    sub_request_base = {**request, "display_bars": 120, "account_equity": None}
     trades: dict[str, list[dict[str, Any]]] = {"LONG_CONFIRMED": [], "WATCH_LONG_SETUP": []}
     all_trades: list[dict[str, Any]] = []
     actions_seen: dict[str, int] = {}
@@ -507,15 +628,19 @@ def run_plan_backtest(
     while t < end:
         cut_day = bars[t]["day"]
         ipo_at_t = bool(is_ipo_no_limit and t < 5)
+        st_at_t = _causal_is_st_at_cutoff(bars, t, market, symbol, is_st)
+        name_at_t = inst_name if st_at_t else re.sub(r"^\*?S?\*?ST", "", inst_name, flags=re.IGNORECASE)
+        inst_at_t = {**inst, "is_st": st_at_t, "name": name_at_t}
+        sub_request = {**sub_request_base, "is_st": st_at_t, "name": name_at_t}
         pit_bars = rescale_bars_as_of(bars[: min(n, t + horizon_bars + 10)], t)
         sub_bundle = {
             "schema_version": "6.0.0",
             "market": market,
-            "target": {"instrument": inst, "bars": pit_bars[: t + 1], "intraday": None},
+            "target": {"instrument": inst_at_t, "bars": pit_bars[: t + 1], "intraday": None},
             "benchmark": {**bench, "bars": [b for b in bench["bars"] if b["day"] <= cut_day]} if bench else None,
             # 历史 VIX 不可得，回放中不使用当前 VIX，避免前视
-            "extra_context": {"vix": None, "earnings_date": None, "is_st": is_st, "is_ipo_no_limit": ipo_at_t},
-            "provenance": bundle.get("provenance", {}),
+            "extra_context": {"vix": None, "earnings_date": None, "is_st": st_at_t, "is_ipo_no_limit": ipo_at_t},
+            "provenance": {**bundle.get("provenance", {}), "missing_closed_session": None, "stale_sessions": 0},
         }
         rep = analyze_bundle(sub_bundle, sub_request, include_replay=False, include_forecast=False)
         decisions += 1
@@ -548,13 +673,13 @@ def run_plan_backtest(
                     market=market,
                     asset_type=asset_type,
                     symbol=symbol,
-                    is_st=is_st,
+                    is_st=st_at_t,
                     is_ipo_no_limit=ipo_at_t,
                     trailing_stop=bool(ratchet.get("enabled", True)),
                     trigger_r=float(ratchet.get("trigger_r", 0.90)),
                     confirm_close_r=float(ratchet.get("confirm_close_r", 0.30)),
                     lock_r=float(ratchet.get("lock_r", 0.08)),
-                    name=inst_name,
+                    name=name_at_t,
                 )
                 if res.get("tradable"):
                     trade_rec = {
@@ -756,7 +881,7 @@ def _simulate_plan_on_bars(
                 active_stop = min(active_stop, entry - 0.08 * risk)
                 ratchet_armed = True
 
-    if not matured:
+    if not matured or (direction == "LONG" and _locked_at_limit(len(future_bars) - 1, "down")):
         return {"triggered": True, "entry_day": entry_day, "status": "PENDING", "realized_r": None}
     last_c = float(future_bars[-1]["close"])
     r_val = (last_c - entry) / risk if direction == "LONG" else (entry - last_c) / risk

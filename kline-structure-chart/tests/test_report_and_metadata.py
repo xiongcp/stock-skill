@@ -311,6 +311,63 @@ def test_missing_closed_session_is_disclosed_not_filled(replay_recorded) -> None
     assert hist["provenance"]["missing_closed_session"] is None
 
 
+def test_delisted_or_stale_ticker_and_delisting_period_trigger_risk_veto(
+    monkeypatch: pytest.MonkeyPatch, replay_recorded
+) -> None:
+    """退市/长期停牌僵尸行情（落后基准 > 5 个交易日）与退市整理期简称，必须降级为 PARTIAL 并触发独立风控官否决。"""
+    from conftest import load_recorded
+    from evaluation import _causal_is_st_at_cutoff
+    from market_rules import count_missing_trading_sessions, is_delisting_instrument
+
+    assert is_delisting_instrument("600086.SH", "退市金钰")
+    assert is_delisting_instrument("002477.SZ", "雏鹰退")
+    assert is_delisting_instrument("000001.US", "ACME (DELISTED)")
+    assert not is_delisting_instrument("600519.SH", "贵州茅台")
+    assert not is_delisting_instrument("600289.SH", "ST信通")
+    # 2026-09-30 与 2026-10-08 之间隔着国庆长假（10-01..10-07 休市），只差 1 个交易日
+    assert count_missing_trading_sessions("2026-09-30", "2026-10-08", "CN") == 1
+
+    orig_sina = data_gateway.fetch_sina_daily_bars
+
+    def stale_target_sina(code: str, datalen: int = 450) -> list[dict]:
+        rows = orig_sina(code, datalen)
+        if code == "sh600519":
+            return [b for b in rows if b["day"] <= "2026-08-14"]
+        return rows
+
+    monkeypatch.setattr(data_gateway, "fetch_sina_daily_bars", stale_target_sina)
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "account_equity": 500000.0, **REQ_BASE}
+    bundle = load_bundle(req, now=NOW)
+    assert bundle["provenance"]["stale_sessions"] > 5
+    rep = analyze_bundle(bundle, req, include_replay=False)
+    assert rep["quality"]["status"] == "PARTIAL"
+    assert any("疑似已退市或长期停牌" in w for w in rep["quality"]["warnings"])
+    assert rep["debate_and_veto"]["risk_officer_veto"] is True
+    assert "STALE_OR_DELISTED" in rep["debate_and_veto"]["veto_codes"]
+    assert rep["meta_labeling_decision"]["action"] == "DEFENSIVE_AVOID"
+    assert rep["triple_barrier_plan"]["position_sizing"]["recommended_shares"] is None
+
+    # 若用户显式指定 --as-of 2026-08-14 复盘当时截面，则基准同步对齐至 2026-08-14，不误判为停牌/退市
+    hist_bundle = load_bundle({**req, "as_of": "2026-08-14"}, now=NOW)
+    assert hist_bundle["provenance"]["stale_sessions"] == 0
+    hist_rep = analyze_bundle(hist_bundle, {**req, "as_of": "2026-08-14"}, include_replay=False)
+    assert "STALE_OR_DELISTED" not in hist_rep["debate_and_veto"]["veto_codes"]
+
+    # 退市整理期简称（如「退市某某」「某某退」）直接触发 DELISTING_RISK 否决
+    delist_req = {**req, "as_of": "2026-08-14", "name": "退市测试"}
+    delist_rep = analyze_bundle(hist_bundle, delist_req, include_replay=False)
+    assert delist_rep["quality"]["status"] == "PARTIAL"
+    assert "DELISTING_RISK" in delist_rep["debate_and_veto"]["veto_codes"]
+    assert delist_rep["meta_labeling_decision"]["action"] == "DEFENSIVE_AVOID"
+    assert delist_rep["triple_barrier_plan"]["position_sizing"]["recommended_shares"] is None
+
+    # 因果 ST 校验：比亚迪 (002594.SZ) 在 2026-07-03 前存在 >5.5% 真实波动，即使假定今日为 ST 也不能回填到当时；而真实 ST信通 (600289.SH) 全程无 >5.5% 波动，保持 True
+    byd_bars = [b for b in load_recorded("sina_daily/sz002594.json") if b["day"] <= "2026-07-03"]
+    st_bars = [b for b in load_recorded("sina_daily/sh600289.json") if b["day"] <= "2026-07-03"]
+    assert _causal_is_st_at_cutoff(byd_bars, len(byd_bars) - 1, "CN", "002594.SZ", base_is_st=True) is False
+    assert _causal_is_st_at_cutoff(st_bars, len(st_bars) - 1, "CN", "600289.SH", base_is_st=True) is True
+
+
 def test_win_rate_interval_does_not_collapse_on_small_samples() -> None:
     from evaluation import _summarize_returns, _wilson_ci
 

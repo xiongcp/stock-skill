@@ -17,6 +17,7 @@ from market_rules import (
     MARKET_SESSIONS,
     TENCENT_INDEX_SOURCES,
     apply_point_in_time_adjustment,
+    count_missing_trading_sessions,
     is_daily_bar_complete,
     latest_closed_session,
     is_st_instrument,
@@ -539,12 +540,29 @@ def load_bundle(
             out = dict(raw_data)
             out["target"] = {**target, "bars": target_bars, "intraday": intraday or target.get("intraday")}
             benchmark = raw_data.get("benchmark")
+            bench_latest_local: str | None = None
             if benchmark and benchmark.get("bars"):
                 bench_bars = [dict(b) for b in benchmark["bars"]]
                 if as_of:
                     bench_bars = [b for b in bench_bars if str(b["day"]) <= str(as_of)[:10]]
                 validate_bars(bench_bars, "bundle.benchmark.bars")
-                out["benchmark"] = {**benchmark, "bars": bench_bars}
+                bench_bars, _ = split_incomplete_last_bar(bench_bars, inst["market"], now)
+                if bench_bars:
+                    bench_latest_local = bench_bars[-1]["day"]
+                out["benchmark"] = {**benchmark, "bars": [b for b in bench_bars if str(b["day"]) <= target_bars[-1]["day"]]}
+            stale_ref_local = bench_latest_local or (str(as_of)[:10] if (as_of and intraday is None) else None)
+            stale_local = (
+                count_missing_trading_sessions(target_bars[-1]["day"], stale_ref_local, inst["market"])
+                if stale_ref_local
+                else 0
+            )
+            prov_local = dict(out.get("provenance") or {})
+            prov_local.setdefault("as_of", target_bars[-1]["day"])
+            if stale_local > 0:
+                prov_local["stale_sessions"] = stale_local
+                prov_local["stale_reference_day"] = stale_ref_local
+                prov_local.setdefault("missing_closed_session", stale_ref_local)
+            out["provenance"] = prov_local
             return out  # type: ignore[return-value]
         if isinstance(raw_data, list):
             inst = resolve_instrument(
@@ -581,6 +599,8 @@ def load_bundle(
                 "source": None,
                 "error": "本地文件未附带除权除息数据，按原始价格使用",
             }
+            as_of_local = str(request["as_of"])[:10] if (request.get("as_of") and intraday is None) else None
+            stale_list = count_missing_trading_sessions(bars[-1]["day"], as_of_local, inst["market"]) if as_of_local else 0
             return {
                 "schema_version": "6.0.0",
                 "market": inst["market"],
@@ -600,6 +620,9 @@ def load_bundle(
                     "adjustment": "raw",
                     "adjustment_status": local_adjustment,
                     "intraday_excluded_day": intraday["day"] if intraday else None,
+                    "missing_closed_session": as_of_local if stale_list > 0 else None,
+                    "stale_sessions": stale_list,
+                    "stale_reference_day": as_of_local if stale_list > 0 else None,
                 },
             }
 
@@ -651,25 +674,42 @@ def load_bundle(
     if intraday is not None and target_bars:
         intraday = {**intraday, "prev": float(target_bars[-1]["close"])}
 
-    # 先大盘、后个股：若当前标的不是该市场默认基准指数，则同步加载基准指数（截至标的最后一根已收盘K线）
+    # 先大盘、后个股：若当前标的不是该市场默认基准指数，则同步加载基准指数（先取截至 as_of 的最新基准交易日以检测停牌/退市滞后，再对齐到标的末日）
     bench_cfg = DEFAULT_BENCHMARKS[market]
     bench_symbol = request.get("benchmark_symbol") or bench_cfg["symbol"]
     benchmark_payload: dict[str, Any] | None = None
+    bench_latest_day: str | None = None
     if bench_symbol.upper() != inst["symbol"].upper():
         bench_inst = resolve_instrument(bench_symbol, market=market, asset_type="index" if market != "US" else "etf")
-        bench_bars, bench_src, bench_errors, bench_placeholders = _load_single_series(
+        bench_bars_full, bench_src, bench_errors, bench_placeholders = _load_single_series(
             bench_inst,
             datalen=datalen,
-            as_of=target_bars[-1]["day"],
+            as_of=as_of,
             allow_network=allow_network,
         )
-        benchmark_payload = {
-            "instrument": bench_inst,
-            "bars": bench_bars,
-            "source": bench_src,
-            "errors": bench_errors,
-            "placeholder_bars_removed": bench_placeholders,
-        }
+        bench_bars_full, _ = split_incomplete_last_bar(bench_bars_full, market, now)
+        if bench_bars_full:
+            bench_latest_day = bench_bars_full[-1]["day"]
+        bench_bars = [b for b in bench_bars_full if b["day"] <= target_bars[-1]["day"]]
+        if len(bench_bars) >= MIN_LIVE_BARS:
+            benchmark_payload = {
+                "instrument": bench_inst,
+                "bars": bench_bars,
+                "source": bench_src,
+                "errors": bench_errors,
+                "placeholder_bars_removed": [d for d in bench_placeholders if d <= target_bars[-1]["day"]],
+            }
+
+    stale_reference_day: str | None = bench_latest_day
+    if stale_reference_day is None and as_of and intraday is None:
+        stale_reference_day = min(str(as_of)[:10], latest_closed)
+    stale_sessions = (
+        count_missing_trading_sessions(target_bars[-1]["day"], stale_reference_day, market)
+        if stale_reference_day
+        else 0
+    )
+    if stale_sessions > 0 and not missing_session:
+        missing_session = stale_reference_day
 
     vix_value, vix_source = (None, "NOT_APPLICABLE")
     if market == "US":
@@ -701,6 +741,8 @@ def load_bundle(
             "intraday_excluded_day": intraday["day"] if intraday else None,
             "intraday_ex_date_aligned": intraday_ex_day,
             "missing_closed_session": missing_session,
+            "stale_sessions": stale_sessions,
+            "stale_reference_day": stale_reference_day if stale_sessions > 0 else None,
             "placeholder_bars_removed": target_placeholders,
             "instrument_meta": instrument_meta,
         },
