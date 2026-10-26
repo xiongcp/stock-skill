@@ -2,7 +2,7 @@
 
 **A股 / 港股 / 美股 K 线数学结构识别与风控研究技能，给 Claude Code、Codex 等 AI 助手使用**
 
-**中文** | [English](README.en.md)
+**中文** | [English](README.en.md) | [项目主页](https://xiongcp.github.io/stock-skill/)
 
 [![CI](https://github.com/xiongcp/stock-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/xiongcp/stock-skill/actions/workflows/ci.yml) ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue) ![Agent Skills](https://img.shields.io/badge/Agent%20Skills-compatible-6f42c1)
 
