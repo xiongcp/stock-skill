@@ -18,6 +18,7 @@ from market_rules import (
     TENCENT_INDEX_SOURCES,
     apply_point_in_time_adjustment,
     count_missing_trading_sessions,
+    default_benchmark_for,
     is_daily_bar_complete,
     latest_closed_session,
     is_st_instrument,
@@ -704,7 +705,7 @@ def load_bundle(
         intraday = {**intraday, "prev": float(target_bars[-1]["close"])}
 
     # 先大盘、后个股：若当前标的不是该市场默认基准指数，则同步加载基准指数（先取截至 as_of 的最新基准交易日以检测停牌/退市滞后，再对齐到标的末日）
-    bench_cfg = DEFAULT_BENCHMARKS[market]
+    bench_cfg = default_benchmark_for(market, inst["symbol"], inst["asset_type"])
     bench_symbol = request.get("benchmark_symbol") or bench_cfg["symbol"]
     benchmark_payload: dict[str, Any] | None = None
     bench_latest_day: str | None = None

@@ -63,10 +63,16 @@ _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?；;\n]")
 
 # 价格语境（比 CONTEXT_PRICE_RE 更宽）：交易动作或价位词之后 4 个字符内的数字，以及紧跟交易动作的数字
 _LINT_PRICE_AFTER_RE = re.compile(
-    r"(?:目标位?|失效位?|止损位?|止盈位?|触发位?|破位价|支撑位?|压力位?|阻力位?|现价|收盘价?|POC|VAH|VAL|TP1|TP2|入场区?|买入|卖出|"
+    r"(?:目标位?|失效位?|止损位?|止盈位?|触发位?|破位价|支撑位?|压力位?|阻力位?|现价|收盘价?|POC|VAH|VAL|TP1|TP2|入场区?|观察区|防守位?|减仓位?|买入|卖出|"
     r"建仓|加仓|减仓|挂单|低吸|抄底|回踩|突破|跌破|站上|站稳|站回|收回|上破|下破|看至|看到|上看|下看|关注|观察位?|参考位?|价位"
     r"|(?:止损位?|日?均线|乐观上沿|悲观下沿)(?:建议)?(?:设在|位于|可达))"
     r"[^\d\n。；，,、（）()|]{0,4}?(\d+(?:\.\d+)?)"
+)
+_LINT_PRICE_COMPARE_RE = re.compile(
+    r"(?:目标位?|失效位?|止损位?|止盈位?|触发位?|破位价|支撑位?|压力位?|阻力位?|现价|收盘价?|POC|VAH|VAL|TP1|TP2|入场区?|观察区|防守位?|减仓位?)"
+    r"[^。；\n]{0,36}?"
+    r"(?:vs\.?|VS\.?|对比|较上日|上日|前日|昨日|原为|下调至|上调至|移至|降至|升至|~|～|→|->)"
+    r"[^\d\n。；]{0,8}?(\d+\.\d+)"
 )
 _LINT_PRICE_BEFORE_RE = re.compile(
     r"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:元|港元|美元|港币)?\s*(?:附近|一线|上方|下方|左右|处|之上|之下|上下)\s*"
@@ -116,6 +122,7 @@ def lint_agent_response(
     response_text: str,
     report: dict[str, Any],
     backtest: dict[str, Any] | None = None,
+    prev_reports: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     """校验 Agent 回复文本，返回违规列表（空列表表示合规）。"""
     errors: list[str] = []
@@ -134,7 +141,7 @@ def lint_agent_response(
 
     # 1. UNAVAILABLE 检查
     if q_status == "UNAVAILABLE":
-        if any(pat.search(text) for pat in (CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_PRICE_BEFORE_RE)):
+        if any(pat.search(text) for pat in (CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_PRICE_COMPARE_RE, _LINT_PRICE_BEFORE_RE)):
             errors.append("quality.status == UNAVAILABLE 时，严禁在回复中输出任何具体价格点位或交易计划")
         return errors
 
@@ -214,6 +221,10 @@ def lint_agent_response(
     # 5. 价格白名单检查（针对带价格语境的数值）
     whitelist = report.get("quotable_prices") or {}
     wl_prices: list[float] = [float(p) for p in whitelist.get("prices") or []]
+    for pr in prev_reports or []:
+        if isinstance(pr, dict):
+            prev_wl = (pr.get("quotable_prices") or {}).get("prices") or []
+            wl_prices.extend(float(p) for p in prev_wl)
     wl_tol = float(whitelist.get("tolerance") or 0.01)
     wave_only_prices: list[float] = []
     for wc in list(struct.get("wave_counts") or []) + ([struct["abc_scenario"]] if struct.get("abc_scenario") else []):
@@ -248,7 +259,7 @@ def lint_agent_response(
         ):
             errors.append(f"不得把浪型测算位 {cand_tp} 当作目标位/目标价: {m_tp.group(0)!r}")
     seen_spans: set[tuple[int, int]] = set()
-    for pat in (CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_PRICE_BEFORE_RE):
+    for pat in (CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_PRICE_COMPARE_RE, _LINT_PRICE_BEFORE_RE):
         for m in pat.finditer(cleaned):
             grp_idx = 1 if m.group(1) is not None else 2
             span = m.span(grp_idx)
@@ -272,6 +283,7 @@ def main() -> None:
     parser.add_argument("--result", required=True, help="Path to *_result.json")
     parser.add_argument("--response", required=True, help="Path to markdown/text response file")
     parser.add_argument("--backtest", default=None, help="Optional path to *_backtest.json")
+    parser.add_argument("--prev-result", action="append", default=[], help="Optional previous *_result.json path(s) for cross-day comparison")
     args = parser.parse_args()
 
     res_path = Path(args.result)
@@ -283,9 +295,15 @@ def main() -> None:
 
     report = json.loads(res_path.read_text(encoding="utf-8"))
     bt = json.loads(Path(args.backtest).read_text(encoding="utf-8")) if args.backtest else None
+    prev_reports: list[dict[str, Any]] = []
+    for p_str in args.prev_result or []:
+        p_path = Path(p_str)
+        if not p_path.exists():
+            raise SystemExit(f"[INVALID_ARGUMENT] prev-result file not found: {p_path}")
+        prev_reports.append(json.loads(p_path.read_text(encoding="utf-8")))
     text = resp_path.read_text(encoding="utf-8")
 
-    errors = lint_agent_response(text, report, backtest=bt)
+    errors = lint_agent_response(text, report, backtest=bt, prev_reports=prev_reports)
     if errors:
         raise SystemExit(f"[RESPONSE_CONTRACT_VIOLATION] 回复校验未通过（共 {len(errors)} 项）：{'；'.join(errors)}")
     print(json.dumps({"status": "OK", "symbol": report["meta"]["symbol"], "response": str(resp_path)}, ensure_ascii=False))

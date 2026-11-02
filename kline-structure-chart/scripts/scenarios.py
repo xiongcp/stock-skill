@@ -431,9 +431,17 @@ def build_scenarios(
 
     candidates: list[dict[str, Any]] = []
 
+    last_bull_bar = float(sview[-1]["close"]) >= float(sview[-1]["open"])
+    poked_above_pre = st_code != "below" and ref >= mid_rail - 0.3 * atr_abs and (
+        (recent_hi10 >= u * 0.997 and ref < u and not struct["expired"])
+        or (recent_hi10 >= prev20_hi * 0.998 and ref < prev20_hi)
+        or any(recent_hi10 >= ph * 0.998 and ref < ph for ph in piv_hs[-3:])
+    )
+    fell_back_rejection = bool(poked_above_pre and st_code != "above" and not last_bull_bar)
+
     # 1. TREND_CONTINUATION（趋势延续）
-    channel_active = bool(struct.get("fitted") and st_code in ("inside", "above") and ref >= mid_rail)
-    up_impulse = impulse is not None and impulse["direction"] == "up" and ref >= mid_rail
+    channel_active = bool(struct.get("fitted") and st_code in ("inside", "above") and ref >= mid_rail and not fell_back_rejection)
+    up_impulse = impulse is not None and impulse["direction"] == "up" and ref >= mid_rail and not fell_back_rejection
     if channel_active or up_impulse or (ref >= ma20 >= ma60 and ref >= mid_rail):
         strict_1 = bool(channel_active or up_impulse)
         ext_u = _money(max(u + max(0.0, su) * horizon, bull_base["target_price"], ref * (1.0 + 0.8 * atr)))
@@ -470,11 +478,11 @@ def build_scenarios(
     broken_up_candidates: list[float] = []
     if st_code == "above" and status_run_bars <= 5 and not struct["expired"] and ref >= u:
         broken_up_candidates.append(u)
-    if len(sview) >= 20 and ref >= prev20_hi * 0.998 and min(float(b["close"]) for b in recent5) < prev20_hi:
-        broken_up_candidates.append(min(ref, prev20_hi))
+    if len(sview) >= 20 and ref >= prev20_hi and min(float(b["close"]) for b in recent5) < prev20_hi:
+        broken_up_candidates.append(prev20_hi)
     for ph in piv_hs[-3:]:
-        if ref >= ph * 0.998 and min(float(b["close"]) for b in recent5) < ph:
-            broken_up_candidates.append(min(ref, ph))
+        if ref >= ph and min(float(b["close"]) for b in recent5) < ph:
+            broken_up_candidates.append(ph)
     broke_up_recent = bool(broken_up_candidates)
     near_breakout = (not broke_up_recent) and (abs(r1 / ref - 1.0) <= max(0.035, 1.8 * atr) or abs(u / ref - 1.0) <= 1.5 * atr)
     strict_2 = bool(broke_up_recent)
@@ -531,7 +539,7 @@ def build_scenarios(
                 ref * (1.0 - 0.55 * atr),
             )
         )
-        fell_back_inside = bool(poked_above and st_code != "above")
+        fell_back_inside = bool(fell_back_rejection and not broke_up_recent)
         fb_Fall_lvl = u if (st_code == "above" and not struct["expired"]) else float(bull_base["retest_hold"])
         candidates.append(
             build_item(
@@ -592,11 +600,11 @@ def build_scenarios(
     broken_dn_candidates: list[float] = []
     if st_code == "below" and not struct["expired"] and ref <= l:
         broken_dn_candidates.append(l)
-    if len(sview) >= 20 and ref <= prev20_lo * 1.002 and max(float(b["close"]) for b in recent5) > prev20_lo:
-        broken_dn_candidates.append(max(ref, prev20_lo))
+    if len(sview) >= 20 and ref <= prev20_lo and max(float(b["close"]) for b in recent5) > prev20_lo:
+        broken_dn_candidates.append(prev20_lo)
     for pl in piv_ls[-2:]:
-        if ref <= pl * 1.002 and max(float(b["close"]) for b in recent5) > pl:
-            broken_dn_candidates.append(max(ref, pl))
+        if ref <= pl and max(float(b["close"]) for b in recent5) > pl:
+            broken_dn_candidates.append(pl)
     broke_dn_recent = bool(broken_dn_candidates)
     near_support = ref <= mid_rail or abs(ref / s1 - 1.0) <= max(0.035, 1.8 * atr)
     strict_5 = bool(broke_dn_recent)
@@ -655,7 +663,12 @@ def build_scenarios(
         exhaustion = (c_dir == "down" and (rsi_now <= 44.0 or rev_bar)) or (
             c_dir == "up" and (rsi_now >= 56.0 or rev_bar)
         )
-        strict_6 = bool(near_100 and exhaustion)
+        strict_6 = bool(
+            near_100
+            and exhaustion
+            and not (c_dir == "down" and broke_dn_recent)
+            and not (c_dir == "up" and broke_up_recent)
+        )
         if strict_6 or (0.65 <= c_ratio <= 1.75):
             rev_dir = "BULLISH" if c_dir == "down" else "BEARISH"
             exh_desc = "出现企稳/反转K线" if rev_bar else f"RSI14={rsi_now:.1f} 进入动能衰竭区"
@@ -703,13 +716,13 @@ def build_scenarios(
                         if c_dir == "down"
                         else f"C 浪继续创新高超过 1.618×A（站上 {fp(lvl_1618)}）"
                     ),
-                    already_active=bool(strict_6 and abs(c_ratio - 1.0) <= 0.12),
+                    already_active=bool(strict_6 and rev_bar and abs(c_ratio - 1.0) <= 0.12),
                 )
             )
 
     # 7. OVERSOLD_BOUNCE（超跌反弹）
     dev_ma20_atr = (ma20 - ref) / atr_abs
-    strict_7 = bool(rsi_now < 30.0 or dev_ma20_atr >= 2.0 or (rsi_now <= 35.0 and dev_ma20_atr >= 1.5))
+    strict_7 = bool((rsi_now < 30.0 or dev_ma20_atr >= 2.0 or (rsi_now <= 35.0 and dev_ma20_atr >= 1.5)) and not broke_dn_recent)
     if strict_7 or (rsi_now <= 40.0 and dev_ma20_atr >= 1.1):
         fib_382 = next((lv["price"] for lv in fibs.get("retracements", []) if abs(lv["ratio"] - 0.382) < 0.01), None)
         cand_bounce = [x for x in (ma20, fib_382, r1) if x is not None and x > ref * (1.0 + 0.5 * atr)]

@@ -113,7 +113,7 @@ def build_result(report: dict[str, Any], files: dict[str, str]) -> dict[str, Any
             "recent_gaps": sl["recent_gaps"],
             "abc_scenario": sl["abc_scenario"],
             "wave_counts": sl["wave_counts"],
-            "patterns": report["algebraic_patterns_detected"],
+            "patterns": [{k: v for k, v in p.items() if k != "invalidated"} for p in report["algebraic_patterns_detected"]],
             "smc": report["smc_structures"],
             "volume_profile": {k: v for k, v in report["volume_profile"].items() if k != "bins"},
         },

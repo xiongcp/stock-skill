@@ -297,7 +297,13 @@ def render_report_markdown(
 
     # 5. 形态与信号证据
     lines += ["## 5. 形态与信号证据（公式可复核）", ""]
-    patterns = st.get("patterns") or []
+    struct_bars = int((meta.get("request") or {}).get("structure_bars") or 120)
+    patterns = [
+        p
+        for p in (st.get("patterns") or [])
+        if not p.get("invalidated")
+        and not (p.get("category") == "candlestick" and isinstance(p.get("bar_idx"), int) and int(p["bar_idx"]) < struct_bars - 3)
+    ]
     for p in patterns[:6]:
         lines += [
             f"- {p['name_cn']}（{DIRECTION_CN.get(p['direction'], p['direction'])}，{p.get('confirmed_at') or p.get('observed_at')}）："
