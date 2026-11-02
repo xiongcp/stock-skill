@@ -760,6 +760,13 @@ def _path_slots(trigger_eta: float, target_eta: float, horizon: int) -> tuple[in
     """路径三个折点（触发、回踩/反抽、目标）的时间槽：取扩散尺度估计，截断在预测期 horizon 以内且严格递增。"""
     if horizon < 3:
         return horizon, horizon, horizon
+    if horizon >= 9:
+        min_t1 = 3
+        min_t3 = max(9, (horizon * 3) // 5)
+        t3 = min(horizon, max(min_t3, round(5.0 + target_eta * 0.75)))
+        t1 = min(t3 - 3, max(min_t1, round(2.0 + trigger_eta * 0.75)))
+        t2 = min(t3 - 1, max(t1 + 2, round((t1 + t3) / 2)))
+        return t1, t2, t3
     t3 = min(horizon, max(3, round(target_eta)))
     t1 = min(t3 - 2, max(1, round(trigger_eta)))
     t2 = min(t3 - 1, max(t1 + 1, round((t1 + t3) / 2)))
@@ -845,6 +852,9 @@ def compute_projections(
     d1, d2, d3 = _path_slots(*eta["bear"], horizon)
     if horizon < 3:
         n1 = n2 = horizon
+    elif horizon >= 9:
+        n1 = min(horizon - 5, max(4, 3 + round(_diffusion_bars(neutral_high, ref, sigma) * 0.6)))
+        n2 = min(horizon - 2, max(n1 + 3, n1 + 2 + round(_diffusion_bars(neutral_low, neutral_high, sigma) * 0.6)))
     else:
         n1 = min(horizon - 2, max(1, round(_diffusion_bars(neutral_high, ref, sigma))))
         n2 = min(horizon - 1, max(n1 + 1, round(n1 + _diffusion_bars(neutral_low, neutral_high, sigma))))

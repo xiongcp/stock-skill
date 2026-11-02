@@ -901,7 +901,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
       ctx.fillText(fmtPrice(gp), 8, gy + 4);
     }}
 
-    // Future divider line
+    // Future divider line & future time-node grid (+5日 / +10日 / +15日)
     const divX = padL + histW;
     ctx.strokeStyle = '#38bdf8';
     ctx.setLineDash([5, 5]);
@@ -913,6 +913,19 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     ctx.fillStyle = '#38bdf8';
     ctx.font = 'bold 12px sans-serif';
     ctx.fillText('右侧: 未来 ' + hBars + ' 日正常波动范围与条件路径', divX + 10, padT + 18);
+
+    const futureTickOffsets = [Math.max(1, Math.round(hBars / 3)), Math.max(2, Math.round(hBars * 2 / 3)), hBars];
+    futureTickOffsets.forEach(function(fOff) {{
+      const fx = xOfFut(Math.min(hBars - 1, Math.max(0, fOff - 1)));
+      ctx.save();
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.22)';
+      ctx.setLineDash([4, 5]);
+      ctx.beginPath();
+      ctx.moveTo(fx, padT + 26);
+      ctx.lineTo(fx, mainB);
+      ctx.stroke();
+      ctx.restore();
+    }});
 
     // Layer: Volume Profile POC / Value Area
     if (layers.poc && REPORT.volume_profile && activeReplayIdx === replays.length) {{
@@ -1126,20 +1139,39 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
         if (pending) ctx.setLineDash([6, 4]);
         ctx.beginPath();
         const wps = sc.waypoints_offset || [];
+        const wpCoords = [];
         wps.forEach(function(wp, wi) {{
           const dx = wp[0], p = wp[1];
           const x = dx <= 0 ? startX : xOfFut(Math.min(hBars - 1, Math.max(0, Math.round(dx) - 1)));
           const y = yOfPrice(p);
+          wpCoords.push([x, y, Math.round(dx), p]);
           if (wi === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         }});
         ctx.stroke();
+        ctx.setLineDash([]);
+        wpCoords.slice(1).forEach(function(pt, idx) {{
+          ctx.fillStyle = '#0e1420';
+          ctx.beginPath();
+          ctx.arc(pt[0], pt[1], 3.8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          if (idx === 0) {{
+            const wpTimeTag = '+' + pt[2] + '日 ' + fmtPrice(pt[3]);
+            scenarioLabels.push({{
+              text: wpTimeTag,
+              color: 'rgba(' + rgb + ', 0.92)',
+              x: Math.max(divX + 10, Math.min(W - padR - 95, pt[0] - 28)),
+              y: pt[1] - 8
+            }});
+          }}
+        }});
         if (wps.length > 0) {{
           const lastWp = wps[wps.length - 1];
           const endX = xOfFut(Math.min(hBars - 1, Math.max(0, Math.round(lastWp[0]) - 1)));
           scenarioLabels.push({{
-            text: edgeMark(lastWp[1]) + sc.name + ' ' + fmtPrice(lastWp[1]),
+            text: edgeMark(lastWp[1]) + sc.name + '(+' + Math.round(lastWp[0]) + '日) ' + fmtPrice(lastWp[1]),
             color: 'rgba(' + rgb + ', ' + Math.min(1, alpha + 0.1).toFixed(2) + ')',
-            x: Math.max(divX + 6, endX - 110),
+            x: Math.max(divX + 12, endX - 132),
             y: yOfPrice(lastWp[1]) - 6
           }});
         }}
@@ -1172,6 +1204,50 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     rightLabels.forEach(function(l) {{
       ctx.fillStyle = l.color;
       ctx.fillText(l.text, W - padR + 6, l.y + 4);
+    }});
+
+    // X-axis historical date ticks & future time-node ticks (+5日 / +10日 / +15日)
+    ctx.font = '11px monospace';
+    const histStep = Math.max(12, Math.floor(nBars / 7));
+    for (let bi = 0; bi < nBars - 6; bi += histStep) {{
+      const tx = xOfBar(bi);
+      const dLabel = bi === 0 ? activeBars[bi].day : activeBars[bi].day.slice(5);
+      ctx.strokeStyle = '#334155';
+      ctx.beginPath();
+      ctx.moveTo(tx, mainB);
+      ctx.lineTo(tx, mainB + 5);
+      ctx.stroke();
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(dLabel, tx - 18, mainB + 16);
+    }}
+    if (lastBar && lastBar.day) {{
+      const nowTxt = lastBar.day.slice(5) + '(当前)';
+      ctx.strokeStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.moveTo(startX, mainB);
+      ctx.lineTo(startX, mainB + 6);
+      ctx.stroke();
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillText(nowTxt, startX - 52, mainB + 16);
+    }}
+    let prevFutRight = startX + 8;
+    futureTickOffsets.forEach(function(fOff) {{
+      const fIdx = Math.min(hBars - 1, Math.max(0, fOff - 1));
+      const fx = xOfFut(fIdx);
+      const fd = (activeFp.horizon_dates && activeFp.horizon_dates[fIdx]) ? activeFp.horizon_dates[fIdx].slice(5) : '';
+      const fTxt = fd ? ('+' + fOff + '日(' + fd + ')') : ('+' + fOff + '日');
+      ctx.strokeStyle = '#facc15';
+      ctx.beginPath();
+      ctx.moveTo(fx, mainB);
+      ctx.lineTo(fx, mainB + 5);
+      ctx.stroke();
+      const tw = ctx.measureText(fTxt).width;
+      const drawX = Math.min(W - padR - tw, fx - tw / 2);
+      if (drawX > prevFutRight + 4) {{
+        ctx.fillStyle = '#facc15';
+        ctx.fillText(fTxt, drawX, mainB + 16);
+        prevFutRight = drawX + tw;
+      }}
     }});
 
     // Subchart subplot (Volume+RVOL20, RSI14, or MACD Hist)

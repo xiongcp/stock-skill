@@ -2738,6 +2738,16 @@ def test_de_placebo_and_logic_consistency_guards(replay_recorded, tmp_path: Path
     assert 'data-layer="quantiles" checked' not in html_cn
     assert "quantiles: false" in html_cn
 
+    # 4. 推演路径时间节点展开（15日窗口下首折点 >= +3日、终点 >= +9日，不挤在最新K线旁）且 HTML/PNG 包含未来时间节点渲染
+    for key in ("bull", "neutral", "bear"):
+        wps = [dx for dx, _ in rep_cn["rule_scenarios"][key]["waypoints_offset"]]
+        assert wps[1] >= 3 and wps[-1] >= 9, f"{key} 折点挤在最新K线旁: {wps}"
+    for sc_item in rep_cn["rule_scenarios"]["scenarios"]:
+        sc_wps = [dx for dx, _ in sc_item["waypoints_offset"]]
+        assert sc_wps[1] >= 3 and sc_wps[-1] >= 9, f"{sc_item['id']} 折点挤在最新K线旁: {sc_wps}"
+    assert "futureTickOffsets" in html_cn and "wpTimeTag" in html_cn
+
+
 
 
 

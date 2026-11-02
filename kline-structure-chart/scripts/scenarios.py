@@ -276,6 +276,13 @@ def _last_causal_state(bars: list[dict[str, Any]]) -> dict[str, float]:
 def _slot_triplet(t_med: float, horizon: int) -> tuple[int, int, int]:
     if horizon < 3:
         return horizon, horizon, horizon
+    if horizon >= 9:
+        min_t1 = 3
+        min_t3 = max(9, (horizon * 3) // 5)
+        t3 = min(horizon, max(min_t3, round(5.0 + t_med * 0.75)))
+        t1 = min(t3 - 3, max(min_t1, round(t3 * 0.36)))
+        t2 = min(t3 - 1, max(t1 + 2, round(t3 * 0.68)))
+        return t1, t2, t3
     t3 = min(horizon, max(3, round(t_med)))
     t1 = min(t3 - 2, max(1, round(t3 * 0.35)))
     t2 = min(t3 - 1, max(t1 + 1, round(t3 * 0.68)))
