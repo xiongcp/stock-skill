@@ -427,8 +427,8 @@ def draw_callout_badge(
     pad_x, pad_y = 8, 5
     bw, bh = tw + pad_x * 2 + 3, th + pad_y * 2
 
-    dy_up = [-bh - 16, -bh - 34, -bh - 54, -bh - 76, -bh - 98]
-    dy_dn = [16, 34, 54, 76, 98]
+    dy_up = [-bh - 16, -bh - 34, -bh - 54, -bh - 76, -bh - 98, -bh - 124, -bh - 154, -bh - 186]
+    dy_dn = [16, 34, 54, 76, 98, 124, 154, 186]
     dx_shifts = [
         -bw // 2,
         -int(bw * 0.82),
@@ -475,11 +475,11 @@ def draw_callout_badge(
                     if (pside == "above" and cy <= py and py - cy < 110) or (pside == "below" and cy >= py and cy - py < 110):
                         score += 1200.0
 
-            # 3) 尽量避开 K 线高低点实体与影线区域
+            # 3) 严禁遮挡 K 线高低点实体与影线区域（惩罚高于换边，确保徽标落入K线包络上方或下方空白区）
             for kx1, ky1, kx2, ky2 in obs_list:
-                if not (box[2] + 2 < kx1 or box[0] - 2 > kx2 or box[3] + 2 < ky1 or box[1] - 2 > ky2):
+                if not (box[2] + 3 < kx1 or box[0] - 3 > kx2 or box[3] + 3 < ky1 or box[1] - 3 > ky2):
                     ov_h = min(box[3], ky2) - max(box[1], ky1) + 4
-                    score += max(12.0, ov_h * 7.5)
+                    score += 3800.0 + max(12.0, ov_h * 55.0)
 
             if score < best_score:
                 best_score = score
@@ -660,7 +660,8 @@ def render(
     )
     draw.text((left, 50), subtitle, font=f_sub, fill=MUTED)
 
-    bull_ftag, bull_w, bull_a, bull_dash = "", 2.8, 255, False
+    bull_ftag = "(禁做多)" if veto_flag else ""
+    bull_w, bull_a, bull_dash = (1.8, 95, True) if veto_flag else (2.8, 255, False)
     neut_ftag, neut_w, neut_a, neut_dash = "", 2.8, 255, True
     bear_ftag, bear_w, bear_a, bear_dash = "", 2.8, 255, False
 
@@ -786,9 +787,9 @@ def render(
         draw.text((cx1 + 13, cy1 + 45), c_line2, font=f_tiny, fill=MUTED)
 
     # ---------------- 主图坐标系与预判区分界背景 ----------------
-    # 历史区与推演区各用各的横向比例：推演区占的宽度固定（等于默认 120 日图的比例），历史区按 --days 均分
+    # 历史区与推演区各用各的横向比例：推演区保证充足横向像素以完整展示 +5/+10/+15 日时间节点，不挤压最新K线
     span = width - left - right
-    fut_w = span * future_slots / (struct_slots + future_slots)
+    fut_w = max(295.0, span * future_slots / (struct_slots + future_slots))
     step = (span - fut_w) / len(plot)
     fstep = fut_w / future_slots
     bar_half = max(1.2 if step < 4 else 2.2, step * 0.35)  # --days 很大时K线变窄，避免实体互相重叠
@@ -808,7 +809,7 @@ def render(
         cx1, cp1, cx2, cp2 = clipped
         return (x_of(cx1), yp(cp1)), (x_of(cx2), yp(cp2))
 
-    div_x = x_of(last_bar_idx + 0.6)
+    div_x = x_of(last_bar_idx + 0.75)
     chart_right = width - right
 
     # 主图面板底色 + 右侧预判区微暗底色 + 楔形 RGBA 半透明通道填充
@@ -915,14 +916,15 @@ def render(
             dashed_hline(draw, left, chart_right, y_poc, (*VP_POC, 195))
             right_gutter_tags.append((y_poc, f"POC 成交分布近似 {fp(poc_f)}", VP_POC))
     if scenario:
-        for level in scenario["levels"]:
-            if not level["drawn"]:
-                continue
+        drawn_lvls = [lv for lv in scenario["levels"] if lv["drawn"]]
+        primary_abc_lvl = next((lv for lv in drawn_lvls if lv["ratio"] == 1.0), drawn_lvls[-1] if drawn_lvls else None)
+        for level in drawn_lvls:
             y = yp(level["price"])
             abc_ys.append(y)
             dashed_hline(draw, left, chart_right, y, (*SCEN, 185))
-            live_tag = f"·{level['intraday']}" if level["intraday"] else ""
-            right_gutter_tags.append((y, f"ABC {level['ratio']:.3f}  {fp(level['price'])} ({level['state']}{live_tag})", SCEN))
+            if primary_abc_lvl is not None and level["ratio"] == primary_abc_lvl["ratio"]:
+                live_tag = f"·{level['intraday']}" if level["intraday"] else ""
+                right_gutter_tags.append((y, f"ABC {level['ratio']:.3f}  {fp(level['price'])} ({level['state']}{live_tag})", SCEN))
     elif fibs and fibs.get("retracements"):
         for flvl in fibs["retracements"]:
             if flvl["ratio"] not in (0.382, 0.5, 0.618):
@@ -1004,10 +1006,13 @@ def render(
         for idx, line in enumerate(v_lines):
             draw.text((div_x + 14, top + 41 + idx * 15), line, font=f_tiny_sm, fill=(254, 226, 226))
 
+    bull_end_dx = int(round(projections["bull"]["waypoints_offset"][-1][0]))
+    neut_end_dx = int(round(projections["neutral"]["waypoints_offset"][-1][0]))
+    bear_end_dx = int(round(projections["bear"]["waypoints_offset"][-1][0]))
     proj_configs = [
-        ("bull", PROJ_BULL, bull_dash, bull_w, bull_a, f"上攻 {fp(projections['bull']['target_price'])}{bull_ftag}"),
-        ("neutral", PROJ_NEUTRAL, neut_dash, neut_w, neut_a, f"震荡 {fp(projections['neutral']['target_price'])}{neut_ftag}"),
-        ("bear", PROJ_BEAR, bear_dash, bear_w, bear_a, f"下探 {fp(projections['bear']['target_price'])}{bear_ftag}"),
+        ("bull", PROJ_BULL, bull_dash, bull_w, bull_a, f"上攻(+{bull_end_dx}日) {fp(projections['bull']['target_price'])}{bull_ftag}"),
+        ("neutral", PROJ_NEUTRAL, neut_dash, neut_w, neut_a, f"震荡(+{neut_end_dx}日) {fp(projections['neutral']['target_price'])}{neut_ftag}"),
+        ("bear", PROJ_BEAR, bear_dash, bear_w, bear_a, f"下探(+{bear_end_dx}日) {fp(projections['bear']['target_price'])}{bear_ftag}"),
     ]
     dup_tol = float(ref_p) * 0.003
     skip_labels = set()
@@ -1025,11 +1030,16 @@ def render(
         for i in range(len(pts) - 1):
             all_proj_segs.append((pts[i], pts[i + 1]))
         draw_arrow_polyline(draw, pts, fill=col, width=w_val, dashed=is_dashed, alpha=a_val)
+        for wx, wy in pts[1:-1]:
+            draw.ellipse((wx - 4.2, wy - 4.2, wx + 4.2, wy + 4.2), fill=PANEL_BG, outline=(*col, max(130, a_val)), width=2.0)
+            draw.ellipse((wx - 1.6, wy - 1.6, wx + 1.6, wy + 1.6), fill=(*col, max(150, a_val)))
         right_gutter_tags.append((pts[-1][1], tag_text, col))
 
-    # 同步叠绘 L1 活跃情景中与三主路径目标位不同的独立情景路径，保证 PNG 与 HTML 同源
+    # 静态 PNG 仅在未触发风控否决时叠绘与三主路径目标位不同的独立 ACTIVE 情景，避免否决下满屏多头虚线造成视觉过载
     main_targets = [float(projections[k]["target_price"]) for k in ("bull", "neutral", "bear")]
-    for sc_item in projections.get("scenarios") or []:
+    for sc_item in ([] if veto_flag else (projections.get("scenarios") or [])):
+        if sc_item.get("status") != "ACTIVE":
+            continue
         sc_tgt = float(sc_item.get("target_price") or 0.0)
         if sc_tgt <= 0 or any(abs(sc_tgt - mt) <= dup_tol for mt in main_targets):
             continue
@@ -1039,8 +1049,7 @@ def render(
         sc_dir = str(sc_item.get("direction") or "NEUTRAL")
         sc_col = PROJ_BULL if sc_dir == "BULLISH" else (PROJ_BEAR if sc_dir == "BEARISH" else PROJ_NEUTRAL)
         sc_pts = [(x_of(last_bar_idx + dx), yp(p)) for dx, p in sc_wps]
-        sc_pending = sc_item.get("status") != "ACTIVE"
-        draw_arrow_polyline(draw, sc_pts, fill=sc_col, width=2.2, dashed=sc_pending, alpha=200)
+        draw_arrow_polyline(draw, sc_pts, fill=sc_col, width=2.2, dashed=False, alpha=200)
         right_gutter_tags.append((sc_pts[-1][1], f"{sc_item['name']} {fp(sc_tgt)}", sc_col))
 
     step_boxes: list[tuple[int, int, int, int]] = []
@@ -1052,17 +1061,22 @@ def render(
             if k is None or k == 0 or k == len(waypoints) - 1 or step_txt in skip_labels:
                 continue
             sx, sy = pts[k]
-            tw, th = text_size(draw, step_txt, f_tiny_bold)
+            disp_step_txt = f"+{int(round(dx))}日 {step_txt}"
+            tw, th = text_size(draw, disp_step_txt, f_tiny_bold)
             bw_s, bh_s = tw + 12, th + 6
             is_peak = waypoints[k][1] >= max(waypoints[k - 1][1], waypoints[k + 1][1])
-            dy_cands = [-bh_s - 10, -bh_s - 26, -bh_s - 42, 10, 26, 42] if is_peak else [10, 26, 42, -bh_s - 10, -bh_s - 26, -bh_s - 42]
-            dx_cands = [0, -14, 14, -26, 26]
+            dy_cands = (
+                [-bh_s - 10, -bh_s - 28, -bh_s - 46, -bh_s - 64, 10, 28, 46, 64]
+                if is_peak
+                else [10, 28, 46, 64, -bh_s - 10, -bh_s - 28, -bh_s - 46, -bh_s - 64]
+            )
+            dx_cands = [0, 18, -18, 38, -38, 60, -60, 84]
             best_box = None
             best_sc = float("inf")
             step_top_bound = (veto_box[3] + 6) if veto_box is not None else (top + 36)
             for r_y, dy_c in enumerate(dy_cands):
                 for r_x, dx_c in enumerate(dx_cands):
-                    bx1 = min(max(div_x + 4, sx - bw_s // 2 + dx_c), chart_right - bw_s - 4)
+                    bx1 = min(max(div_x + 16, sx - bw_s // 2 + dx_c), chart_right - bw_s - 4)
                     by1 = min(max(step_top_bound, sy + dy_c), main_bottom - bh_s - 6)
                     cand = (bx1, by1, bx1 + bw_s, by1 + bh_s)
                     if any(not (cand[2] + 4 < b[0] or cand[0] - 4 > b[2] or cand[3] + 4 < b[1] or cand[1] - 4 > b[3]) for b in step_boxes):
@@ -1080,7 +1094,7 @@ def render(
                         best_box = cand
             if best_box is None:
                 ly = (sy - bh_s - 10) if is_peak else (sy + 10)
-                bx1 = min(max(div_x + 4, sx - bw_s // 2), chart_right - bw_s - 4)
+                bx1 = min(max(div_x + 16, sx - bw_s // 2), chart_right - bw_s - 4)
                 best_box = (bx1, ly, bx1 + bw_s, ly + bh_s)
             step_boxes.append(best_box)
             cy_mid = (best_box[1] + best_box[3]) // 2
@@ -1095,7 +1109,7 @@ def render(
                 outline=(*col, 150),
                 width=1,
             )
-            draw.text((best_box[0] + 6, best_box[1] + 2), step_txt, font=f_tiny_bold, fill=col)
+            draw.text((best_box[0] + 6, best_box[1] + 2), disp_step_txt, font=f_tiny_bold, fill=col)
 
     # 将今日上下轨与最新价也放入右侧专属标签槽（形态已越过收敛顶点时轨道不再作为今日参考，不放）
     upper_tag = "形态上轨" if wedge["upper_today"] > float(ref_p) else "上轨(已突破)"
@@ -1170,7 +1184,10 @@ def render(
             mark(rail[x_key], rail[p_key], tag, col, side)
     recent_avg = sum(b["close"] for b in plot[-12:]) / min(12, len(plot))
     last_side = "below" if plot[-1]["close"] < recent_avg else "above"
-    mark(last_bar_idx, plot[-1]["close"], "盘中" if not plot[-1]["complete"] else "最新收", INTRA, last_side)
+    if not plot[-1]["complete"]:
+        mark(last_bar_idx, plot[-1]["close"], "盘中", INTRA, last_side)
+    else:
+        draw_pivot_dot(draw, x_of(last_bar_idx), yp(plot[-1]["close"]), INTRA)
 
     sorted_marks = sorted(marks, key=lambda item: (item["idx"], -item["price"] if item["side"] == "above" else item["price"]))
     peer_anchors = [(x_of(m["idx"]), yp(m["price"]), m["side"]) for m in sorted_marks]
@@ -1185,7 +1202,7 @@ def render(
             m["color"],
             m["side"],
             left,
-            div_x + 48,
+            div_x - 6,
             top + 36,
             main_bottom - 6,
             occupied_badges,
@@ -1193,7 +1210,7 @@ def render(
             peer_anchors=peer_anchors,
         )
 
-    # ---------------- 绘制 X 轴历史日期刻度 + 预判区未来时间刻度 ----------------
+    # ---------------- 绘制 X 轴历史日期刻度 + 预判区未来时间刻度与垂直时间网格 ----------------
     for i in range(0, len(view), date_step):
         if len(view) - 1 - i < 8:
             continue
@@ -1207,11 +1224,11 @@ def render(
     tw, _ = text_size(draw, now_label, f_tiny_sm)
     nx = x_of(last_bar_idx)
     draw.line((nx, main_bottom, nx, main_bottom + 6), fill=INTRA, width=2)
-    draw.text((nx - tw // 2, main_bottom + 8), now_label, font=f_tiny_sm, fill=INTRA)
+    draw.text((nx - tw + 4, main_bottom + 8), now_label, font=f_tiny_sm, fill=INTRA)
 
-    # 预判区未来时间刻度：优先读取 conformal_forecast.horizon_dates 的交易所日历，无则回退周末估算；确保终点刻度始终可读
+    # 预判区未来时间刻度：优先读取 conformal_forecast.horizon_dates 的交易所日历，无则回退周末估算；同时绘制垂直虚线时间网格
     base_day = plot[-1]["day"]
-    prev_right = nx + tw // 2
+    prev_right = nx + 6
     horizon_ticks = int(projections.get("horizon_bars") or projections["bull"]["waypoints_offset"][-1][0])
     h_dates = (conformal_forecast or {}).get("horizon_dates") if isinstance(conformal_forecast, dict) else None
 
@@ -1221,18 +1238,16 @@ def render(
         return f"≈+{f_off}日({add_trading_days_str(base_day, f_off)})"
 
     tick_offsets = sorted({max(1, round(horizon_ticks * k / 3)) for k in (1, 2, 3)})
-    term_off = tick_offsets[-1]
-    term_fx = x_of(last_bar_idx + term_off)
-    term_tw, _ = text_size(draw, _future_tick_label(term_off), f_tiny_sm)
-    term_left = term_fx - term_tw // 2
     for f_off in tick_offsets:
         fx = x_of(last_bar_idx + f_off)
+        dashed_line(draw, (fx, top + 35), (fx, main_bottom), fill=(*GRID, 155), width=1.0, dash=4, gap=5)
         f_date_str = _future_tick_label(f_off)
         tw, _ = text_size(draw, f_date_str, f_tiny_sm)
         draw.line((fx, main_bottom, fx, main_bottom + 5), fill=PROJ_NEUTRAL, width=1.2)
-        if f_off != term_off and fx + tw // 2 + 4 >= term_left:
-            continue  # 预留终点 (+15日) 标签空间，避免中段刻度把终点挤掉
-        if fx - tw // 2 > prev_right + 4:
+        if fx - tw // 2 <= prev_right + 3:
+            f_date_str = f"+{f_off}日"
+            tw, _ = text_size(draw, f_date_str, f_tiny_sm)
+        if fx - tw // 2 > prev_right + 2:
             draw.text((fx - tw // 2, main_bottom + 8), f_date_str, font=f_tiny_sm, fill=PROJ_NEUTRAL)
             prev_right = fx + tw // 2
 

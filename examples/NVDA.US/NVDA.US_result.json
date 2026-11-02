@@ -22,10 +22,7 @@
       "market": "US",
       "asset_type": "equity",
       "display_bars": 120,
-      "structure_bars": 120,
       "horizon_bars": 15,
-      "max_risk_pct": 0.01,
-      "color_scheme": "auto",
       "as_of": "2026-10-15"
     }
   },
@@ -59,19 +56,19 @@
     "veto_codes": [
       "BELOW_LOWER_RAIL"
     ],
-    "rule_score": 57.2,
+    "rule_score": 54.2,
     "rating": "NEUTRAL_WATCH",
     "rating_cn": "多空分歧/等待确认",
-    "headline_cn": "【防守回避/破位警惕】综合规则分 57.2/100，当前属于「区间观察/等待右侧收盘突破」；关键突破位 222.68，关键防守/止损位 211.26，TP1 227.31（净盈亏比 1.48）。",
+    "headline_cn": "【防守回避/破位警惕】综合规则分 54.2/100，当前属于「区间观察/等待右侧收盘突破」；关键突破位 222.68，关键防守/止损位 211.26，TP1 227.67（净盈亏比 1.54）。",
     "overextended": false,
     "rule_detail": {
       "components": {
         "macro_trend_25": 25.0,
-        "structure_pattern_25": 7.5,
+        "structure_pattern_25": 4.5,
         "strategy_trigger_25": 12.5,
         "volume_benchmark_25": 12.2
       },
-      "components_total": 57.2,
+      "components_total": 54.2,
       "regime_adjustment": {
         "applied": false
       },
@@ -156,8 +153,7 @@
       "warnings_cn": []
     },
     "bull_case": [
-      "结构触发：若日线放量收盘站稳 222.68（已跌破的下轨(反压)），回踩不破 220.50，上方空间指向 TP1 227.31 / TP2 232.12。",
-      "数学形态证据：早晨之星 (Bar[-2]Bear(3.76>=0.6*ATR) AND StarBody(0.89<=0.35*Body[-2]) AND Close(230.86) >= Mid[-2](229.09))。"
+      "结构触发：若日线放量收盘站稳 222.68（已跌破的下轨(反压)），回踩不破 220.50，上方空间指向 TP1 227.67 / TP2 232.48。"
     ],
     "bear_case": [
       "空头证伪/失效线：若日线收盘跌破 214.27（MA120/前高 07-22/前高 06-22）或跌穿硬止损屏障 211.26，多头结构立即失效，下方风险指向 208.93。",
@@ -187,7 +183,7 @@
         "adx14": 16.64,
         "bbw_percentile_120": 3.33,
         "hv_ratio_20_60": 0.666,
-        "vix": 16.46,
+        "vix": null,
         "close_vs_ema60_pct": -1.63,
         "close_vs_ema200_pct": 6.8
       },
@@ -1114,28 +1110,6 @@
     },
     "active": [
       {
-        "id": "OVERSOLD_BOUNCE",
-        "name": "超跌反弹",
-        "direction": "BULLISH",
-        "status": "ACTIVE",
-        "status_cn": "已在进行中",
-        "selection_role": "PRECONDITION_MET",
-        "precondition_template": "RSI 低于 30、偏离 MA20 超过 2 个 ATR",
-        "precondition_met": true,
-        "precondition_rationale": "RSI14=40.2，收盘低于 MA20 (228.58) 达 2.14 个 ATR",
-        "applicability_score": 93.0,
-        "trigger": "已在进行中（超跌偏离 2.1 ATR 后日线已出现企稳阳线）",
-        "trigger_price": null,
-        "reference_trigger_price": 221.48,
-        "trigger_distance_atr": 0.8,
-        "target_price": 222.68,
-        "target_source_template": "MA20 / 0.382 反弹位",
-        "target_source": "MA20 (228.58) / 0.382 反弹位",
-        "invalidation": "再创新低（收盘跌破 212.85）",
-        "invalidation_template": "再创新低",
-        "invalidation_price": 212.85
-      },
-      {
         "id": "BREAKDOWN_DECLINE",
         "name": "破位下行",
         "direction": "BEARISH",
@@ -1156,9 +1130,31 @@
         "invalidation": "收盘收回破位位 224.81 上方",
         "invalidation_template": "收盘收回破位位",
         "invalidation_price": 224.81
+      },
+      {
+        "id": "BREAKOUT_RETEST",
+        "name": "突破回踩",
+        "direction": "BULLISH",
+        "status": "PENDING_TRIGGER",
+        "status_cn": "待触发（前提未成立，条件备选）",
+        "selection_role": "CONDITIONAL_FALLBACK",
+        "precondition_template": "刚收盘突破轨道或颈线 ≤ 5 根",
+        "precondition_met": false,
+        "precondition_rationale": "现价距上方突破位 222.68（已跌破的下轨(反压)）约 1.0 个 ATR",
+        "applicability_score": 72.0,
+        "trigger": "日线放量收盘站上 222.68（已跌破的下轨(反压)）",
+        "trigger_price": 222.68,
+        "reference_trigger_price": 222.68,
+        "trigger_distance_atr": 1.03,
+        "target_price": 238.63,
+        "target_source_template": "形态高度测量",
+        "target_source": "形态高度测量 / 前高 08-17",
+        "invalidation": "收盘跌回轨道内超过 0.5 个 ATR（跌破 215.10）",
+        "invalidation_template": "收盘跌回轨道内超过 0.5 个 ATR",
+        "invalidation_price": 215.1
       }
     ],
-    "precondition_met_count": 2,
+    "precondition_met_count": 1,
     "impulse_wave": null
   },
   "plan": {
@@ -1168,10 +1164,10 @@
         219.33
       ],
       "stop_loss_barrier": 211.26,
-      "take_profit_1": 227.31,
-      "take_profit_2": 232.12,
+      "take_profit_1": 227.67,
+      "take_profit_2": 232.48,
       "time_barrier_bars": 15,
-      "risk_reward_ratio": 1.48,
+      "risk_reward_ratio": 1.54,
       "breakeven_ratchet": {
         "enabled": true,
         "trigger_r": 0.9,
@@ -1191,7 +1187,7 @@
         "required_evidence": "日线收盘站稳 222.68 且 RVOL20 >= 1.35 (当前 1.17)",
         "false_breakout_rule": "突破后收盘跌回 220.50 下方视为假突破"
       },
-      "time_stop_rule": "持仓满 15 根K线仍未触及止损(211.26)或 TP1(227.31) 时，于到期日收盘触发时间屏障离场（若遇一字跌停封死则顺延至开板日）",
+      "time_stop_rule": "持仓满 15 根K线仍未触及止损(211.26)或 TP1(227.67) 时，于到期日收盘触发时间屏障离场（若遇一字跌停封死则顺延至开板日）",
       "market_microstructure": {
         "market": "US",
         "settlement": "T+1_SEC_SETTLEMENT",
@@ -1510,8 +1506,8 @@
       "sigma_lookback_bars": 60,
       "overnight_gap_ratio": 0.654,
       "vol_scale_multiplier": 1.0,
-      "vix": 16.46,
-      "vix_source": "YAHOO_DAILY(^VIX,2026-10-15)",
+      "vix": null,
+      "vix_source": "UNAVAILABLE(TypeError)",
       "earnings_date": null
     },
     "calibration_audit": {
@@ -1631,7 +1627,7 @@
   "reproducibility": {
     "engine_version": "6.0.0",
     "bars_hash": "885cca78371a7ff8",
-    "report_hash": "8022e2a78ec305e6"
+    "report_hash": "d98c804318fd9d77"
   },
   "quotable_prices": {
     "price_decimals": 2,
@@ -1783,6 +1779,7 @@
       214.37,
       214.86,
       214.9,
+      215.1,
       215.3,
       215.43,
       215.88,
@@ -1818,7 +1815,6 @@
       221.03,
       221.09,
       221.3,
-      221.48,
       221.56,
       221.65,
       221.79,
@@ -1882,7 +1878,6 @@
       227.03,
       227.12,
       227.21,
-      227.31,
       227.38,
       227.5,
       227.67,
@@ -1922,11 +1917,11 @@
       231.66,
       231.73,
       231.75,
-      232.12,
       232.14,
       232.28,
       232.29,
       232.37,
+      232.48,
       232.82,
       232.99,
       233.07,
@@ -1958,6 +1953,7 @@
       237.47,
       237.69,
       237.88,
+      238.63,
       238.9,
       238.93,
       239.08,

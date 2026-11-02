@@ -118,8 +118,7 @@ def render_report_markdown(
         "",
         f"- 直出摘要（供 Agent / Flash 模型首段原样引用）：{flash_digest}",
         f"- 结论：{verdict['headline_cn']}",
-        f"- 规则分：**{verdict['rule_score']:.1f} / 100**（{verdict['rating_cn']}）。这是确定性规则加权分，不是胜率，也不是上涨概率。"
-        + (f"{mr_note}" if mr_note else ""),
+        f"- 规则分：**{verdict['rule_score']:.1f} / 100**（{verdict['rating_cn']}）。这是确定性规则加权分，不是胜率，也不是上涨概率。",
         f"- 最新收盘：{price(last_close)}；计划类型：{verdict['setup_label_cn']}。",
         "",
     ]
@@ -191,7 +190,7 @@ def render_report_markdown(
         lines += [
             f"- 现价 {sc['min_trigger_distance_atr']} 个 ATR 以内正在争夺的价位：{items}。这些价位落在日常波动范围内，不作触发条件。"
         ]
-    counts = st.get("wave_counts") or []
+    counts = [wc for wc in (st.get("wave_counts") or []) if wc.get("role") == "主计数"] or (st.get("wave_counts") or [])[:1]
     if counts:
         lines += ["", "| 浪型计数 | A 浪 | B 浪终点 | C 浪进度 | 1.0 倍测算位 | 否定条件 |", "| --- | --- | --- | --- | --- | --- |"]
         for wc in counts:
@@ -202,7 +201,6 @@ def render_report_markdown(
                 f"| {wc['b_end']['day']} {price(wc['b_end']['price'])} | {_cell(wc['c_progress']['phase'])} "
                 f"| {price(lvl_1['price']) if lvl_1 else '—'}（{lvl_1['state'] if lvl_1 else '—'}） | {_cell(wc['count_invalidation']['text'])} |"
             ]
-        lines += ["", "- 浪型计数是对同一段走势的不同数法，备选计数用于提示主计数可能错在哪里，不代表可能性大小。"]
     lines += [""]
     ladder = st.get("key_levels") or {}
     res = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("resistances") or [])[:3]]
@@ -304,19 +302,31 @@ def render_report_markdown(
         if not p.get("invalidated")
         and not (p.get("category") == "candlestick" and isinstance(p.get("bar_idx"), int) and int(p["bar_idx"]) < struct_bars - 3)
     ]
+    formula_lines: list[str] = []
     for p in patterns[:6]:
         lines += [
-            f"- {p['name_cn']}（{DIRECTION_CN.get(p['direction'], p['direction'])}，{p.get('confirmed_at') or p.get('observed_at')}）："
-            f"`{p['formula_verified']}`"
+            f"- {p['name_cn']}（{DIRECTION_CN.get(p['direction'], p['direction'])}，{p.get('confirmed_at') or p.get('observed_at')}）"
         ]
+        formula_lines.append(f"- {p['name_cn']}：`{p['formula_verified']}`")
     for s in verdict.get("strategy_signals") or []:
         if s.get("direction") != "NEUTRAL":
-            lines += [f"- 策略 {s['name_cn']} → {s['state']}：`{s['formula_verified']}`"]
+            lines += [f"- 策略 {s['name_cn']} → {s['state']}"]
+            formula_lines.append(f"- 策略 {s['name_cn']}：`{s['formula_verified']}`")
     breaks = (st.get("smc") or {}).get("structure_breaks") or []
     if breaks:
         last_break = breaks[-1]
         b_label = BREAK_CN.get(str(last_break.get("type")), str(last_break.get("type")))
         lines += [f"- 最近一次结构破位：{b_label}（{last_break['day']}，破位价 {price(last_break['broken_level'])}）"]
+    if formula_lines:
+        lines += [
+            "",
+            "<details>",
+            "<summary>展开底层量化公式验证明细</summary>",
+            "",
+            *formula_lines,
+            "",
+            "</details>",
+        ]
     if not patterns and not breaks and not any(s.get("direction") != "NEUTRAL" for s in verdict.get("strategy_signals") or []):
         lines += ["- 当前窗口未触发蜡烛形态、背离或策略信号。"]
     lines += [""]

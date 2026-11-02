@@ -268,18 +268,19 @@ def compute_triple_barrier_plan(
     entry_mid = (entry_low + entry_high) / 2.0
     unit_risk = max(atr14 * 0.5, entry_mid - stop_loss)
     eff_swing_risk = min(unit_risk, 1.50 * atr14)
+    fee_rate = round_trip_cost_rate(rules)
+    min_viable_tp1 = entry_mid + 1.25 * unit_risk + 2.0 * entry_mid * fee_rate
     if setup_type == "RIGHT_SIDE_BREAKOUT":
         struct_cap = max(r1, bull_target_ladder)
     else:
-        struct_cap = r1 if r1 >= entry_mid + 1.15 * unit_risk else bull_target_ladder
-    raw_tp1 = min(struct_cap, entry_mid + 1.5 * eff_swing_risk)
+        struct_cap = r1 if r1 >= min_viable_tp1 else max(r1, bull_target_ladder)
+    raw_tp1 = min(struct_cap, entry_mid + 2.2 * eff_swing_risk)
     if raw_tp1 <= entry_mid:
         raw_tp1 = entry_mid + 1.0 * atr14
     tp1 = round_to_tick(raw_tp1, market, asset_type, as_of_day)
     tp2 = round_to_tick(max(tp1 + 0.8 * atr14, bull_target_ladder), market, asset_type, as_of_day)
 
     # Round-trip fee deduction in price units
-    fee_rate = round_trip_cost_rate(rules)
     net_reward = max(0.0, (tp1 - entry_mid) - entry_mid * fee_rate)
     net_risk = unit_risk + entry_mid * fee_rate
     rr_ratio = round(net_reward / net_risk, 2) if net_risk > 0 else 0.0
@@ -440,8 +441,9 @@ def compute_triple_barrier_plan(
         lot = int(rules["lot_size"])
         step = int(rules.get("lot_step", lot))
         lot_shares = round_shares_to_lot(raw_shares, rules)
+        max_notional_pct = 0.50 if asset_type == "etf" else 0.25
         max_cash_shares = round_shares_to_lot(
-            int(math.floor(float(account_equity) / max(1e-6, entry_high_raw * (1.0 + fee_rate)))), rules
+            int(math.floor(float(account_equity) * max_notional_pct / max(1e-6, entry_high_raw * (1.0 + fee_rate)))), rules
         )
         final_shares = max(0, min(lot_shares, max_cash_shares))
         price_loss_per_share = (entry_high - stop_loss) / adj_factor
@@ -911,7 +913,7 @@ def audit_trade_idea(
     net_rr = net_reward / max(1e-6, net_risk)
 
     hk_t_violation = market == "HK" and asset_type == "equity" and gross_reward < 0.60
-    if net_rr < 1.50 or hk_t_violation:
+    if net_rr < 1.20 or hk_t_violation:
         hk_msg = (
             f"；港股双边印花税+规费下价差仅 {gross_reward:.2f} HKD（低于 0.60 HKD 保本底线及 1.50 HKD 推荐做T空间）"
             if hk_t_violation
@@ -925,7 +927,19 @@ def audit_trade_idea(
             "effective_cost_rate": cost_detail["effective_cost_rate"],
             "breakeven_price": round(entry_f + fee_per_share if direction_u == "LONG" else entry_f - fee_per_share, p_dec),
             "note_cn": (
-                f"扣除双边佣金、印花税与规费（共 {cost_detail['total_cost_amount']:.2f} {meta.get('currency', '')}）后净盈亏比仅 {net_rr:.2f}（低于 1.50 门禁）{hk_msg}"
+                f"扣除双边佣金、印花税与规费（共 {cost_detail['total_cost_amount']:.2f} {meta.get('currency', '')}）后净盈亏比仅 {net_rr:.2f}（低于 1.20 硬门禁）{hk_msg}"
+            ),
+        }
+    elif net_rr < 1.50:
+        rr_check = {
+            "status": "WARN",
+            "gross_rr": round(gross_rr, 2),
+            "net_rr_after_cost": round(net_rr, 2),
+            "round_trip_cost_amount": cost_detail["total_cost_amount"],
+            "effective_cost_rate": cost_detail["effective_cost_rate"],
+            "breakeven_price": round(entry_f + fee_per_share if direction_u == "LONG" else entry_f - fee_per_share, p_dec),
+            "note_cn": (
+                f"扣除双边佣金、印花税与规费（共 {cost_detail['total_cost_amount']:.2f} {meta.get('currency', '')}）后净盈亏比为 {net_rr:.2f}（高于 1.20 硬底线但低于 1.50 理想值）"
             ),
         }
     else:

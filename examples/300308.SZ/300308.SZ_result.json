@@ -22,10 +22,7 @@
       "market": "CN",
       "asset_type": "equity",
       "display_bars": 120,
-      "structure_bars": 120,
       "horizon_bars": 15,
-      "max_risk_pct": 0.01,
-      "color_scheme": "auto",
       "as_of": "2026-10-15"
     }
   },
@@ -56,7 +53,7 @@
     "setup_label_cn": "区间观察/等待右侧收盘突破",
     "risk_veto": true,
     "veto_reasons": [
-      "大盘环境评分偏弱 (16.0<35)，压降个股做多评级",
+      "大盘环境评分偏弱 (6.0<35)，压降个股做多评级",
       "日线收盘处于结构下轨下方（破位状态未修复）"
     ],
     "veto_codes": [
@@ -66,8 +63,8 @@
     "rule_score": 12.5,
     "rating": "BEARISH_PRESSURE",
     "rating_cn": "多周期空头承压",
-    "headline_cn": "【防守回避/破位警惕】综合规则分 12.5/100，当前属于「区间观察/等待右侧收盘突破」；关键突破位 761.54，关键防守/止损位 606.79，TP1 761.54（净盈亏比 1.43）。",
-    "overextended": true,
+    "headline_cn": "【防守回避/破位警惕】综合规则分 12.5/100，当前属于「区间观察/等待右侧收盘突破」；关键突破位 676.00，关键防守/止损位 606.79，TP1 761.54（净盈亏比 1.44）。",
+    "overextended": false,
     "rule_detail": {
       "components": {
         "macro_trend_25": 2.5,
@@ -86,7 +83,7 @@
         "active_bear_strategies": 3,
         "causal_momentum_ic_15d": 0.306,
         "scoring_regime": "MOMENTUM_TREND",
-        "weekly_60w_position_pct": 35.6
+        "weekly_60w_position_pct": 37.1
       },
       "scoring_method": "DETERMINISTIC_MULTI_FACTOR_RULE_V5",
       "note": "rule_score 为确定性多维度规则加权分（0~100），不代表统计胜率或预测概率。"
@@ -159,38 +156,36 @@
       "effort_vs_result": -0.5307,
       "warnings_cn": [
         "【防阴跌接飞刀】收盘低于 EMA20 且 EMA20 不高于 EMA50（中短期均线走弱）；未见右侧微观破位收回（Micro-BOS）或放量吞没前，左侧回踩计划不予确认",
-        "【过热降级】偏离 EMA20 -3.09 ATR、RSI14 25.8 或高位派发结构触发过热条件，已不给出做多确认"
+        "【高位破位派发降级】近60日高低振幅达 1.80x 且现价已跌破 EMA20（较近20日高点回撤 6.54 ATR），处于高位派发破位阶段，已不给出做多确认"
       ]
     },
     "bull_case": [
-      "结构触发：若在支撑 630.99 上方企稳（入场/观察区 660.81~678.72，防守位 606.79），修复空间指向 TP1 761.54，放量突破 761.54（已跌破的下轨(反压)）后指向 TP2 800.26。",
-      "数学形态证据：看涨锤头线 (LowerWick(45.22) >= 2.0*Body(0.35) AND UpperWick/Range(0.09) <= 0.18 AND Range(49.92) >= 0.75*ATR(47.50) AND LowRank20(0.18))。"
+      "结构触发：若日线放量收盘站稳 676.00（缺口下沿 10-15），回踩不破 661.77，上方空间指向 TP1 761.54 / TP2 800.26。"
     ],
     "bear_case": [
       "空头证伪/失效线：若日线收盘跌破 630.99（前高 2026-03-20）或跌穿硬止损屏障 606.79，多头结构立即失效，下方风险指向 597.41。",
-      "反向形态警示：看跌吞没形态 (PrevBull(C1=939.54>O1=938.05) AND BearBody(40.22) >= 1.08*PrevBody(1.50) AND C(926.28) <= O1(938.05) AND RVOL(0.92))。",
-      "独立风控否决项：大盘环境评分偏弱 (16.0<35)，压降个股做多评级",
+      "独立风控否决项：大盘环境评分偏弱 (6.0<35)，压降个股做多评级",
       "独立风控否决项：日线收盘处于结构下轨下方（破位状态未修复）"
     ]
   },
   "market_context": {
-    "index_symbol": "000300.SH",
-    "index_name": "沪深300",
+    "index_symbol": "399006.SZ",
+    "index_name": "创业板指",
     "regime": "TRENDING_BEAR",
     "regime_label_cn": "空头趋势承压",
-    "regime_score": 16.0,
-    "relative_strength_vs_index": 0.7946,
+    "regime_score": 6.0,
+    "relative_strength_vs_index": 0.8726,
     "benchmark_missing": false,
     "source": "SINA_LIVE_DAILY",
-    "bench_ret1": -0.01225,
-    "bench_ret5": -0.03347
+    "bench_ret1": -0.029158,
+    "bench_ret5": -0.083474
   },
   "structure": {
     "last_close": 656.94,
     "regime": {
       "regime": "HIGH_VOLATILITY_CHAOS",
       "label_cn": "高波失序/极端波动",
-      "regime_score": 16.0,
+      "regime_score": 6.0,
       "routed_strategy_family": "DEFENSIVE_WAIT",
       "evidence": {
         "adx14": 21.17,
@@ -1322,8 +1317,8 @@
     "sigma_1d_pct": 5.463,
     "min_trigger_distance_atr": 0.5,
     "breakout_level": {
-      "price": 761.54,
-      "source": "已跌破的下轨(反压)"
+      "price": 676.0,
+      "source": "缺口下沿 10-15"
     },
     "breakdown_level": {
       "price": 630.99,
@@ -1357,20 +1352,20 @@
     "paths": {
       "bull": {
         "name": "上攻突破路径",
-        "trigger": "日线放量收盘站上 761.54（已跌破的下轨(反压)）",
-        "retest_hold": 745.51,
-        "target_price": 794.35,
-        "target_source": "ABC 0.382倍位",
-        "invalidation": "突破后收盘跌回 745.51 下方视为假突破"
+        "trigger": "日线放量收盘站上 676.00（缺口下沿 10-15）",
+        "retest_hold": 661.77,
+        "target_price": 761.54,
+        "target_source": "已跌破的下轨(反压)",
+        "invalidation": "突破后收盘跌回 661.77 下方视为假突破"
       },
       "neutral": {
         "name": "区间震荡路径",
         "range": [
           636.19,
-          709.24
+          676.0
         ],
-        "target_price": 672.72,
-        "condition": "收盘既未站上 761.54 也未跌破 630.99"
+        "target_price": 656.1,
+        "condition": "收盘既未站上 676.00 也未跌破 630.99"
       },
       "bear": {
         "name": "下探破位路径",
@@ -1382,28 +1377,6 @@
       }
     },
     "active": [
-      {
-        "id": "OVERSOLD_BOUNCE",
-        "name": "超跌反弹",
-        "direction": "BULLISH",
-        "status": "PENDING_TRIGGER",
-        "status_cn": "待触发",
-        "selection_role": "PRECONDITION_MET",
-        "precondition_template": "RSI 低于 30、偏离 MA20 超过 2 个 ATR",
-        "precondition_met": true,
-        "precondition_rationale": "RSI14=25.8，收盘低于 MA20 (837.64) 达 5.23 个 ATR",
-        "applicability_score": 93.0,
-        "trigger": "超跌止跌并日线收阳站上 684.60",
-        "trigger_price": 684.6,
-        "reference_trigger_price": 684.6,
-        "trigger_distance_atr": 0.8,
-        "target_price": 761.54,
-        "target_source_template": "MA20 / 0.382 反弹位",
-        "target_source": "MA20 (837.64) / 0.382 反弹位",
-        "invalidation": "再创新低（收盘跌破 629.28）",
-        "invalidation_template": "再创新低",
-        "invalidation_price": 629.28
-      },
       {
         "id": "BREAKDOWN_DECLINE",
         "name": "破位下行",
@@ -1427,51 +1400,51 @@
         "invalidation_price": 775.37
       },
       {
-        "id": "C_WAVE_REVERSAL",
-        "name": "C 浪末端反转",
+        "id": "BREAKOUT_RETEST",
+        "name": "突破回踩",
         "direction": "BULLISH",
         "status": "PENDING_TRIGGER",
-        "status_cn": "待触发",
-        "selection_role": "PRECONDITION_MET",
-        "precondition_template": "C 浪达到 1.0×A 附近，且出现背离或反转形态",
-        "precondition_met": true,
-        "precondition_rationale": "下跌ABC C/A 已达 1.43 倍（接近 1.0×A），RSI14=25.8",
-        "applicability_score": 89.0,
-        "trigger": "C 浪在 1.0×A 附近企稳并放量站上 675.96",
-        "trigger_price": 675.96,
-        "reference_trigger_price": 675.96,
+        "status_cn": "待触发（前提未成立，条件备选）",
+        "selection_role": "CONDITIONAL_FALLBACK",
+        "precondition_template": "刚收盘突破轨道或颈线 ≤ 5 根",
+        "precondition_met": false,
+        "precondition_rationale": "现价距上方突破位 676.00（缺口下沿 10-15）约 0.6 个 ATR",
+        "applicability_score": 72.0,
+        "trigger": "日线放量收盘站上 676.00（缺口下沿 10-15）",
+        "trigger_price": 676.0,
+        "reference_trigger_price": 676.0,
         "trigger_distance_atr": 0.55,
-        "target_price": 973.48,
-        "target_source_template": "B 浪终点",
-        "target_source": "B 浪终点 973.48 (09-22)",
-        "invalidation": "C 浪继续创新低超过 1.618×A（跌破 602.13）",
-        "invalidation_template": "C 浪继续创新低超过 1.618×A",
-        "invalidation_price": 602.13
+        "target_price": 779.74,
+        "target_source_template": "形态高度测量",
+        "target_source": "形态高度测量 / 已跌破的下轨(反压)",
+        "invalidation": "收盘跌回轨道内超过 0.5 个 ATR（跌破 643.11）",
+        "invalidation_template": "收盘跌回轨道内超过 0.5 个 ATR",
+        "invalidation_price": 643.11
       }
     ],
-    "precondition_met_count": 3,
+    "precondition_met_count": 1,
     "impulse_wave": null
   },
   "plan": {
     "long": {
       "entry_zone": [
         660.81,
-        678.72
+        678.03
       ],
       "stop_loss_barrier": 606.79,
       "take_profit_1": 761.54,
       "take_profit_2": 800.26,
       "time_barrier_bars": 15,
-      "risk_reward_ratio": 1.43,
+      "risk_reward_ratio": 1.44,
       "breakeven_ratchet": {
         "enabled": true,
         "trigger_r": 0.9,
         "confirm_close_r": 0.3,
         "lock_r": 0.08,
-        "trigger_price": 726.44,
-        "confirm_close_price": 688.66,
-        "breakeven_stop_price": 674.8,
-        "rule_cn": "盘中最高价触及 +0.90R（以入场区中值计约 726.44）且当日收盘高于 +0.30R（约 688.66）后，自次日起将保护性止损上移至 +0.08R 保本位（约 674.80）"
+        "trigger_price": 725.79,
+        "confirm_close_price": 688.21,
+        "breakeven_stop_price": 674.43,
+        "rule_cn": "盘中最高价触及 +0.90R（以入场区中值计约 725.79）且当日收盘高于 +0.30R（约 688.21）后，自次日起将保护性止损上移至 +0.08R 保本位（约 674.43）"
       },
       "left_side_constraints": {
         "required_evidence": "缩量企稳 (RVOL20 <= 1.10，当前 1.40) + RSI 底背离或下轨支撑不破",
@@ -1479,8 +1452,8 @@
         "exit_rule": "盘中最低价触及硬止损屏障 606.79 无条件离场（A 股受 T+1 约束自入场次日起生效）"
       },
       "right_side_constraints": {
-        "required_evidence": "日线收盘站稳 761.54 且 RVOL20 >= 1.35 (当前 1.40)",
-        "false_breakout_rule": "突破后收盘跌回 745.51 下方视为假突破"
+        "required_evidence": "日线收盘站稳 676.00 且 RVOL20 >= 1.35 (当前 1.40)",
+        "false_breakout_rule": "突破后收盘跌回 661.77 下方视为假突破"
       },
       "time_stop_rule": "持仓满 15 根K线仍未触及止损(606.79)或 TP1(761.54) 时，于到期日收盘触发时间屏障离场（若遇一字跌停封死则顺延至开板日）",
       "market_microstructure": {
@@ -1516,7 +1489,7 @@
         "min_order_shares": 100,
         "lot_step": 100,
         "sizing_basis": "ENTRY_HIGH_WORST_FILL",
-        "unit_risk_per_share": 72.6087,
+        "unit_risk_per_share": 71.918,
         "recommended_shares": null,
         "estimated_notional": null,
         "max_loss_at_stop": null,
@@ -1531,7 +1504,7 @@
       "reduce_level": 630.99,
       "exit_level": 606.79,
       "rebound_cap": 644.28,
-      "upside_recheck_level": 761.54,
+      "upside_recheck_level": 676.0,
       "downside_reference": {
         "price": 597.41,
         "source": "前高 2026-03-03"
@@ -1912,7 +1885,7 @@
   "reproducibility": {
     "engine_version": "6.0.0",
     "bars_hash": "14d1e3059b26f837",
-    "report_hash": "8290082acbc1fca7"
+    "report_hash": "6c5f4ff98872a1b1"
   },
   "quotable_prices": {
     "price_decimals": 2,
@@ -1992,7 +1965,6 @@
       600.09,
       600.86,
       601.18,
-      602.13,
       605.55,
       606.79,
       608.88,
@@ -2000,24 +1972,23 @@
       618.13,
       618.14,
       625.4,
-      629.28,
       630.99,
       633.45,
       636.19,
+      643.11,
       643.24,
       644.28,
       645.01,
       647.34,
+      656.1,
       656.94,
       660.81,
       661.19,
+      661.77,
       668.97,
-      672.72,
-      675.96,
       676.0,
-      678.72,
+      678.03,
       680.43,
-      684.6,
       689.5,
       690.16,
       692.9,
@@ -2026,7 +1997,6 @@
       700.31,
       705.0,
       708.33,
-      709.24,
       712.7,
       713.02,
       713.79,
@@ -2051,7 +2021,6 @@
       742.73,
       742.9,
       744.95,
-      745.51,
       746.0,
       747.0,
       747.28,
@@ -2082,6 +2051,7 @@
       775.37,
       777.95,
       778.79,
+      779.74,
       781.79,
       782.29,
       788.89,

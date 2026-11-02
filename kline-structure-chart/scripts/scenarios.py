@@ -276,6 +276,13 @@ def _last_causal_state(bars: list[dict[str, Any]]) -> dict[str, float]:
 def _slot_triplet(t_med: float, horizon: int) -> tuple[int, int, int]:
     if horizon < 3:
         return horizon, horizon, horizon
+    if horizon >= 9:
+        min_t1 = 3
+        min_t3 = max(9, (horizon * 3) // 5)
+        t3 = min(horizon, max(min_t3, round(5.0 + t_med * 0.75)))
+        t1 = min(t3 - 3, max(min_t1, round(t3 * 0.36)))
+        t2 = min(t3 - 1, max(t1 + 2, round(t3 * 0.68)))
+        return t1, t2, t3
     t3 = min(horizon, max(3, round(t_med)))
     t1 = min(t3 - 2, max(1, round(t3 * 0.35)))
     t2 = min(t3 - 1, max(t1 + 1, round(t3 * 0.68)))
@@ -442,8 +449,8 @@ def build_scenarios(
     # 1. TREND_CONTINUATION（趋势延续）
     channel_active = bool(struct.get("fitted") and st_code in ("inside", "above") and ref >= mid_rail and not fell_back_rejection)
     up_impulse = impulse is not None and impulse["direction"] == "up" and ref >= mid_rail and not fell_back_rejection
+    strict_1 = bool(channel_active or up_impulse)
     if channel_active or up_impulse or (ref >= ma20 >= ma60 and ref >= mid_rail):
-        strict_1 = bool(channel_active or up_impulse)
         ext_u = _money(max(u + max(0.0, su) * horizon, bull_base["target_price"], ref * (1.0 + 0.8 * atr)))
         if up_impulse and impulse is not None:
             tgt_1 = _money(max(float(impulse["wave3_1618_target"]), ref * (1.0 + 0.8 * atr)))
@@ -522,6 +529,7 @@ def build_scenarios(
     )
     low_vol_break = (st_code == "above" or ref >= prev20_hi * 0.998) and rvol_now < 1.15
     strict_3 = bool(poked_above or low_vol_break)
+    fell_back_inside = bool(fell_back_rejection and not broke_up_recent)
     near_upper_resist = ref >= mid_rail and abs(u - ref) <= 1.6 * atr_abs
     if strict_3 or near_upper_resist:
         cand_dn = [
@@ -539,7 +547,6 @@ def build_scenarios(
                 ref * (1.0 - 0.55 * atr),
             )
         )
-        fell_back_inside = bool(fell_back_rejection and not broke_up_recent)
         fb_Fall_lvl = u if (st_code == "above" and not struct["expired"]) else float(bull_base["retest_hold"])
         candidates.append(
             build_item(
@@ -548,9 +555,13 @@ def build_scenarios(
                 precondition_met=strict_3,
                 applicability_score=86.0 if strict_3 else 64.0,
                 rationale=(
-                    f"近期冲高至 {fp(recent_hi5)} 后量能不足（RVOL20={rvol_now:.2f}x）或收盘跌回轨道内 {fp(u)}"
-                    if strict_3
-                    else f"现价逼近上轨/前高阻力 {fp(r1)}，若冲高缺量跌回 {fp(bull_base['retest_hold'])} 下方则触发假突破"
+                    f"近期冲高至 {fp(recent_hi5)} 但量能不足（RVOL20={rvol_now:.2f}x < 1.15）"
+                    if (strict_3 and low_vol_break)
+                    else (
+                        f"近期冲高至 {fp(recent_hi5)}（RVOL20={rvol_now:.2f}x）后未能站稳，日线收盘跌回轨道内 {fp(u)}"
+                        if strict_3
+                        else f"现价逼近上轨/前高阻力 {fp(r1)}，若冲高缺量跌回 {fp(bull_base['retest_hold'])} 下方则触发假突破"
+                    )
                 ),
                 raw_trigger_price=brk_cap if fell_back_inside else trig_3,
                 pending_trigger_text=f"冲高受阻于 {fp(brk_cap if st_code == 'above' else r1)} 且日线收盘跌回 {fp(fb_Fall_lvl)} 下方",
@@ -568,9 +579,16 @@ def build_scenarios(
     # 4. RANGE_OSCILLATION（区间震荡）
     dist_u_atr = (max(u, r1) - ref) / atr_abs
     dist_l_atr = (ref - min(l, s1)) / atr_abs
-    strict_4 = bool(st_code == "inside" and dist_u_atr >= 1.0 and dist_l_atr >= 1.0)
+    strict_4 = bool(
+        st_code == "inside"
+        and dist_u_atr >= 1.0
+        and dist_l_atr >= 1.0
+        and not strict_1
+        and not strict_2
+        and not fell_back_inside
+    )
     neut_trig_raw = float(neut_base["target_price"])
-    if not strict_4 and abs(neut_trig_raw / ref - 1.0) < min_trig_dist:
+    if (not strict_4) or abs(neut_trig_raw / ref - 1.0) < min_trig_dist:
         neut_trig_raw = _money(ref * (1.0 + 0.55 * atr) if neut_trig_raw >= ref else ref * (1.0 - 0.55 * atr))
     candidates.append(
         build_item(
@@ -745,7 +763,12 @@ def build_scenarios(
                 target_source_detail=f"MA20 ({fp(ma20)}) / 0.382 反弹位",
                 invalidation_price=inv_7,
                 invalidation_text=f"再创新低（收盘跌破 {fp(inv_7)}）",
-                already_active=bool(strict_7 and float(sview[-1]["close"]) > float(sview[-1]["open"])),
+                already_active=bool(
+                    strict_7
+                    and float(sview[-1]["close"]) > float(sview[-1]["open"])
+                    and not broke_dn_recent
+                    and st_code != "below"
+                ),
             )
         )
 
@@ -782,6 +805,28 @@ def build_scenarios(
         )
         apex_item["alt_target_price"] = dn_apex_tgt if pref_up else up_apex_tgt
         candidates.append(apex_item)
+
+    # 单截面最多允许 1 个主导情景处于 ACTIVE（已在进行中），避免多空/震荡同时激活形成“两头堵”
+    active_cands = sorted(
+        [c for c in candidates if c["status"] == "ACTIVE"],
+        key=lambda x: x["applicability_score"],
+        reverse=True,
+    )
+    for extra in active_cands[1:]:
+        ed = extra["direction"]
+        fb_trig = rp(_money(ref * (1.0 - 0.55 * atr) if ed == "BEARISH" else ref * (1.0 + 0.55 * atr)))
+        extra["status"] = "PENDING_TRIGGER"
+        extra["status_cn"] = "待触发" if extra["precondition_met"] else "待触发（前提未成立，条件备选）"
+        extra["trigger_price"] = fb_trig
+        extra["reference_trigger_price"] = fb_trig
+        extra["trigger_distance_atr"] = max(0.55, round(abs(fb_trig / ref - 1.0) / max(atr, 1e-6), 2))
+        extra["trigger"] = f"待日线收盘{'跌破' if ed == 'BEARISH' else '站上'} {fp(fb_trig)} 确认"
+        if extra["waypoints_offset"] and len(extra["waypoints_offset"]) >= 2:
+            t1_slot = extra["waypoints_offset"][1][0]
+            extra["waypoints_offset"][1] = (t1_slot, fb_trig)
+        if extra["step_labels"]:
+            t1_slot = extra["step_labels"][0][0]
+            extra["step_labels"][0] = (t1_slot, f"触发 {fp(fb_trig)}")
 
     # 筛选规则：优先输出所有 precondition_met=True 的情景（按 applicability_score 降序，最多 5 个）；
     # 若满足前提的情景不足 2 个，仅补充 1 个最高分的待触发条件备选情景（保留 precondition_met=False，严禁篡改为 True）。
