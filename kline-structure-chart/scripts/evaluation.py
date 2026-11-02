@@ -169,29 +169,37 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
         if any(abs(float(a["close"]) - float(b["close"])) > 1e-6 for a, b in zip(sub_pit, ext_pit_restored)):
             mismatches.append(f"PIT rescaling leaked future corporate action at cut={cut}")
 
-        # 6. 策略评分与三重屏障风控决策：验证指标快照、多周期规则分、风控否决与入场/止损/止盈点位零前视
-        sview_sub = layer_sub["sview"]
+        # 6. 策略评分与三重屏障风控决策：验证在 PIT 截面还原后，指标快照、多周期规则分、风控否决与入场/止损/止盈点位对未来除权与极端价格零前视
+        layer_sub_pit = compute_structure_layer(sub_pit, None, 120)
+        ind_sub_pit = compute_all_indicators(sub_pit)
+        sview_sub = layer_sub_pit["sview"]
         sview_len = len(sview_sub)
-        piv_sview = causal_swing_pivots(sview_sub, thr_sub)
+        piv_sview = causal_swing_pivots(sview_sub, layer_sub_pit["zz_thr"])
         geo_sub = detect_geometric_patterns(
-            sview_sub, piv_sview, sub_ind["series"]["atr14"][-sview_len:], sub_ind["series"]["rvol20"][-sview_len:]
+            sview_sub, piv_sview, ind_sub_pit["series"]["atr14"][-sview_len:], ind_sub_pit["series"]["rvol20"][-sview_len:]
         )
         div_sub = detect_divergences(
-            sview_sub, piv_sview, sub_ind["series"]["rsi14"][-sview_len:], sub_ind["series"]["atr14"][-sview_len:]
+            sview_sub, piv_sview, ind_sub_pit["series"]["rsi14"][-sview_len:], ind_sub_pit["series"]["atr14"][-sview_len:]
         )
-        pats_sub = sub_cdl + geo_sub + div_sub
-        wedge_sub = {k: v for k, v in layer_sub["wedge"].items() if not k.startswith("_")}
-        reg_sub = classify_market_regime(sview_sub, sub_ind["snapshot"])
-        strat_sub = evaluate_five_core_strategies(sview_sub, sub_ind, reg_sub)
+        cdl_sub_pit = detect_candlestick_patterns(
+            sub_pit, ind_sub_pit["series"]["atr14"], ind_sub_pit["series"]["rvol20"], lookback=40, max_items=None
+        )
+        pats_sub = cdl_sub_pit + geo_sub + div_sub
+        smc_sub_pit = detect_smc_structures(
+            sub_pit[-STRUCT_DAYS:], causal_swing_pivots(sub_pit[-STRUCT_DAYS:], layer_sub_pit["zz_thr"]), ind_sub_pit["series"]["atr14"][-STRUCT_DAYS:]
+        )
+        wedge_sub = {k: v for k, v in layer_sub_pit["wedge"].items() if not k.startswith("_")}
+        reg_sub = classify_market_regime(sview_sub, ind_sub_pit["snapshot"])
+        strat_sub = evaluate_five_core_strategies(sview_sub, ind_sub_pit, reg_sub)
         bench_stub = {"index_symbol": "AUDIT.SH", "regime": reg_sub["regime"], "regime_score": reg_sub["regime_score"], "relative_strength_vs_index": 1.0, "benchmark_missing": False}
-        mtf_sub = compute_multi_timeframe_score(sub, sub_ind, wedge_sub, pats_sub, sub_smc, strat_sub, bench_stub)
+        mtf_sub = compute_multi_timeframe_score(sub_pit, ind_sub_pit, wedge_sub, pats_sub, smc_sub_pit, strat_sub, bench_stub)
         dec_sub, plan_sub, _ = compute_triple_barrier_plan(
             sview_sub,
             meta={**meta_stub, "as_of": cut_day},
-            ind_snapshot=sub_ind["snapshot"],
+            ind_snapshot=ind_sub_pit["snapshot"],
             wedge=wedge_sub,
-            ladder=layer_sub["ladder"],
-            projections=layer_sub["projections"],
+            ladder=layer_sub_pit["ladder"],
+            projections=layer_sub_pit["projections"],
             mtf_score=mtf_sub,
             algebraic_patterns=pats_sub,
             benchmark_info=bench_stub,
@@ -200,7 +208,7 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
         ind_pit = compute_all_indicators(ext_pit_restored)
         reg_pit = classify_market_regime(layer_pit["sview"], ind_pit["snapshot"])
         strat_pit = evaluate_five_core_strategies(layer_pit["sview"], ind_pit, reg_pit)
-        mtf_pit = compute_multi_timeframe_score(ext_pit_restored, ind_pit, {k: v for k, v in layer_pit["wedge"].items() if not k.startswith("_")}, pats_sub, sub_smc, strat_pit, bench_stub)
+        mtf_pit = compute_multi_timeframe_score(ext_pit_restored, ind_pit, {k: v for k, v in layer_pit["wedge"].items() if not k.startswith("_")}, pats_sub, smc_sub_pit, strat_pit, bench_stub)
         dec_pit, plan_pit, _ = compute_triple_barrier_plan(
             layer_pit["sview"],
             meta={**meta_stub, "as_of": cut_day},
@@ -221,10 +229,10 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
         ):
             mismatches.append(f"Triple-barrier decision mutated at cut={cut}")
         if (
-            layer_sub["scenario"] != layer_pit["scenario"]
-            or layer_sub["wave_counts"] != layer_pit["wave_counts"]
-            or layer_sub["projections"].get("scenarios") != layer_pit["projections"].get("scenarios")
-            or layer_sub["projections"].get("impulse_wave") != layer_pit["projections"].get("impulse_wave")
+            layer_sub_pit["scenario"] != layer_pit["scenario"]
+            or layer_sub_pit["wave_counts"] != layer_pit["wave_counts"]
+            or layer_sub_pit["projections"].get("scenarios") != layer_pit["projections"].get("scenarios")
+            or layer_sub_pit["projections"].get("impulse_wave") != layer_pit["projections"].get("impulse_wave")
         ):
             mismatches.append(f"Structure or scenarios mutated at cut={cut}")
 

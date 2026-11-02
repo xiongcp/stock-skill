@@ -2641,6 +2641,105 @@ def test_audit_eight_core_defects_and_linter_p1_regressions(replay_recorded) -> 
     assert not any("9876.54" in e for e in errs_vs_ok), errs_vs_ok
 
 
+def test_de_placebo_and_logic_consistency_guards(replay_recorded, tmp_path: Path) -> None:
+    """多角色陪审团去安慰剂化与内核自洽回归测试：
+    1. risk.py：系统生成的合规计划喂给 audit_trade_idea 不得因 1.20 vs 1.50 双标而 FAIL；单票名义仓位不超过 25% 账户净值。
+    2. scenarios.py：单截面最多 1 个 ACTIVE（已在进行中）情景，杜绝多空/震荡同日同时进行中；放量(RVOL>=1.15)假突破不得误报「量能不足」。
+    3. render_report_md.py / render_html.py：消除第1节均值回归说明重复、移除正文备选浪型计数、折叠第5节代数公式、HTML默认关闭分位数实线图层。
+    """
+    from contract_v6 import artifact_files, build_chart_data, build_result
+    from render_html import render_html
+    from render_report_md import render_report_markdown
+    from risk import audit_trade_idea, compute_triple_barrier_plan
+
+    now = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
+    req_cn = {
+        "symbol": "600519.SH",
+        "market": "CN",
+        "asset_type": "equity",
+        "display_bars": 120,
+        "horizon_bars": 15,
+        "account_equity": 500000.0,
+        "max_risk_pct": 0.01,
+    }
+    bundle_cn = load_bundle(req_cn, now=now)
+    rep_cn = analyze_bundle(bundle_cn, req_cn, include_replay=False)
+    res_cn = build_result(rep_cn, artifact_files("600519.SH", False))
+
+    # 1a. 含除权事件的生产 bundle 传入 run_causal_replay_audit 必须 0 差异通过
+    audit_cn = run_causal_replay_audit(bundle_cn["target"]["bars"])
+    assert audit_cn["passed"] is True and audit_cn["mismatches_count"] == 0
+
+    # 1b. 系统自身生成的计划（按计划自身计算盈亏比的入场中枢 entry_mid 校验，净盈亏比 >= 1.20）传入 audit_trade_idea 时，net_rr_and_friction 不得判 FAIL
+    plan_cn = res_cn["plan"]["long"]
+    assert plan_cn["risk_reward_ratio"] >= 1.20
+    entry_mid_cn = round((float(plan_cn["entry_zone"][0]) + float(plan_cn["entry_zone"][1])) / 2.0, 2)
+    self_audit = audit_trade_idea(
+        res_cn,
+        direction="LONG",
+        entry=entry_mid_cn,
+        stop=float(plan_cn["stop_loss_barrier"]),
+        target=float(plan_cn["take_profit_1"]),
+        shares=100,
+    )
+    assert self_audit["checks"]["net_rr_and_friction"]["status"] in ("PASS", "WARN")
+
+    # 1b. 极窄止损（~0.5%）下，单只股票推荐名义本金不得超过账户净值的 25%
+    bars_cn = bundle_cn["target"]["bars"]
+    last_c = float(bars_cn[-1]["close"])
+    tight_proj = copy.deepcopy(rep_cn["rule_scenarios"])
+    tight_proj["bull"]["target_price"] = round(last_c * 1.15, 2)
+    tight_wedge = {**rep_cn["mathematical_indicators"]["structure_levels"]["wedge_structure"], "status": "above"}
+    tight_bench = {**rep_cn["market_benchmark"], "regime_score": 68.0, "benchmark_missing": False}
+    tight_mtf = {**rep_cn["multi_timeframe_score"], "rule_score": 72.0}
+    tight_mtf["timeframes_aligned"] = {**tight_mtf["timeframes_aligned"], "scoring_regime": "MOMENTUM_TREND"}
+    tight_ind = copy.deepcopy(rep_cn["mathematical_indicators"])
+    tight_ind["trend"]["ema20"] = last_c
+    tight_ind["volatility"]["atr14"] = round(last_c * 0.005, 2)
+    tight_ind["momentum"]["rvol20"] = 1.60
+    tight_ind["momentum"]["rsi14"] = 58.0
+    _, tb_tight, _ = compute_triple_barrier_plan(
+        bars_cn,
+        rep_cn["meta"],
+        tight_ind,
+        tight_wedge,
+        {},
+        tight_proj,
+        tight_mtf,
+        [],
+        tight_bench,
+        account_equity=2000000.0,
+        max_risk_pct=0.02,
+    )
+    sz_tight = tb_tight["position_sizing"]
+    assert sz_tight["recommended_shares"] is not None and sz_tight["recommended_shares"] > 0
+    assert sz_tight["estimated_notional"] <= 2000000.0 * 0.25 + 1e-6
+
+    # 2. 四大代表性标的（含 NVDA.US 与 600519.SH）单截面最多 1 个 ACTIVE 情景；RVOL>=1.15 时假突破不报「量能不足」
+    for sym, mkt in (("600519.SH", "CN"), ("00700.HK", "HK"), ("NVDA.US", "US")):
+        b_item = load_bundle({"symbol": sym, "market": mkt, "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}, now=now)
+        layer_item = compute_structure_layer(b_item["target"]["bars"], None, 120, horizon_bars=15)
+        scs = layer_item["projections"]["scenarios"]
+        active_scs = [s for s in scs if s["status"] == "ACTIVE"]
+        assert len(active_scs) <= 1, f"{sym} 同时存在多个已在进行中情景: {[s['id'] for s in active_scs]}"
+        for s in scs:
+            if s["id"] == "FALSE_BREAKOUT_REVERSAL" and float(rep_cn["mathematical_indicators"]["momentum"]["rvol20"]) >= 1.15 and sym == "600519.SH":
+                assert "量能不足" not in s["precondition_rationale"]
+
+    # 3. 报告与 HTML 降噪检查
+    md_cn = render_report_markdown(res_cn)
+    mr_note = ((res_cn["verdict"].get("rule_detail") or {}).get("regime_adjustment") or {}).get("note_cn")
+    if mr_note:
+        assert md_cn.count(mr_note) == 1
+    assert "备选计数：" not in md_cn
+    assert "<details>" in md_cn and "<summary>" in md_cn
+
+    html_cn = render_html(res_cn, build_chart_data(rep_cn), tmp_path / "cn_dash.html").read_text(encoding="utf-8")
+    assert 'data-layer="quantiles" checked' not in html_cn
+    assert "quantiles: false" in html_cn
+
+
+
 
 
 

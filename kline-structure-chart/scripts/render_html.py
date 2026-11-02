@@ -302,7 +302,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
 <div class="toolbar">
   <div class="layer-group" id="layerControls">
     <label class="layer-pill"><input type="checkbox" data-layer="conformal" checked /> 未来{horizon_n}日正常波动范围(50%/80%)</label>
-    <label class="layer-pill"><input type="checkbox" data-layer="quantiles" checked /> 分位数边界路径(q75/q50/q25)</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="quantiles" /> 分位数边界路径(q75/q50/q25)</label>
     <label class="layer-pill"><input type="checkbox" data-layer="scenarios" checked /> 多情景路径(虚线=待触发)</label>
     <label class="layer-pill"><input type="checkbox" data-layer="barriers" checked /> Triple-Barrier 止盈止损框</label>
     <label class="layer-pill"><input type="checkbox" data-layer="structure" checked /> 核平滑与楔形/波段轨道</label>
@@ -615,7 +615,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   const ctx = canvas.getContext('2d');
   const layers = {{
     conformal: true,
-    quantiles: true,
+    quantiles: false,
     scenarios: true,
     barriers: true,
     structure: true,

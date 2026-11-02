@@ -22,10 +22,7 @@
       "market": "HK",
       "asset_type": "equity",
       "display_bars": 120,
-      "structure_bars": 120,
       "horizon_bars": 15,
-      "max_risk_pct": 0.01,
-      "color_scheme": "auto",
       "as_of": "2026-10-15"
     }
   },
@@ -72,24 +69,24 @@
     "rule_score": 65.7,
     "rating": "BULLISH_RESONANCE",
     "rating_cn": "均值回归体制评分偏多（价格回落至均值附近）",
-    "headline_cn": "【观望等待突破信号】综合规则分 65.7/100，当前属于「左侧支撑回踩观察」；关键突破位 447.21，关键防守/止损位 405.80，TP1 432.60（净盈亏比 1.27）。",
+    "headline_cn": "【观望等待突破信号】综合规则分 65.7/100，当前属于「左侧支撑回踩观察」；关键突破位 447.21，关键防守/止损位 405.80，TP1 440.00（净盈亏比 1.90）。",
     "overextended": false,
     "rule_detail": {
       "components": {
         "macro_trend_25": 2.5,
-        "structure_pattern_25": 12.5,
+        "structure_pattern_25": 9.5,
         "strategy_trigger_25": 5.5,
         "volume_benchmark_25": 6.6
       },
-      "components_total": 27.1,
+      "components_total": 24.1,
       "regime_adjustment": {
         "applied": true,
         "scoring_regime": "MEAN_REVERSION_ADAPTED",
-        "components_total": 27.1,
+        "components_total": 24.1,
         "adjusted_rule_score": 65.7,
         "reversion_score_adj": 7.45,
         "causal_momentum_ic_15d": -0.31,
-        "note_cn": "均值回归体制：近 240 日 20 日均线偏离与随后 15 日收益的秩相关为 -0.310（≤ -0.10）且长期均线偏弱，四组规则分项合计 27.1 经反转调整为 65.7（当前回落超卖补偿加分 +7.5）；该分数衡量的是均值回归下的追高/回落位置，不代表多周期共振或承压"
+        "note_cn": "均值回归体制：近 240 日 20 日均线偏离与随后 15 日收益的秩相关为 -0.310（≤ -0.10）且长期均线偏弱，四组规则分项合计 24.1 经反转调整为 65.7（当前回落超卖补偿加分 +7.5）；该分数衡量的是均值回归下的追高/回落位置，不代表多周期共振或承压"
       },
       "timeframes_aligned": {
         "weekly_trend": "BEARISH_OR_FLAT",
@@ -169,13 +166,10 @@
       "upper_wick_ratio": 0.5581,
       "body_to_range": 0.3256,
       "effort_vs_result": -0.5132,
-      "warnings_cn": [
-        "【仅提示·均线走弱】收盘低于 EMA20 且 EMA20 不高于 EMA50；该市场历史回溯未证实此条件的预测力，不改变评级，左侧抄底风险请自行评估"
-      ]
+      "warnings_cn": []
     },
     "bull_case": [
-      "结构触发：若在支撑 411.20 上方企稳（入场/观察区 413.00~420.00，防守位 405.80），修复空间指向 TP1 432.60，放量突破 447.21（形态上轨）后指向 TP2 458.00。",
-      "数学形态证据：破底翻扫损收回 (0 < PriorLow20(419.00)-Low(416.40)=2.60 <= 0.65*ATR(11.58) AND Close(423.00) > PriorLow20 AND Close > Open(420.00) AND LowerWickRatio(0.50) >= 0.42 (RVOL=0.45))。"
+      "结构触发：若在支撑 411.20 上方企稳（入场/观察区 413.00~420.00，防守位 405.80），修复空间指向 TP1 440.00，放量突破 447.21（形态上轨）后指向 TP2 458.00。"
     ],
     "bear_case": [
       "空头证伪/失效线：若日线收盘跌破 411.20（近期低点 10-08/近120日最低 06-26/前低 06-26）或跌穿硬止损屏障 405.80，多头结构立即失效，下方风险指向 384.60。",
@@ -1067,12 +1061,12 @@
         "name": "C 浪末端反转",
         "direction": "BULLISH",
         "status": "PENDING_TRIGGER",
-        "status_cn": "待触发",
-        "selection_role": "PRECONDITION_MET",
+        "status_cn": "待触发（前提未成立，条件备选）",
+        "selection_role": "CONDITIONAL_FALLBACK",
         "precondition_template": "C 浪达到 1.0×A 附近，且出现背离或反转形态",
-        "precondition_met": true,
+        "precondition_met": false,
         "precondition_rationale": "下跌ABC C/A 已达 0.81 倍（接近 1.0×A），RSI14=42.0",
-        "applicability_score": 89.0,
+        "applicability_score": 65.0,
         "trigger": "C 浪在 1.0×A 附近企稳并放量站上 423.80",
         "trigger_price": 423.8,
         "reference_trigger_price": 423.8,
@@ -1085,7 +1079,7 @@
         "invalidation_price": 376.8
       }
     ],
-    "precondition_met_count": 2,
+    "precondition_met_count": 1,
     "impulse_wave": null
   },
   "plan": {
@@ -1095,10 +1089,10 @@
         420.0
       ],
       "stop_loss_barrier": 405.8,
-      "take_profit_1": 432.6,
+      "take_profit_1": 440.0,
       "take_profit_2": 458.0,
       "time_barrier_bars": 15,
-      "risk_reward_ratio": 1.27,
+      "risk_reward_ratio": 1.9,
       "breakeven_ratchet": {
         "enabled": true,
         "trigger_r": 0.9,
@@ -1118,7 +1112,7 @@
         "required_evidence": "日线收盘站稳 447.21 且 RVOL20 >= 1.35 (当前 1.02)",
         "false_breakout_rule": "突破后收盘跌回 442.54 下方视为假突破"
       },
-      "time_stop_rule": "持仓满 15 根K线仍未触及止损(405.80)或 TP1(432.60) 时，于到期日收盘触发时间屏障离场（若遇一字跌停封死则顺延至开板日）",
+      "time_stop_rule": "持仓满 15 根K线仍未触及止损(405.80)或 TP1(440.00) 时，于到期日收盘触发时间屏障离场（若遇一字跌停封死则顺延至开板日）",
       "market_microstructure": {
         "market": "HK",
         "settlement": "T+0_TRADING_T+2_CLEARING",
@@ -1717,6 +1711,7 @@
       439.4,
       439.55,
       439.8,
+      440.0,
       441.0,
       441.4,
       442.0,

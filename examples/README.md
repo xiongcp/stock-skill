@@ -14,7 +14,7 @@
 | 目录 | 标的 | 文件 |
 | --- | --- | --- |
 | [600519.SH](600519.SH) | 贵州茅台（A 股，基准沪深300） | 报告、结果 JSON、渲染数据 JSON、回测 JSON、结构图 PNG、交互看板 HTML、[标准回复](600519.SH/reply.md) |
-| [300308.SZ](300308.SZ) | 中际旭创（A 股创业板，基准沪深300） | 报告、结果 JSON、渲染数据 JSON、结构图 PNG、交互看板 HTML（未传 `--backtest`，没有回测 JSON） |
+| [300308.SZ](300308.SZ) | 中际旭创（A 股创业板，基准创业板指） | 报告、结果 JSON、渲染数据 JSON、结构图 PNG、交互看板 HTML（未传 `--backtest`，没有回测 JSON） |
 | [00700.HK](00700.HK) | 腾讯控股（港股，基准恒生指数） | 报告、结果 JSON、渲染数据 JSON、结构图 PNG、交互看板 HTML（未传 `--backtest`，没有回测 JSON） |
 | [NVDA.US](NVDA.US) | 英伟达（美股，基准 SPY） | 报告、结果 JSON、渲染数据 JSON、结构图 PNG、交互看板 HTML（未传 `--backtest`，没有回测 JSON） |
 

@@ -660,7 +660,8 @@ def render(
     )
     draw.text((left, 50), subtitle, font=f_sub, fill=MUTED)
 
-    bull_ftag, bull_w, bull_a, bull_dash = "", 2.8, 255, False
+    bull_ftag = "(禁做多)" if veto_flag else ""
+    bull_w, bull_a, bull_dash = (1.8, 95, True) if veto_flag else (2.8, 255, False)
     neut_ftag, neut_w, neut_a, neut_dash = "", 2.8, 255, True
     bear_ftag, bear_w, bear_a, bear_dash = "", 2.8, 255, False
 
@@ -915,14 +916,15 @@ def render(
             dashed_hline(draw, left, chart_right, y_poc, (*VP_POC, 195))
             right_gutter_tags.append((y_poc, f"POC 成交分布近似 {fp(poc_f)}", VP_POC))
     if scenario:
-        for level in scenario["levels"]:
-            if not level["drawn"]:
-                continue
+        drawn_lvls = [lv for lv in scenario["levels"] if lv["drawn"]]
+        primary_abc_lvl = next((lv for lv in drawn_lvls if lv["ratio"] == 1.0), drawn_lvls[-1] if drawn_lvls else None)
+        for level in drawn_lvls:
             y = yp(level["price"])
             abc_ys.append(y)
             dashed_hline(draw, left, chart_right, y, (*SCEN, 185))
-            live_tag = f"·{level['intraday']}" if level["intraday"] else ""
-            right_gutter_tags.append((y, f"ABC {level['ratio']:.3f}  {fp(level['price'])} ({level['state']}{live_tag})", SCEN))
+            if primary_abc_lvl is not None and level["ratio"] == primary_abc_lvl["ratio"]:
+                live_tag = f"·{level['intraday']}" if level["intraday"] else ""
+                right_gutter_tags.append((y, f"ABC {level['ratio']:.3f}  {fp(level['price'])} ({level['state']}{live_tag})", SCEN))
     elif fibs and fibs.get("retracements"):
         for flvl in fibs["retracements"]:
             if flvl["ratio"] not in (0.382, 0.5, 0.618):
@@ -1027,9 +1029,11 @@ def render(
         draw_arrow_polyline(draw, pts, fill=col, width=w_val, dashed=is_dashed, alpha=a_val)
         right_gutter_tags.append((pts[-1][1], tag_text, col))
 
-    # 同步叠绘 L1 活跃情景中与三主路径目标位不同的独立情景路径，保证 PNG 与 HTML 同源
+    # 静态 PNG 仅在未触发风控否决时叠绘与三主路径目标位不同的独立 ACTIVE 情景，避免否决下满屏多头虚线造成视觉过载
     main_targets = [float(projections[k]["target_price"]) for k in ("bull", "neutral", "bear")]
-    for sc_item in projections.get("scenarios") or []:
+    for sc_item in ([] if veto_flag else (projections.get("scenarios") or [])):
+        if sc_item.get("status") != "ACTIVE":
+            continue
         sc_tgt = float(sc_item.get("target_price") or 0.0)
         if sc_tgt <= 0 or any(abs(sc_tgt - mt) <= dup_tol for mt in main_targets):
             continue
@@ -1039,8 +1043,7 @@ def render(
         sc_dir = str(sc_item.get("direction") or "NEUTRAL")
         sc_col = PROJ_BULL if sc_dir == "BULLISH" else (PROJ_BEAR if sc_dir == "BEARISH" else PROJ_NEUTRAL)
         sc_pts = [(x_of(last_bar_idx + dx), yp(p)) for dx, p in sc_wps]
-        sc_pending = sc_item.get("status") != "ACTIVE"
-        draw_arrow_polyline(draw, sc_pts, fill=sc_col, width=2.2, dashed=sc_pending, alpha=200)
+        draw_arrow_polyline(draw, sc_pts, fill=sc_col, width=2.2, dashed=False, alpha=200)
         right_gutter_tags.append((sc_pts[-1][1], f"{sc_item['name']} {fp(sc_tgt)}", sc_col))
 
     step_boxes: list[tuple[int, int, int, int]] = []
@@ -1055,14 +1058,18 @@ def render(
             tw, th = text_size(draw, step_txt, f_tiny_bold)
             bw_s, bh_s = tw + 12, th + 6
             is_peak = waypoints[k][1] >= max(waypoints[k - 1][1], waypoints[k + 1][1])
-            dy_cands = [-bh_s - 10, -bh_s - 26, -bh_s - 42, 10, 26, 42] if is_peak else [10, 26, 42, -bh_s - 10, -bh_s - 26, -bh_s - 42]
-            dx_cands = [0, -14, 14, -26, 26]
+            dy_cands = (
+                [-bh_s - 10, -bh_s - 28, -bh_s - 46, -bh_s - 64, 10, 28, 46, 64]
+                if is_peak
+                else [10, 28, 46, 64, -bh_s - 10, -bh_s - 28, -bh_s - 46, -bh_s - 64]
+            )
+            dx_cands = [0, 18, -18, 38, -38, 60, -60, 84]
             best_box = None
             best_sc = float("inf")
             step_top_bound = (veto_box[3] + 6) if veto_box is not None else (top + 36)
             for r_y, dy_c in enumerate(dy_cands):
                 for r_x, dx_c in enumerate(dx_cands):
-                    bx1 = min(max(div_x + 4, sx - bw_s // 2 + dx_c), chart_right - bw_s - 4)
+                    bx1 = min(max(div_x + 14, sx - bw_s // 2 + dx_c), chart_right - bw_s - 4)
                     by1 = min(max(step_top_bound, sy + dy_c), main_bottom - bh_s - 6)
                     cand = (bx1, by1, bx1 + bw_s, by1 + bh_s)
                     if any(not (cand[2] + 4 < b[0] or cand[0] - 4 > b[2] or cand[3] + 4 < b[1] or cand[1] - 4 > b[3]) for b in step_boxes):
