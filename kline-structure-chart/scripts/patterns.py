@@ -306,6 +306,21 @@ def detect_candlestick_patterns(
                     }
                 )
 
+    for p in detected:
+        t_idx = int(p["bar_idx"])
+        if p["pattern"] in ("CDL_MORNING_STAR", "CDL_EVENING_STAR"):
+            span_start = max(0, t_idx - 2)
+        elif p["pattern"] in ("CDL_BULLISH_ENGULFING", "CDL_BEARISH_ENGULFING"):
+            span_start = max(0, t_idx - 1)
+        else:
+            span_start = t_idx
+        if p["direction"] == "BULLISH":
+            pat_low = min(float(bars[k]["low"]) for k in range(span_start, t_idx + 1))
+            p["invalidated"] = any(float(b["close"]) < pat_low for b in bars[t_idx + 1 :])
+        else:
+            pat_high = max(float(bars[k]["high"]) for k in range(span_start, t_idx + 1))
+            p["invalidated"] = any(float(b["close"]) > pat_high for b in bars[t_idx + 1 :])
+
     return detected[-max_items:] if max_items is not None else detected
 
 

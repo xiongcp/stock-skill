@@ -82,6 +82,19 @@ DEFAULT_BENCHMARKS: dict[str, dict[str, str]] = {
     "US": {"symbol": "SPY.US", "sina_symbol": "gb_spy", "name": "标普500 ETF(SPY)"},
 }
 
+
+def default_benchmark_for(market: str, symbol: str = "", asset_type: str = "equity") -> dict[str, str]:
+    """按市场与板块匹配默认宽基基准：A 股创业板(300/301)匹配创业板指(399006.SZ)，科创板(688/689)匹配科创50(000688.SH)，其余匹配沪深300(000300.SH)。"""
+    m = (market or "CN").upper()
+    sym = (symbol or "").upper()
+    code = sym.split(".")[0]
+    if m == "CN" and asset_type == "equity":
+        if code.startswith(("300", "301")):
+            return {"symbol": "399006.SZ", "sina_symbol": "sz399006", "name": "创业板指"}
+        if code.startswith(("688", "689")):
+            return {"symbol": "000688.SH", "sina_symbol": "sh000688", "name": "科创50"}
+    return dict(DEFAULT_BENCHMARKS.get(m, DEFAULT_BENCHMARKS["CN"]))
+
 KNOWN_INSTRUMENTS: dict[str, dict[str, Any]] = {
     "000001.SH": {"market": "CN", "asset_type": "index", "name": "上证指数", "sina": "sh000001", "currency": "CNY"},
     "399001.SZ": {"market": "CN", "asset_type": "index", "name": "深证成指", "sina": "sz399001", "currency": "CNY"},

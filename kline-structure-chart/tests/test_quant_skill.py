@@ -2509,5 +2509,138 @@ def test_phase5_html_png_and_site_consistency_and_ux_guards(replay_recorded, tmp
         assert "((s - e) * (t - e) >= 0)" in html_text or "点位方向矛盾" in html_text
 
 
+def test_audit_eight_core_defects_and_linter_p1_regressions(replay_recorded) -> None:
+    """深度代码审计 8 项 P0 核心缺陷 + Linter P1 跨日多价位校验回归测试。"""
+    from contract_v6 import artifact_files, build_result
+    from lint_response import lint_agent_response
+    from market_rules import default_benchmark_for
+    from risk import compute_triple_barrier_plan
+    from scenarios import build_scenarios
+    from strategies import aggregate_bars_to_weekly, classify_market_regime, compute_multi_timeframe_score
+    from structure import MAJOR_SOURCE_PREFIXES, _trigger
+
+    # 缺陷 1：MAJOR_SOURCE_PREFIXES 包含前低/前高，_trigger 不跳过近端支撑去抓 2*cap 外的远端 ABC 位；
+    #         且当近端存在 <0.5*ATR 的 contested 下轨/前低而 s1 偏远时，holder_defense 优先采用近端防线。
+    assert "前低" in MAJOR_SOURCE_PREFIXES and "前高" in MAJOR_SOURCE_PREFIXES
+    levels_below_demo = [
+        {"price": 151.03, "sources": ["前低 10-12"]},
+        {"price": 144.81, "sources": ["前低 09-25"]},
+        {"price": 134.35, "sources": ["ABC 1.000倍位"]},
+    ]
+    s1_pick, s1_src = _trigger(levels_below_demo, [], ref=168.28, cap=0.20, min_dist=0.033, fallback=157.0, fallback_src="ATR")
+    assert s1_pick == pytest.approx(151.03) and "前低" in s1_src
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "horizon_bars": 15}
+    bundle = load_bundle(req, now=datetime(2026, 10, 16, 12, 0, tzinfo=UTC))
+    rep = analyze_bundle(bundle, req, include_replay=False)
+    bars = bundle["target"]["bars"]
+    last_c = float(bars[-1]["close"])
+    atr14 = float(rep["mathematical_indicators"]["volatility"]["atr14"])
+    bench_ok = {**rep["market_benchmark"], "regime_score": 60.0, "benchmark_missing": False}
+
+    # 构造 s1 远在 -25% 处、contested 含近端下轨的场景，验证：
+    # (1) 缺陷 1：holder_defense.reduce_level 采用近端 contested 下轨而非 -25% 的远端 s1
+    # (2) 缺陷 2：stop_loss_barrier 被 last_c - 1.45*ATR 兜底保護，绝不跟跌到 s1 - 0.15*ATR (-25%)
+    # (3) 缺陷 2：breakeven_ratchet.trigger_price 严格小于 take_profit_1
+    far_s1 = round(last_c * 0.75, 2)
+    near_rail = round(last_c - 0.30 * atr14, 2)
+    proj_far = copy.deepcopy(rep["rule_scenarios"])
+    proj_far["breakdown_level"] = {"price": far_s1, "source": "ABC 1.000倍位"}
+    proj_far["contested_levels"] = [{"price": near_rail, "sources": ["形态下轨"], "side": "below"}]
+    proj_far["breakout_level"] = {"price": round(last_c + 0.90 * atr14, 2), "source": "形态上轨"}
+    proj_far["bull"]["target_price"] = round(last_c + 1.10 * atr14, 2)
+    wedge_inside = {**rep["mathematical_indicators"]["structure_levels"]["wedge_structure"], "status": "inside"}
+    _, tb_far, deb_far = compute_triple_barrier_plan(
+        bars, rep["meta"], rep["mathematical_indicators"], wedge_inside, {}, proj_far,
+        rep["multi_timeframe_score"], [], bench_ok,
+    )
+    assert tb_far["stop_loss_barrier"] >= last_c - 1.60 * atr14
+    assert tb_far["holder_defense_plan"]["reduce_level"] == pytest.approx(near_rail, abs=0.05)
+    assert tb_far["breakeven_ratchet"]["trigger_price"] < tb_far["take_profit_1"]
+
+    # 缺陷 3：收盘跌破 EMA20 的暴跌股（climax_distribution=True, ext_atr < 0）不得标为 overextended=True，也不得报「【过热降级】」
+    crash_bars = copy.deepcopy(bars)
+    for k in range(-30, -10):
+        crash_bars[k]["high"] = last_c * 1.75
+        crash_bars[k]["low"] = last_c * 0.90
+    crash_ind = copy.deepcopy(rep["mathematical_indicators"])
+    crash_ind["trend"]["ema20"] = last_c + 2.2 * atr14  # ext_atr = -2.2 < 0（远低于 EMA20）
+    crash_ind["momentum"]["rsi14"] = 32.0
+    dec_crash, _, _ = compute_triple_barrier_plan(
+        crash_bars, rep["meta"], crash_ind, wedge_inside, {}, proj_far,
+        rep["multi_timeframe_score"], [], bench_ok,
+    )
+    assert dec_crash["overextended"] is False
+    assert not any("【过热降级】" in w for w in dec_crash["anti_quant_traps"]["warnings_cn"])
+    assert any("高位破位派发" in w for w in dec_crash["anti_quant_traps"]["warnings_cn"])
+
+    # 缺陷 4 & 5：LEFT_SIDE_PULLBACK 生效时不得同时报「左侧回踩计划不予确认」；
+    #             WAIT_CONFIRMATION 时 bull_case[0] 不得声称在 s1 左侧入场
+    assert "若在支撑" not in deb_far["bull_case"][0]
+
+    # 缺陷 5（scenarios）：未真正越过前高（ref = ph * 0.999 < ph）不得判为 BREAKOUT_RETEST ACTIVE；
+    # 同一截面上不得同时激活 BULLISH 与 BEARISH 两个方向相反的 ACTIVE 情景
+    layer_base = compute_structure_layer(bars, None, 120, horizon_bars=15)
+    active_dirs = {
+        s["direction"]
+        for s in layer_base["projections"]["scenarios"]
+        if s["status"] == "ACTIVE" and s["direction"] in ("BULLISH", "BEARISH")
+    }
+    assert len(active_dirs) <= 1
+
+    # 缺陷 6：大盘状态分在 sh000300 2026-10-09..10-15 期间连续变化（不再5天焊死 16.0）；创业板/科创板默认匹配对应宽基
+    hs300 = load_recorded("sina_daily/sh000300.json")
+    scores_5d = []
+    for d in ("2026-10-09", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15"):
+        sub_b = [b for b in hs300 if b["day"] <= d]
+        ind_b = compute_all_indicators(sub_b[-420:])
+        scores_5d.append(classify_market_regime(sub_b[-120:], ind_b["snapshot"])["regime_score"])
+    assert len(set(scores_5d)) >= 3, f"regime_score 仍被焊死: {scores_5d}"
+    assert default_benchmark_for("CN", "300750.SZ", "equity")["symbol"] == "399006.SZ"
+    assert default_benchmark_for("CN", "688981.SH", "equity")["symbol"] == "000688.SH"
+    assert default_benchmark_for("CN", "600519.SH", "equity")["symbol"] == "000300.SH"
+
+    # 缺陷 7：已被后续收盘跌破最低点的历史看涨蜡烛形态，或超过 3 根 K 线的陈旧单根蜡烛形态，不得计入 bull_case 或触发 has_bull_candle
+    stale_cdl = [
+        {
+            "pattern": "CDL_BULLISH_HAMMER",
+            "name_cn": "看涨锤头线",
+            "category": "candlestick",
+            "direction": "BULLISH",
+            "bar_idx": len(bars) - 6,
+            "observed_at": bars[-6]["day"],
+            "confirmed_at": bars[-6]["day"],
+            "invalidated": True,
+            "formula_verified": "LowerWick >= 2.0*Body",
+        }
+    ]
+    _, _, deb_stale = compute_triple_barrier_plan(
+        bars, rep["meta"], rep["mathematical_indicators"], wedge_inside, {}, rep["rule_scenarios"],
+        rep["multi_timeframe_score"], stale_cdl, bench_ok,
+    )
+    assert not any("看涨锤头线" in c for c in deb_stale["bull_case"])
+
+    # 缺陷 8：周一至周四的半周 K 线在 aggregate_bars_to_weekly 中必须标记 complete=False
+    # 2026-10-15 是周四
+    assert bars[-1]["day"] == "2026-10-15"
+    weekly = aggregate_bars_to_weekly(bars)
+    assert weekly[-1]["complete"] is False
+    assert all(w["complete"] is True for w in weekly[:-1])
+
+    # P1 Linter：拦截对比句式中的第 2 个伪造价格，且支持 prev_reports 合并上日白名单
+    result_v6 = build_result(rep, artifact_files("600519.SH", False))
+    valid_sl = result_v6["plan"]["long"]["stop_loss_barrier"]
+    disclaimer = "【风控否决】大盘偏弱。以上不构成投资建议。"
+    vs_bad = f"{disclaimer}止损位：{valid_sl:.2f} 元 vs 上日 9876.54 元。"
+    errs_vs_bad = lint_agent_response(vs_bad, result_v6)
+    assert any("9876.54" in e for e in errs_vs_bad), errs_vs_bad
+
+    prev_rep = copy.deepcopy(result_v6)
+    prev_rep["quotable_prices"]["prices"].append(9876.54)
+    errs_vs_ok = lint_agent_response(vs_bad, result_v6, prev_reports=[prev_rep])
+    assert not any("9876.54" in e for e in errs_vs_ok), errs_vs_ok
+
+
+
 
 

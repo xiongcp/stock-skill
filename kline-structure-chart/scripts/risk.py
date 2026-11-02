@@ -107,14 +107,22 @@ def compute_triple_barrier_plan(
     bull_target_ladder = float(projections["bull"]["target_price"])
 
     # Determine setup type: RIGHT_SIDE_BREAKOUT vs LEFT_SIDE_PULLBACK vs WAIT_CONFIRMATION
-    has_bull_div = any(p["pattern"] == "RSI_BULLISH_DIVERGENCE" for p in algebraic_patterns)
-    has_bull_candle = any(p["category"] == "candlestick" and p["direction"] == "BULLISH" for p in algebraic_patterns)
     recent_3_days = {b["day"] for b in bars[-3:]}
+    valid_patterns = [p for p in algebraic_patterns if not p.get("invalidated")]
+    narrative_patterns = [
+        p
+        for p in valid_patterns
+        if not (p.get("category") == "candlestick" and p.get("observed_at") and p.get("observed_at") not in recent_3_days)
+    ]
+    has_bull_div = any(p["pattern"] == "RSI_BULLISH_DIVERGENCE" for p in valid_patterns)
+    has_bull_candle = any(
+        p["category"] in ("candlestick", "geometric") and p["direction"] == "BULLISH" for p in valid_patterns
+    )
     has_liquidity_sweep = any(
-        p["pattern"] == "LIQUIDITY_SWEEP_BULLISH" and p.get("observed_at") in recent_3_days for p in algebraic_patterns
+        p["pattern"] == "LIQUIDITY_SWEEP_BULLISH" and p.get("observed_at") in recent_3_days for p in valid_patterns
     )
     has_bull_engulfing_recent = any(
-        p["pattern"] == "CDL_BULLISH_ENGULFING" and p.get("observed_at") in recent_3_days for p in algebraic_patterns
+        p["pattern"] == "CDL_BULLISH_ENGULFING" and p.get("observed_at") in recent_3_days for p in valid_patterns
     )
     last_o = float(last_bar["open"])
     last_h = float(last_bar["high"])
@@ -220,7 +228,8 @@ def compute_triple_barrier_plan(
         else:
             entry_low = round_to_tick(max(s1, last_c - 0.35 * atr14), market, asset_type, as_of_day)
             entry_high = round_to_tick(min(r1, last_c + 0.30 * atr14), market, asset_type, as_of_day)
-        raw_sl = min(s1, max(s1 - 0.35 * atr14, last_c - 1.35 * atr14))
+        sl_cap = s1 if s1 >= entry_low else (s1 if s1 >= last_c - 1.35 * atr14 else entry_low - 0.15 * atr14)
+        raw_sl = min(sl_cap, max(s1 - 0.35 * atr14, last_c - 1.35 * atr14))
         stop_loss = _avoid_round_number_stop(raw_sl, entry_low, market, asset_type, as_of_day)
     elif is_std_left_pullback or is_mr_left_pullback:
         setup_type = "LEFT_SIDE_PULLBACK"
@@ -229,10 +238,12 @@ def compute_triple_barrier_plan(
         entry_high = round_to_tick(min(r1, last_c + 0.20 * atr14), market, asset_type, as_of_day)
         if has_liquidity_sweep:
             sweep_anchor = min(s1, last_l)
-            raw_sl = min(sweep_anchor - 0.35 * atr14, max(sweep_anchor - 0.60 * atr14, last_c - 1.50 * atr14))
+            sweep_cap = sweep_anchor - 0.35 * atr14 if sweep_anchor >= last_c - 1.15 * atr14 else entry_low - 0.15 * atr14
+            raw_sl = min(sweep_cap, max(sweep_anchor - 0.60 * atr14, last_c - 1.50 * atr14))
             stop_loss = _avoid_round_number_stop(raw_sl, entry_low, market, asset_type, as_of_day)
         else:
-            raw_sl = min(s1 - 0.15 * atr14, max(s1 - 0.50 * atr14, last_c - 1.45 * atr14))
+            sl_cap = s1 - 0.15 * atr14 if s1 >= last_c - 1.30 * atr14 else entry_low - 0.15 * atr14
+            raw_sl = min(sl_cap, max(s1 - 0.50 * atr14, last_c - 1.45 * atr14))
             stop_loss = _avoid_round_number_stop(raw_sl, entry_low, market, asset_type, as_of_day)
     else:
         setup_type = "WAIT_CONFIRMATION"
@@ -247,7 +258,8 @@ def compute_triple_barrier_plan(
         else:
             entry_low = round_to_tick(max(s1, last_c - 0.20 * atr14), market, asset_type, as_of_day)
             entry_high = round_to_tick(min(r1, last_c + 0.35 * atr14), market, asset_type, as_of_day)
-        raw_sl = min(s1 - 0.15 * atr14, max(s1 - 0.50 * atr14, last_c - 1.40 * atr14))
+        sl_cap = s1 - 0.15 * atr14 if s1 >= last_c - 1.25 * atr14 else entry_low - 0.15 * atr14
+        raw_sl = min(sl_cap, max(s1 - 0.50 * atr14, last_c - 1.40 * atr14))
         stop_loss = _avoid_round_number_stop(raw_sl, entry_low, market, asset_type, as_of_day)
     if entry_low > entry_high:
         entry_low = round_to_tick(last_c * 0.995, market, asset_type, as_of_day)
@@ -316,11 +328,10 @@ def compute_triple_barrier_plan(
     )
     overextended = (
         (ext_atr > 2.0)
-        or (rsi14 >= 70.0)
-        or climax_distribution
+        or (rsi14 >= 70.0 and ext_atr > 0.0)
     )
     if scoring_regime == "MEAN_REVERSION_ADAPTED":
-        if ext_atr > 0.35 or w_pos > 78.0 or setup_type == "RIGHT_SIDE_BREAKOUT":
+        if ext_atr > 0.35 or (w_pos > 78.0 and ext_atr > 0.0) or (setup_type == "RIGHT_SIDE_BREAKOUT" and ext_atr > 0.0):
             overextended = True
 
     anti_quant_warnings: list[str] = []
@@ -339,8 +350,8 @@ def compute_triple_barrier_plan(
                 + ("A 股 T+1 下当日追入次日可能低开，" if market == "CN" else "")
                 + "该市场历史回溯未证实此形态预测力，不改变评级"
             )
-    if algo_grinding_bleed and not right_turn_confirmed:
-        if market in _ANTI_QUANT_GATES["algo_bleed_gate"]:
+    if algo_grinding_bleed and not right_turn_confirmed and setup_type != "LEFT_SIDE_PULLBACK":
+        if market in _ANTI_QUANT_GATES["algo_bleed_gate"] and scoring_regime != "MEAN_REVERSION_ADAPTED":
             anti_quant_warnings.append(
                 "【防阴跌接飞刀】收盘低于 EMA20 且 EMA20 不高于 EMA50（中短期均线走弱）；未见右侧微观破位收回（Micro-BOS）或放量吞没前，左侧回踩计划不予确认"
             )
@@ -348,12 +359,16 @@ def compute_triple_barrier_plan(
             anti_quant_warnings.append(
                 "【仅提示·均线走弱】收盘低于 EMA20 且 EMA20 不高于 EMA50；该市场历史回溯未证实此条件的预测力，不改变评级，左侧抄底风险请自行评估"
             )
-    # 过热会实际阻止做多确认，必须优先披露；动量拥挤阈值更宽，放在前面会把降级说明盖成"不改变评级"
+    # 过热或高位破位派发会实际阻止做多确认，必须优先披露；动量拥挤阈值更宽，放在前面会把降级说明盖成"不改变评级"
     if overextended:
         anti_quant_warnings.append(
-            f"【过热降级】偏离 EMA20 {ext_atr:+.2f} ATR、RSI14 {rsi14:.1f} 或高位派发结构触发过热条件，已不给出做多确认"
+            f"【过热降级】偏离 EMA20 {ext_atr:+.2f} ATR、RSI14 {rsi14:.1f} 触发短期过热条件，已不给出做多确认"
         )
-    elif momentum_crowding:
+    elif climax_distribution:
+        anti_quant_warnings.append(
+            f"【高位破位派发降级】近60日高低振幅达 {hi60 / max(1e-6, lo60):.2f}x 且现价已跌破 EMA20（较近20日高点回撤 {(hi20 - last_c) / atr14:.2f} ATR），处于高位派发破位阶段，已不给出做多确认"
+        )
+    elif momentum_crowding and ext_atr > 0.0:
         anti_quant_warnings.append(
             f"【仅提示·短期涨幅偏大】5日推进 {ret5_atr:+.2f} ATR，偏离 EMA20 {ext_atr:+.2f} ATR，60周分位 {w_pos:.1f}%；历史回溯中此类截面表现并不差，不改变评级，仅提示追高回撤风险"
         )
@@ -373,12 +388,13 @@ def compute_triple_barrier_plan(
             "【量价VPA·缩量回踩测试】近期回调量能萎缩且日内承接良好，符合供需衰竭（No Supply）企稳特征"
         )
 
-    if not vetoed and not overextended and rule_score >= 65.0 and setup_type in ("RIGHT_SIDE_BREAKOUT", "LEFT_SIDE_PULLBACK"):
+    if not vetoed and not overextended and not climax_distribution and rule_score >= 65.0 and setup_type in ("RIGHT_SIDE_BREAKOUT", "LEFT_SIDE_PULLBACK"):
         action = "LONG_CONFIRMED"
         action_cn = "右侧/结构看多确认"
     elif (
         not vetoed
         and not overextended
+        and not climax_distribution
         and rule_score >= 52.0
         and setup_type in ("RIGHT_SIDE_BREAKOUT", "LEFT_SIDE_PULLBACK")
         and (setup_type == "RIGHT_SIDE_BREAKOUT" or is_stabilizing_bar or has_bull_div or has_bull_candle)
@@ -509,13 +525,24 @@ def compute_triple_barrier_plan(
 
     retest_hold = float(projections["bull"]["retest_hold"])
     bear_target = float(projections["bear"]["target_price"])
-    holder_defense = _holder_defense_plan(market, asset_type, as_of_day, p_dec, projections, stop_loss, s1, r1, bear_target)
+    holder_defense = _holder_defense_plan(
+        market, asset_type, as_of_day, p_dec, projections, stop_loss, s1, r1, bear_target, last_c=last_c, atr14=atr14
+    )
     short_plan = _short_plan(
         market, asset_type, as_of_day, p_dec, projections, s1, r1, bear_target, atr14, fee_rate, benchmark_info
     )
-    breakeven_trigger = round_to_tick(entry_mid + 0.90 * unit_risk, market, asset_type, as_of_day)
-    breakeven_confirm = round_to_tick(entry_mid + 0.30 * unit_risk, market, asset_type, as_of_day)
-    breakeven_stop = round_to_tick(entry_mid + 0.08 * unit_risk, market, asset_type, as_of_day)
+    max_ratchet_r = max(atr14 * 0.20, (tp1 - entry_mid) * 0.85 / 0.90) if tp1 > entry_mid else eff_swing_risk
+    ratchet_r = min(unit_risk, eff_swing_risk, max_ratchet_r)
+    breakeven_trigger = round_to_tick(entry_mid + 0.90 * ratchet_r, market, asset_type, as_of_day)
+    breakeven_confirm = round_to_tick(entry_mid + 0.30 * ratchet_r, market, asset_type, as_of_day)
+    breakeven_stop = round_to_tick(entry_mid + 0.08 * ratchet_r, market, asset_type, as_of_day)
+    tick_step = float(tick_size_for(tp1, market, asset_type, as_of_day))
+    if breakeven_trigger >= tp1 and tp1 - tick_step > entry_mid:
+        breakeven_trigger = round_to_tick(tp1 - tick_step, market, asset_type, as_of_day)
+    if breakeven_confirm >= breakeven_trigger and breakeven_trigger - tick_step > entry_mid:
+        breakeven_confirm = round_to_tick(breakeven_trigger - tick_step, market, asset_type, as_of_day)
+    if breakeven_stop >= breakeven_confirm and breakeven_confirm - tick_step > stop_loss:
+        breakeven_stop = round_to_tick(breakeven_confirm - tick_step, market, asset_type, as_of_day)
     breakeven_ratchet = {
         "enabled": True,
         "trigger_r": 0.90,
@@ -569,10 +596,15 @@ def compute_triple_barrier_plan(
     }
 
     # Bull vs Bear structured falsification (TradingAgents style)
-    if setup_type == "LEFT_SIDE_PULLBACK" or tp1 <= r1:
+    if setup_type == "LEFT_SIDE_PULLBACK":
         bull_lead = (
             f"结构触发：若在支撑 {s1:.{p_dec}f} 上方企稳（入场/观察区 {entry_low:.{p_dec}f}~{entry_high:.{p_dec}f}，防守位 {stop_loss:.{p_dec}f}），"
             f"修复空间指向 TP1 {tp1:.{p_dec}f}，放量突破 {r1:.{p_dec}f}（{projections['breakout_level']['source']}）后指向 TP2 {tp2:.{p_dec}f}。"
+        )
+    elif tp1 <= r1:
+        bull_lead = (
+            f"结构触发：当前处于区间观察（观察区 {entry_low:.{p_dec}f}~{entry_high:.{p_dec}f}，防守位 {stop_loss:.{p_dec}f}），"
+            f"短线反抽先看 TP1 {tp1:.{p_dec}f}，唯有日线放量突破上方压力 {r1:.{p_dec}f}（{projections['breakout_level']['source']}）后空间才打开至 TP2 {tp2:.{p_dec}f}。"
         )
     else:
         bull_lead = (
@@ -582,7 +614,7 @@ def compute_triple_barrier_plan(
     bull_case: list[str] = [
         bull_lead,
     ]
-    for p in algebraic_patterns:
+    for p in narrative_patterns:
         if p["direction"] == "BULLISH":
             bull_case.append(f"数学形态证据：{p['name_cn']} ({p['formula_verified']})。")
     if _num_or(benchmark_info, "relative_strength_vs_index", 1.0) >= 1.0:
@@ -593,7 +625,7 @@ def compute_triple_barrier_plan(
     bear_case: list[str] = [
         f"空头证伪/失效线：若日线收盘跌破 {s1:.{p_dec}f}（{projections['breakdown_level']['source']}）或跌穿硬止损屏障 {stop_loss:.{p_dec}f}，多头结构立即失效，下方风险指向 {bear_target:.{p_dec}f}。",
     ]
-    for p in algebraic_patterns:
+    for p in narrative_patterns:
         if p["direction"] == "BEARISH":
             bear_case.append(f"反向形态警示：{p['name_cn']} ({p['formula_verified']})。")
     if veto_reasons:
@@ -624,14 +656,27 @@ def _holder_defense_plan(
     s1: float,
     r1: float,
     bear_target: float,
+    *,
+    last_c: float | None = None,
+    atr14: float | None = None,
 ) -> dict[str, Any]:
-    """已持仓者的防守计划：收盘跌破下方触发位减仓、跌破硬止损离场；跌破后反抽不过反抽上限不宜回补。"""
+    """已持仓者的防守计划：收盘跌破下方触发位（或近端争夺下轨/前低）减仓、跌破硬止损离场；跌破后反抽不过反抽上限不宜回补。"""
     if asset_type == "index":
         return {"available": False, "reason": "指数不可直接持有，请映射到对应宽基 ETF 后再看防守位"}
-    reduce_level = round_to_tick(s1, market, asset_type, day)
+    contested_below = [
+        c
+        for c in (projections.get("contested_levels") or [])
+        if c.get("side") == "below" and (last_c is None or float(c.get("price") or 0.0) < last_c)
+    ]
+    if last_c is not None and atr14 is not None and (last_c - s1) > 1.50 * atr14 and contested_below:
+        best_near = max(contested_below, key=lambda c: float(c["price"]))
+        reduce_level = round_to_tick(float(best_near["price"]), market, asset_type, day)
+        src = "/".join(best_near.get("sources") or [projections["breakdown_level"]["source"]])
+    else:
+        reduce_level = round_to_tick(s1, market, asset_type, day)
+        src = projections["breakdown_level"]["source"]
     exit_level = float(stop_loss)
     rebound_cap = float(projections["bear"]["rebound_cap"])
-    src = projections["breakdown_level"]["source"]
     if exit_level < reduce_level:
         rules = [
             f"日线收盘跌破 {reduce_level:.{p_dec}f}（{src}）先减仓",

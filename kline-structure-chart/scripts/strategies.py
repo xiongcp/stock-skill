@@ -57,6 +57,20 @@ def classify_market_regime(
         base_score += min(12.0, (pdi - mdi) * 0.6)
     else:
         base_score -= min(12.0, (mdi - pdi) * 0.6)
+        if last_close <= ema60 and (ema200 is None or last_close <= ema200) and (mdi - pdi) >= 20.0:
+            import math
+
+            ema20 = float(trend.get("ema20") or last_close)
+            dev20_pct = (last_close / ema20 - 1.0) * 100.0 if ema20 > 0 else 0.0
+            dev60_pct = (last_close / ema60 - 1.0) * 100.0 if ema60 > 0 else 0.0
+            ret5_pct = (
+                (last_close / float(bars[-6]["close"]) - 1.0) * 100.0
+                if len(bars) >= 6 and float(bars[-6]["close"]) > 0
+                else 0.0
+            )
+            di_excess = max(0.0, (mdi - pdi) - 20.0)
+            raw_signal = dev20_pct * 0.25 + dev60_pct * 0.08 + ret5_pct * 0.20 - di_excess * 0.03
+            base_score += 10.0 * math.tanh(raw_signal) if raw_signal < 0 else 18.0 * math.tanh(raw_signal)
     if regime == "HIGH_VOLATILITY_CHAOS":
         base_score = min(base_score, 38.0)
     score = round(max(5.0, min(95.0, base_score)), 1)
@@ -267,6 +281,7 @@ def aggregate_bars_to_weekly(daily_bars: list[dict[str, Any]]) -> list[dict[str,
         else:
             cur_bucket.append(b)
     if cur_bucket:
+        last_dt = datetime.strptime(cur_bucket[-1]["day"][:10], "%Y-%m-%d").date()
         weeks.append(
             {
                 "day": cur_bucket[-1]["day"],
@@ -275,7 +290,7 @@ def aggregate_bars_to_weekly(daily_bars: list[dict[str, Any]]) -> list[dict[str,
                 "low": min(float(x["low"]) for x in cur_bucket),
                 "close": float(cur_bucket[-1]["close"]),
                 "volume": sum(float(x.get("volume") or 0.0) for x in cur_bucket),
-                "complete": True,
+                "complete": bool(last_dt.weekday() >= 4),
             }
         )
     return weeks
@@ -343,12 +358,13 @@ def compute_multi_timeframe_score(
     from indicators import ema
 
     weekly_bars = aggregate_bars_to_weekly(daily_bars)
-    w_closes = [float(b["close"]) for b in weekly_bars]
+    completed_weekly = [b for b in weekly_bars if b.get("complete", True)]
+    eval_weekly = completed_weekly if len(completed_weekly) >= 6 else weekly_bars
+    w_closes = [float(b["close"]) for b in eval_weekly]
     w_ema20 = ema(w_closes, min(20, max(3, len(w_closes) // 2))) if len(w_closes) >= 6 else [None]
-    w_bull = bool(w_closes and w_ema20[-1] is not None and w_closes[-1] >= float(w_ema20[-1]))
-
     snap = ind["snapshot"]
     last_c = float(daily_bars[-1]["close"])
+    w_bull = bool(w_closes and w_ema20[-1] is not None and last_c >= float(w_ema20[-1]))
     ema200 = snap["trend"]["ema200"]
     rv = float(snap["momentum"]["rvol20"])
     corr_pv = float(snap["qlib_factors"].get("corr_close_logvol_20d") or 0.0)
@@ -369,14 +385,27 @@ def compute_multi_timeframe_score(
         struct_pts += 8.0
     elif wedge.get("status") == "below":
         struct_pts -= 8.0
-    bull_pats = sum(1 for p in algebraic_patterns if p.get("direction") == "BULLISH")
-    bear_pats = sum(1 for p in algebraic_patterns if p.get("direction") == "BEARISH")
+    recent_3_days = {b["day"] for b in daily_bars[-3:]}
+    active_pats = [
+        p
+        for p in algebraic_patterns
+        if not p.get("invalidated")
+        and not (p.get("category") == "candlestick" and p.get("observed_at") and p.get("observed_at") not in recent_3_days)
+    ]
+    bull_pats = sum(1 for p in active_pats if p.get("direction") == "BULLISH")
+    bear_pats = sum(1 for p in active_pats if p.get("direction") == "BEARISH")
+    raw_bull_pats = sum(1 for p in algebraic_patterns if p.get("direction") == "BULLISH")
+    raw_bear_pats = sum(1 for p in algebraic_patterns if p.get("direction") == "BEARISH")
+    raw_struct_pts = struct_pts + max(-6.0, min(6.0, (raw_bull_pats - raw_bear_pats) * 3.0))
     struct_pts += max(-6.0, min(6.0, (bull_pats - bear_pats) * 3.0))
     if any(b["type"] == "BULLISH_BOS" for b in smc.get("structure_breaks", [])):
         struct_pts += 3.0
+        raw_struct_pts += 3.0
     if any(b["type"] == "BEARISH_BOS" for b in smc.get("structure_breaks", [])):
         struct_pts -= 3.0
+        raw_struct_pts -= 3.0
     struct_pts = max(0.0, min(25.0, struct_pts))
+    raw_struct_pts = max(0.0, min(25.0, raw_struct_pts))
 
     # 3. 策略池与微观触发组 (Strategy & Momentum Group: 0 ~ 25)
     strat_pts = 12.5
@@ -414,18 +443,25 @@ def compute_multi_timeframe_score(
     rsi14 = float(snap["momentum"].get("rsi14") or 50.0)
     ext_atr = (last_c - ema20) / atr14
 
-    w_win = weekly_bars[-min(60, len(weekly_bars)) :]
+    w_win = eval_weekly[-min(60, len(eval_weekly)) :]
     w_hi = max(float(b["high"]) for b in w_win) if w_win else last_c
     w_lo = min(float(b["low"]) for b in w_win) if w_win else last_c
     w_pos = (last_c - w_lo) / max(1e-6, w_hi - w_lo)
 
+    win60_d = daily_bars[-min(60, len(daily_bars)) :]
+    hi60_d = max(float(b["high"]) for b in win60_d) if win60_d else last_c
+    lo60_d = min(float(b["low"]) for b in win60_d) if win60_d else last_c
+    win20_d = daily_bars[-min(20, len(daily_bars)) :]
+    hi20_d = max(float(b["high"]) for b in win20_d) if win20_d else last_c
+    climax_dist = (hi60_d / max(1e-6, lo60_d) >= 1.60) and (last_c <= hi20_d - 2.0 * atr14) and (last_c < ema20)
     macro_weak = (ema60 < ema200_val) or (ema60 < sma250_val) or (ema200_val < sma250_val)
-    is_mr_regime = mom_ic <= -0.10 and macro_weak and wedge.get("status") != "below"
+    is_mr_regime = mom_ic <= -0.10 and macro_weak and wedge.get("status") != "below" and not climax_dist
     if is_mr_regime:
         rev_adj = max(-14.0, min(14.0, -ext_atr * 6.0 + (50.0 - rsi14) * 0.25))
         blend = min(0.85, max(0.45, abs(mom_ic) * 2.2))
-        inverted = 100.0 - total_score
-        total_score = round(max(5.0, min(95.0, (1.0 - blend) * total_score + blend * inverted + rev_adj)), 1)
+        mr_base = round(macro_pts + raw_struct_pts + strat_pts + res_pts, 1)
+        inverted = 100.0 - mr_base
+        total_score = round(max(5.0, min(95.0, (1.0 - blend) * mr_base + blend * inverted + rev_adj)), 1)
 
     if total_score >= 65.0:
         rating = "BULLISH_RESONANCE"

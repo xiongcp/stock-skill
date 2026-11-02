@@ -708,8 +708,8 @@ def _src(level: dict) -> str:
     return "/".join(level["sources"])
 
 
-# 「重要位」：形态轨道、ABC 测算位、近120日极值、当前波段极值、均线、核心黄金分割位(0.382/0.500/0.618)。普通前高前低与缺口只作目标参考。
-MAJOR_SOURCE_PREFIXES = ("形态", "已跌破", "已突破", "ABC", f"近{STRUCT_DAYS}日", "近期", "MA", "0.382", "0.500", "0.618")
+# 「重要位」：形态轨道、已确认波段前低/前高、ABC 测算位、近120日极值、当前波段极值、均线、核心黄金分割位(0.382/0.500/0.618)。
+MAJOR_SOURCE_PREFIXES = ("形态", "已跌破", "已突破", "前低", "前高", "ABC", f"近{STRUCT_DAYS}日", "近期", "MA", "0.382", "0.500", "0.618")
 
 
 def _is_major(level: dict) -> bool:
@@ -719,7 +719,7 @@ def _is_major(level: dict) -> bool:
 def _trigger(
     levels: list[dict], rails: list[tuple[float, str]], ref: float, cap: float, min_dist: float, fallback: float, fallback_src: str
 ) -> tuple[float, str]:
-    """触发位优先级：距现价 [min_dist, cap] 内的形态轨道 → 该范围（cap 再放宽到 2×cap）内最近的重要位 → 最近的任意位 → ATR 推算。
+    """触发位优先级：距现价 [min_dist, cap] 内的形态轨道 → 近端 1.5×ATR 内的重要位 → cap 内最近的任意客观位 → 2×cap 内的重要位 → 最近的任意位 → ATR 推算。
 
     距现价不足 min_dist 的价位落在日常波动噪声里，作为「正在争夺的价位」单独披露，不作触发位。
     """
@@ -729,10 +729,22 @@ def _trigger(
     near_rails = [r for r in rails if far_enough(r[0]) and abs(r[0] / ref - 1) <= cap]
     if near_rails:
         return near_rails[0]
-    for limit in (cap, 2 * cap):
-        major = next((lvl for lvl in levels if _is_major(lvl) and far_enough(lvl["price"]) and abs(lvl["price"] / ref - 1) <= limit), None)
-        if major:
-            return major["price"], _src(major)
+    near_major_limit = min(cap, 3.0 * min_dist)
+    major_near = next(
+        (lvl for lvl in levels if _is_major(lvl) and far_enough(lvl["price"]) and abs(lvl["price"] / ref - 1) <= near_major_limit),
+        None,
+    )
+    if major_near:
+        return major_near["price"], _src(major_near)
+    near_any = next((lvl for lvl in levels if far_enough(lvl["price"]) and abs(lvl["price"] / ref - 1) <= cap), None)
+    if near_any:
+        return near_any["price"], _src(near_any)
+    major_far = next(
+        (lvl for lvl in levels if _is_major(lvl) and far_enough(lvl["price"]) and abs(lvl["price"] / ref - 1) <= 2 * cap),
+        None,
+    )
+    if major_far:
+        return major_far["price"], _src(major_far)
     rest = next((lvl for lvl in levels if far_enough(lvl["price"])), None)
     if rest:
         return rest["price"], _src(rest)
