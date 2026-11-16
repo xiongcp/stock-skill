@@ -182,7 +182,7 @@
 记周线收盘为 `W`，`MA30 = SMA(W, 30)`：
 
 - `slope_4w = MA30[-1] / MA30[-5] − 1`。`|slope_4w| ≤ 0.5%` 视为走平，阈值沿用 `structure.TREND_FLAT_PCT`。
-- `pos_60w = (W[-1] − 近 60 周最低价) / (近 60 周最高价 − 近 60 周最低价)`。已完成周不足 60 个时用全部可得的周，实际用了多少周写入 `range_weeks`。
+- `pos_60w = (W[-1] − 近 60 周最低价) / (近 60 周最高价 − 近 60 周最低价)`。已完成周不足 60 个时用全部可得的周，实际用了多少周写入 `range_week_count`（键名避开价格白名单的 `range` 片段规则）。
 
 未完成的当周不参与计算，所以阶段只在一周结束后更新。
 
@@ -202,7 +202,7 @@
 
 已完成周少于 35 个时，`phase` 及周线字段为 `null`，并给出 `reason`；已结束月少于 11 个时，月线字段为 `null`。
 
-输出字段：`basis`（`BENCHMARK` 或 `SELF`）、`phase`、`phase_cn`、`phase_weeks`、`phase_weeks_capped`、`weekly_close`、`ma30w_price`、`slope_4w_pct`、`pos_60w_pct`、`range_weeks`、`high_60w_price`、`low_60w_price`、`monthly_vs_ma10`、`ma10m_price`、`reason`。
+输出字段：`basis`（`BENCHMARK` 或 `SELF`）、`phase`、`phase_cn`、`phase_weeks`、`phase_weeks_capped`、`weekly_close`、`ma30w_price`、`slope_4w_pct`、`pos_60w_pct`、`range_week_count`、`high_60w_price`、`low_60w_price`、`monthly_vs_ma10`、`ma10m_price`、`reason`。
 
 同一函数也用于标的自身，结果放在对齐字典里（第 3.5 节）。
 
@@ -273,7 +273,7 @@
 
 - 只用已收盘K线。基准K线不晚于标的最后一根已收盘K线。
 - 拐点只用已确认的（`confirmed = true`），其确认日不晚于截面日。
-- `evaluation.run_causal_replay_audit` 新增可选参数 `benchmark_bars` 与审计项 `market_layer`：在截面处截断标的与基准的行情算一次；保留未来K线并把价格乘以 3 再算一次；两次的大盘层必须逐项相同。主 CLI 调用时传入基准K线；没有基准时该项记为 `SKIPPED`，不记为通过。
+- `evaluation.run_causal_replay_audit` 新增可选参数 `bundle` 与审计项 `market_layer`：标的截到截面日，基准保留截面日之后的K线并把价格乘以 3；结果必须与基准也截到截面日时逐项相同（大盘层自己按标的最后一个已收盘日截断基准，不依赖上游对齐）。主 CLI 调用时传入 `bundle`；没有基准时该项写入 `modules_skipped`，不记为通过。
 - 大盘层与 `--days` 无关：基准结构层的展示根数固定传 `STRUCT_DAYS`。由 `test_c06_pipeline_is_days_invariant` 覆盖。
 
 ### 3.8 输出契约
