@@ -719,7 +719,7 @@ def run_plan_backtest(
             "extra_context": {"vix": None, "earnings_date": None, "is_st": st_at_t, "is_ipo_no_limit": ipo_at_t},
             "provenance": {**base_provenance, "missing_closed_session": None, "stale_sessions": 0},
         }
-        rep = analyze_bundle(sub_bundle, sub_request, include_replay=False, include_forecast=False)
+        rep = analyze_bundle(sub_bundle, sub_request, include_replay=False, include_forecast=False, include_market_layer=False)
         decisions += 1
         action = rep["meta_labeling_decision"]["action"]
         actions_seen[action] = actions_seen.get(action, 0) + 1

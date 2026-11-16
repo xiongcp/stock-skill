@@ -8,8 +8,11 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from indicators import compute_all_indicators
+from market_rules import DEFAULT_BENCHMARKS, price_decimals, round_to_tick
+from patterns import causal_swing_pivots, detect_geometric_patterns
 from strategies import aggregate_bars_to_weekly
-from structure import HISTORY_BARS, MIN_RAIL_SPAN, TREND_FLAT_PCT
+from structure import HISTORY_BARS, MIN_RAIL_SPAN, STRUCT_DAYS, TREND_FLAT_PCT, compute_structure_layer
 
 MA_WEEKS = 30
 SLOPE_WEEKS = 4
@@ -209,3 +212,61 @@ def compute_alignment(
         "target_phase": classify_cycle_phase(target_bars, target_decimals)["phase"],
         "benchmark_phase": classify_cycle_phase(bench_bars, bench_decimals)["phase"],
     }
+
+
+def summarize_benchmark_structure(bench_layer: dict[str, Any], bench_patterns: list[dict[str, Any]]) -> dict[str, Any]:
+    """基准结构层中对外有意义的部分（内部形状；对外字段由 contract_v6 投影）。"""
+    return {
+        "last_close": float(bench_layer["last_c"]),
+        "wedge": {k: v for k, v in bench_layer["wedge"].items() if not k.startswith("_")},
+        "ladder": bench_layer["ladder"],
+        "scenario": bench_layer["scenario"],
+        "wave_counts": bench_layer["wave_counts"],
+        "patterns": [p for p in bench_patterns if p.get("category") == "geometric"],
+        "projections": bench_layer["projections"],
+    }
+
+
+def compute_market_layer(bundle: dict[str, Any], target_layer: dict[str, Any], horizon_bars: int) -> dict[str, Any] | None:
+    """大盘层编排。缺少基准返回 None；标的自身即基准或指数时只给自身的周期阶段。"""
+    inst = bundle["target"]["instrument"]
+    t_bars = target_layer["completed"]
+    t_dec = int(target_layer["price_decimals"])
+    bench = bundle.get("benchmark")
+    # 自己按标的最后一个已收盘日再截一次基准，不依赖上游已经对齐（Task 4 的因果审计守护）
+    b_bars = [b for b in (bench or {}).get("bars") or [] if b["day"] <= t_bars[-1]["day"]]
+    if not b_bars:
+        is_self = (
+            inst["asset_type"] == "index"
+            or inst["symbol"].upper() == DEFAULT_BENCHMARKS.get(inst["market"], {}).get("symbol", "").upper()
+        )
+        if not is_self:
+            return None
+        return {"structure": None, "structure_reason": "标的自身即基准或指数", "alignment": None,
+                "cycle": {"basis": "SELF", **classify_cycle_phase(t_bars, t_dec)}, "benchmark_price_decimals": None}
+
+    b_inst = bench["instrument"]
+    b_dec = price_decimals(float(b_bars[-1]["close"]), b_inst["market"], b_inst["asset_type"], b_bars[-1]["day"])
+    out: dict[str, Any] = {
+        "structure": None, "structure_reason": None, "alignment": None,
+        "cycle": {"basis": "BENCHMARK", **classify_cycle_phase(b_bars, b_dec)},
+        "benchmark_price_decimals": b_dec,
+    }
+    if len(b_bars) < STRUCT_DAYS:
+        out["structure_reason"] = f"基准已收盘K线 {len(b_bars)} 根，少于 {STRUCT_DAYS} 根，不计算结构"
+        return out
+    b_layer = compute_structure_layer(
+        b_bars, None, STRUCT_DAYS,
+        price_decimals=lambda price, day: price_decimals(price, b_inst["market"], b_inst["asset_type"], day),
+        horizon_bars=horizon_bars,
+        round_price=lambda price, day: round_to_tick(price, b_inst["market"], b_inst["asset_type"], day),
+    )
+    sview = b_layer["sview"]
+    series = compute_all_indicators(b_layer["hist"])["series"]
+    piv = causal_swing_pivots(sview, b_layer["zz_thr"], price_decimals=b_dec)
+    pats = detect_geometric_patterns(
+        sview, piv, series["atr14"][-len(sview):], series["rvol20"][-len(sview):], price_decimals=b_dec
+    )
+    out["structure"] = summarize_benchmark_structure(b_layer, pats)
+    out["alignment"] = compute_alignment(target_layer, b_layer, t_bars, b_bars, t_dec, b_dec)
+    return out

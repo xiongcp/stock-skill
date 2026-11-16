@@ -11,6 +11,7 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+from analyze_and_forecast import run_pipeline  # noqa: E402
 from conftest import load_recorded  # noqa: E402
 
 CSI300 = "sina_daily/sh000300.json"
@@ -212,3 +213,65 @@ def test_alignment_short_overlap_gives_nulls() -> None:
     assert got["beta_120"] is None and got["corr_120"] is None
     assert got["rs_trend_60"] is None and got["rs_at_60d_high"] is None
     assert got["rs_trend_20"] in ("UP", "DOWN", "FLAT")
+
+
+REQ = {"display_bars": 120, "structure_bars": 120, "horizon_bars": 15}
+FIVE = [("CN", "600519.SH", "equity"), ("CN", "000001.SH", "index"), ("HK", "00700.HK", "equity"),
+        ("US", "NVDA.US", "equity"), ("US", "SPY.US", "etf")]
+
+
+def test_market_layer_present_for_stock(replay_recorded, tmp_path: Path) -> None:
+    rep = run_pipeline({"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ}, output_dir=tmp_path)
+    ml = rep["market_layer"]
+    assert ml["cycle"]["basis"] == "BENCHMARK" and ml["cycle"]["phase"] in ("ADVANCE", "DECLINE", "TOPPING", "BASING")
+    s = ml["structure"]
+    assert set(s) == {"last_close", "wedge", "ladder", "scenario", "wave_counts", "patterns", "projections"}
+    assert not any(k.startswith("_") for k in s["wedge"])
+    assert all(p["category"] == "geometric" for p in s["patterns"])
+    assert ml["alignment"]["common_day_count"] == 120
+    assert ml["benchmark_price_decimals"] == 2
+
+
+def test_market_layer_self_benchmark(replay_recorded, tmp_path: Path) -> None:
+    rep = run_pipeline({"symbol": "SPY.US", "market": "US", "asset_type": "etf", **REQ}, output_dir=tmp_path)
+    ml = rep["market_layer"]
+    assert ml["structure"] is None and ml["alignment"] is None
+    assert ml["cycle"]["basis"] == "SELF" and ml["benchmark_price_decimals"] is None
+
+
+def test_market_layer_none_without_benchmark() -> None:
+    from market_structure import compute_market_layer
+    from structure import STRUCT_DAYS, compute_structure_layer
+
+    bars = load_recorded(MOUTAI)
+    bundle = {"market": "CN", "benchmark": None,
+              "target": {"instrument": {"symbol": "600519.SH", "market": "CN", "asset_type": "equity"}, "bars": bars}}
+    assert compute_market_layer(bundle, compute_structure_layer(bars, None, STRUCT_DAYS), 15) is None
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("market,symbol,asset_type", FIVE)
+def test_decisions_do_not_depend_on_market_layer(replay_recorded, market, symbol, asset_type) -> None:
+    """每 5 个交易日取一个截面：开与关大盘层，除 market_layer 外内部报告逐项相同。"""
+    import data_gateway
+    from analysis import analyze_bundle
+
+    req = {"symbol": symbol, "market": market, "asset_type": asset_type, **REQ}
+    full = data_gateway.load_bundle(req)
+    bars, bench = full["target"]["bars"], full.get("benchmark")
+    checked = 0
+    # 截面的构造方式与 evaluation.run_plan_backtest 相同：标的截到第 t 根，基准截到同一天
+    for t in range(len(bars) - 250, len(bars), 5):
+        cut_day = bars[t]["day"]
+        bundle = {
+            **full,
+            "target": {**full["target"], "bars": bars[: t + 1], "intraday": None},
+            "benchmark": {**bench, "bars": [b for b in bench["bars"] if b["day"] <= cut_day]} if bench else None,
+        }
+        on = analyze_bundle(bundle, req, include_replay=False, include_forecast=False, include_market_layer=True)
+        off = analyze_bundle(bundle, req, include_replay=False, include_forecast=False, include_market_layer=False)
+        assert off["market_layer"] is None
+        on.pop("market_layer"), off.pop("market_layer")
+        assert on == off, f"{symbol} {cut_day}"
+        checked += 1
+    assert checked == 50
