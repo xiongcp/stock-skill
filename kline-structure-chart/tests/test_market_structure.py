@@ -275,3 +275,28 @@ def test_decisions_do_not_depend_on_market_layer(replay_recorded, market, symbol
         assert on == off, f"{symbol} {cut_day}"
         checked += 1
     assert checked == 50
+
+
+def test_market_layer_ignores_benchmark_bars_after_cut(replay_recorded) -> None:
+    import data_gateway
+    from evaluation import audit_market_layer_causality
+    from market_structure import classify_cycle_phase
+
+    bundle = data_gateway.load_bundle({"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ})
+    assert audit_market_layer_causality(bundle) == []
+    # 对照：同一段K线被乘以 3 后，周期阶段的输出一定不同；所以上面的相等不是空转
+    b = bundle["benchmark"]["bars"]
+    dirty = b[:-30] + [{**x, **{k: float(x[k]) * 3.0 for k in ("open", "high", "low", "close")}} for x in b[-30:]]
+    assert classify_cycle_phase(dirty)["weekly_close"] != classify_cycle_phase(b)["weekly_close"]
+
+
+@pytest.mark.slow
+def test_causal_audit_reports_market_layer(replay_recorded) -> None:
+    import data_gateway
+    from evaluation import run_causal_replay_audit
+
+    bundle = data_gateway.load_bundle({"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ})
+    res = run_causal_replay_audit(bundle["target"]["bars"], bundle=bundle)
+    assert "market_layer" in res["modules_audited"] and res["modules_skipped"] == [] and res["passed"]
+    res2 = run_causal_replay_audit(bundle["target"]["bars"])
+    assert res2["modules_skipped"] == ["market_layer"] and "market_layer" not in res2["modules_audited"]

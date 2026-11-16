@@ -108,6 +108,7 @@
   "causal_replay_audit.mismatches",
   "causal_replay_audit.mismatches_count",
   "causal_replay_audit.modules_audited",
+  "causal_replay_audit.modules_skipped",
   "causal_replay_audit.passed",
   "market",
   "schema_version",

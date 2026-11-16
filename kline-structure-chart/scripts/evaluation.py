@@ -28,6 +28,7 @@ from patterns import (
     detect_geometric_patterns,
     detect_smc_structures,
 )
+from market_structure import compute_market_layer
 from risk import compute_triple_barrier_plan
 from strategies import (
     classify_market_regime,
@@ -37,7 +38,36 @@ from strategies import (
 from structure import HISTORY_BARS, STRUCT_DAYS, compute_structure_layer
 
 
-def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) -> dict[str, Any]:
+def audit_market_layer_causality(bundle: dict[str, Any], check_steps: int = 4) -> list[str]:
+    """大盘层零前视：标的截到截面日，基准保留截面日之后的K线并把价格乘以 3。
+
+    结果必须与基准也截到截面日时逐项相同，即大盘层不读取标的最后一个已收盘日之后的任何基准K线。
+    """
+    t_bars, bench = bundle["target"]["bars"], bundle["benchmark"]
+    n = len(t_bars)
+    mismatches: list[str] = []
+    step = max(10, (n - 440) // max(1, check_steps))
+    for cut in range(440, n - 5, step):
+        cut_day = str(t_bars[cut - 1]["day"])
+        t_layer = compute_structure_layer(t_bars[:cut], None, STRUCT_DAYS)
+
+        def run(b_bars: list[dict[str, Any]]) -> dict[str, Any] | None:
+            sub = {**bundle, "target": {**bundle["target"], "bars": t_bars[:cut]}, "benchmark": {**bench, "bars": b_bars}}
+            return compute_market_layer(sub, t_layer, 15)
+
+        clean = run([b for b in bench["bars"] if b["day"] <= cut_day])
+        dirty = run(
+            [b if b["day"] <= cut_day else {**b, **{k: float(b[k]) * 3.0 for k in ("open", "high", "low", "close")}}
+             for b in bench["bars"]]
+        )
+        if clean != dirty:
+            mismatches.append(f"Market layer read benchmark bars after cut_day={cut_day}")
+    return mismatches
+
+
+def run_causal_replay_audit(
+    bars: list[dict[str, Any]], check_steps: int = 8, bundle: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """按生产配置验证因果无前视不变性：
     1. 单边因果 Nadaraya-Watson 平滑在追加未来 K 线后绝不改变历史值；
     2. 在生产固定结构窗口（HISTORY_BARS / STRUCT_DAYS）与同一阈值下，截至 t_cut 已确认的拐点与 SMC 缺口在追加未来 K 线后不改变；
@@ -236,6 +266,11 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
         ):
             mismatches.append(f"Structure or scenarios mutated at cut={cut}")
 
+    # 大盘层：需要基准与至少 460 根标的K线；条件不满足时记为跳过，不记为通过
+    market_layer_audited = bool(bundle and bundle.get("benchmark") and n >= 460)
+    if market_layer_audited:
+        mismatches.extend(audit_market_layer_causality(bundle))
+
     return {
         "checked_cutoffs": checked,
         "modules_audited": [
@@ -247,7 +282,9 @@ def run_causal_replay_audit(bars: list[dict[str, Any]], check_steps: int = 8) ->
             "conformal_forecast",
             "pit_rescaling",
             "triple_barrier_decision",
+            *(["market_layer"] if market_layer_audited else []),
         ],
+        "modules_skipped": [] if market_layer_audited else ["market_layer"],
         "mismatches_count": len(mismatches),
         "mismatches": mismatches[:10],
         "passed": len(mismatches) == 0,
