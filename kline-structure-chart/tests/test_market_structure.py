@@ -355,3 +355,36 @@ def test_lint_benchmark_price_needs_index_context(replay_recorded, tmp_path: Pat
     bad = lint_agent_response(f"该股下方支撑位 {px}。{tail}", res)
     assert not [e for e in ok if "白名单" in e]
     assert [e for e in bad if "白名单" in e]
+
+
+def test_report_md_has_market_layer_and_passes_lint(replay_recorded, tmp_path: Path) -> None:
+    from lint_response import lint_agent_response
+
+    rep = run_pipeline({"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ}, output_dir=tmp_path)
+    res = _result(rep)
+    md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    cyc, ali = res["market_context"]["cycle"], res["market_context"]["alignment"]
+    assert "### 大盘结构" in md and "### 周期阶段" in md and "### 个股与大盘" in md
+    assert cyc["phase_cn"] in md and f"{cyc['phase_weeks']}" in md
+    if ali["low_compare"]:
+        assert ali["low_compare"]["label_cn"] in md
+        assert ("未稳定" in md) == (not ali["low_compare"]["window_complete"] or
+                                    bool(ali["high_compare"] and not ali["high_compare"]["window_complete"]))
+    assert "不构成交易信号，也不改变风控结论" in md
+    assert lint_agent_response(md, res) == []
+
+
+def test_report_md_market_layer_absent_cases(replay_recorded, tmp_path: Path) -> None:
+    from render_report_md import _market_layer_lines
+
+    assert _market_layer_lines({"structure": None, "cycle": None, "alignment": None}, 2) == []
+    rep = run_pipeline({"symbol": "SPY.US", "market": "US", "asset_type": "etf", **REQ}, output_dir=tmp_path)
+    md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    assert "### 周期阶段" in md and "### 大盘结构" not in md and "### 个股与大盘" not in md
+
+
+def test_dashboard_embeds_market_layer_rows(replay_recorded, tmp_path: Path) -> None:
+    rep = run_pipeline({"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ}, output_dir=tmp_path)
+    html = Path(rep["rendered_paths"]["dashboard_html"]).read_text(encoding="utf-8")
+    for label in ("大盘周线阶段", "大盘日线通道", "大盘低点对照"):
+        assert label in html
