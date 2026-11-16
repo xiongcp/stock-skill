@@ -12,8 +12,10 @@
       "smc_structures",
       "conformal_forecast",
       "pit_rescaling",
-      "triple_barrier_decision"
+      "triple_barrier_decision",
+      "market_layer"
     ],
+    "modules_skipped": [],
     "mismatches_count": 0,
     "mismatches": [],
     "passed": true

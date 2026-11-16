@@ -119,3 +119,74 @@
   - 净盈亏比扣除往返交易成本，不含融券费用；
   - 大盘状态分 ≥ 65 或净盈亏比 < 1.20 时写入 `warnings`；
   - 卖空制度约束见 `hk-market.md` / `us-market.md`。
+
+## 8. 大盘周期阶段与个股—大盘对齐（`scripts/market_structure.py`）
+
+本节是描述性计算：只用已收盘K线与已确认拐点（`confirmed = true`），不参与规则分、评级、风控否决与计划价位。常量在规格中写定，未经调参，也未经有效性验证。
+
+| 常量 | 取值 | 含义 |
+| --- | --- | --- |
+| `MA_WEEKS` | 30 | 周线均线周期 |
+| `SLOPE_WEEKS` | 4 | 均线斜率的回看周数 |
+| `RANGE_WEEKS` | 60 | 位置区间的回看周数 |
+| `MIN_WEEKS` | 35 | 判定阶段所需的最少已完成周数 |
+| `MA_MONTHS` | 10 | 月线均线周期 |
+| `MIN_MONTHS` | 11 | 月线位置所需的最少已结束月数 |
+| `ALIGN_DAYS` | 120 | 对齐窗口（共同交易日） |
+| `ALIGN_MIN_DAYS` | 60 | 联动程度与相对强弱需要的最少共同交易日 |
+| `RS_BAND` | 0.02 | 相对强弱线趋势的 ±2% 带 |
+| `ALIGN_WINDOW_BARS` | 5 | 新低新高对照时，拐点前后的K线窗口 |
+
+另有两个沿用自 `structure.py` 的常量：`TREND_FLAT_PCT`（0.5%，斜率走平阈值）与 `MIN_RAIL_SPAN`（10 根，拐点配对的最大间隔）。
+
+### 8.1 周线阶段
+
+输入取最近 `HISTORY_BARS`（420）根已收盘日线，因此结果与取数长度无关。周线来自 `strategies.aggregate_bars_to_weekly`，只保留已完成的周，并丢弃第一个可能不完整的周；未完成的当周不参与计算，阶段只在一周结束后更新。
+
+记周线收盘为 $W$，$\text{MA30} = \text{SMA}(W, 30)$：
+
+- $\text{slope\_4w} = \text{MA30}[-1] / \text{MA30}[-5] - 1$；$|\text{slope\_4w}| \le 0.5\%$ 视为走平。
+- $\text{pos\_60w} = (W[-1] - L_{60}) / (H_{60} - L_{60})$，$H_{60}$、$L_{60}$ 为近 60 个已完成周的最高价与最低价；不足 60 周时用全部可得的周，实际周数写入 `range_week_count`；$H_{60} = L_{60}$ 时取 0.5。
+
+| 阶段 | 条件 |
+| --- | --- |
+| `ADVANCE`（上升阶段） | $\text{slope\_4w} > +0.5\%$ 且 $W[-1] > \text{MA30}[-1]$ |
+| `DECLINE`（下降阶段） | $\text{slope\_4w} < -0.5\%$ 且 $W[-1] < \text{MA30}[-1]$ |
+| `TOPPING`（高位震荡） | 其余情况，且 $\text{pos\_60w} \ge 0.5$ |
+| `BASING`（低位震荡） | 其余情况，且 $\text{pos\_60w} < 0.5$ |
+
+规则无状态：只看当前这一周的数值。`phase_weeks` 是按同一规则逐周回看、当前阶段已连续多少周；回看到预热不足的那一周为止，此时 `phase_weeks_capped = true`（实际持续周数不少于该值）。
+
+月线：已结束自然月（丢弃第一个月与最后一个月）的收盘相对 10 月均线的位置，`ABOVE` 或 `BELOW`，价位为 `ma10m_price`。
+
+已完成周少于 35 个时，`phase` 与周线字段为 `null` 并给出 `reason`；已结束月少于 11 个时，月线字段为 `null`。标的自身即基准或指数时，同一函数用于标的自身，`cycle.basis = "SELF"`。
+
+### 8.2 个股与大盘的对齐（`alignment`）
+
+按日期对齐标的与基准的已收盘K线，取最近 120 个共同交易日（`common_day_count` 为实际个数）。
+
+- **联动程度**：`beta_120`、`corr_120` 是日对数收益的回归斜率与相关系数；共同交易日少于 60 个，或任一方差为 0 时为 `null`。
+- **相对强弱线**：$rs = $ 标的收盘 / 基准收盘。`rs_trend_20`、`rs_trend_60` 取 $rs[-1] / rs[-1-n]$：不低于 1.02 为 `UP`，不高于 0.98 为 `DOWN`，其余为 `FLAT`（60 日项在共同交易日不足 60 个时为 `null`）。`rs_at_60d_high`、`rs_at_60d_low` 为 $rs[-1]$ 是否为最近 60 个值中的最大或最小值。
+- **拐点先后**：取基准最近一个已确认的波段低点，在标的的已确认低点中找时间最近且相距不超过 10 根K线的一个，`low_lead_lag_bars = 标的低点序号 - 基准低点序号`（按共同交易日序号计，负数表示标的先见低点），找不到时为 `null`；高点同理，输出 `high_lead_lag_bars`。
+- **新低新高对照**：取基准最近两个已确认低点 $L_1$（较早）与 $L_2$，标的在 $L_1$、$L_2$ 各自前后 5 根K线窗口内的最低价记为 $m_1$、$m_2$。
+
+| 基准 | 标的 | 标签 |
+| --- | --- | --- |
+| $L_2 < L_1$（创新低） | $m_2 > m_1$ | `HIGHER_LOW_WHILE_INDEX_LOWER_LOW`（大盘新低、个股未新低） |
+| $L_2 < L_1$ | $m_2 \le m_1$ | `LOWER_LOW_WITH_INDEX`（与大盘同步新低） |
+| $L_2 \ge L_1$ | $m_2 < m_1$ | `LOWER_LOW_WHILE_INDEX_HIGHER_LOW`（大盘未新低、个股新低） |
+| $L_2 \ge L_1$ | $m_2 \ge m_1$ | `HIGHER_LOW_WITH_INDEX`（与大盘同步抬高低点） |
+
+  高点对称（窗口内取最高价，$H_2 > H_1$ 为创新高）：
+
+| 基准 | 标的 | 标签 |
+| --- | --- | --- |
+| $H_2 > H_1$（创新高） | $m_2 < m_1$ | `LOWER_HIGH_WHILE_INDEX_HIGHER_HIGH`（大盘新高、个股未新高） |
+| $H_2 > H_1$ | $m_2 \ge m_1$ | `HIGHER_HIGH_WITH_INDEX`（与大盘同步新高） |
+| $H_2 \le H_1$ | $m_2 > m_1$ | `HIGHER_HIGH_WHILE_INDEX_LOWER_HIGH`（大盘未新高、个股新高） |
+| $H_2 \le H_1$ | $m_2 \le m_1$ | `LOWER_HIGH_WITH_INDEX`（与大盘同步压低高点） |
+
+  输出基准两个拐点的日期 `benchmark_days`、基准是否创新低（或新高）`benchmark_extended` 与 $m_2/m_1 - 1$ 的百分比 `target_change_pct`，不输出标的价位。$L_2$ 之后已收盘K线不足 5 根时窗口右侧截到最后一根，`window_complete = false`，标签可能在随后几根K线内改变。基准已确认低点（或高点）不足两个时，对应对照为 `null`。
+- **阶段对照**：`target_phase` 与 `benchmark_phase` 各自按 8.1 计算并列给出，不合成一个标签。
+
+因果性：大盘层自己按标的最后一个已收盘日截断基准，不依赖上游对齐；`evaluation.run_causal_replay_audit` 的 `market_layer` 项守护这一点。

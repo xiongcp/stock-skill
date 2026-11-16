@@ -75,7 +75,7 @@ kline-structure-chart/
 │   ├── market_rules.py               # CN/HK/US 日历、涨跌停、价位表、印花税、收盘判定、代码映射与点位复权
 │   ├── data_gateway.py               # 新浪/Yahoo/腾讯取数、厂商数据校验、除权除息事件、腾讯快照补全简称/ST/港股每手股数、未收盘K线拆分、基准配对
 │   ├── structure.py                  # 结构层纯计算（拐点/轨道打分拟合/主+备选浪型计数/斐波那契/阶梯/三条推演），JSON 与 PNG 共用
-│   ├── market_structure.py           # 大盘结构与周期层：月线聚合、周线阶段四分类（描述性，不参与评级/否决/计划价位）
+│   ├── market_structure.py           # 大盘结构与周期层（基准结构摘要、周线月线阶段、个股与大盘对齐；只描述，不参与评分与风控）
 │   ├── scenarios.py                  # 多情景引擎（8 类标准情景前提判定、推动5浪识别、2~5 个活跃情景筛选）
 │   ├── price_text.py                 # 价格文本识别与可引用价位收集
 │   ├── lint_response.py              # Agent 回复文本契约校验器（否决置顶、价格白名单、禁用术语与免责声明检查）
@@ -107,7 +107,7 @@ kline-structure-chart/
     ├── test_docs_contract.py         # 文档契约：无绝对路径、引用文件存在、目录树与代码同步
     ├── test_report_and_metadata.py   # 代码校验、行情快照元数据（简称/ST/每手股数）与 Markdown 报告
     ├── test_tools.py                 # 名称转代码（录制回放）、doctor 离线自检、插件市场清单与 install.sh 语法
-    ├── test_market_structure.py      # 大盘结构与周期层：周期阶段等（录制真实行情）
+    ├── test_market_structure.py      # 大盘结构与周期层：阶段规则、对齐关系、决策不变、契约与呈现（录制真实行情）
     ├── test_v6_contract.py           # v6 输出契约：去预测化、schema、体积预算与命令行信封
     ├── check_days_invariance.py      # 跨展示窗口 (60~500日) 结构层不变性回归校验
     ├── record_fixtures.py            # 联网录制真实行情 fixture（手动执行）

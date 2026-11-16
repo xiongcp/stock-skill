@@ -448,6 +448,7 @@ uv run --directory kline-structure-chart python scripts/lint_response.py --resul
   - 报告同时给出历史样本外覆盖率和约等于多少个独立样本。独立样本很少时，覆盖率本身也不稳定。
   - 只有约 20 个以上独立样本且覆盖率接近名义值时，状态才是"已达标"，否则是"校准观察期"。审计覆盖全部已取到的历史，默认 15 日范围约有 24～42 个独立样本（视历史长度而定），能否达标取决于覆盖率是否接近名义值。
 - **回测看样本量**：成交少于 30 笔时，胜率和收益统计参考价值很低，报告会明确提示。胜率后面括号里是 Wilson 95% 区间，样本越少区间越宽（例如 3 笔全亏时为 0%~56%）。
+- **大盘结构与周期（实验字段，只描述、不是信号）**：`market_context.structure`（基准指数的通道、浪型与支撑压力）、`market_context.cycle`（基准的周线阶段：上升、下降、高位震荡、低位震荡，已持续周数与月线位置）、`market_context.alignment`（个股与大盘近 120 个共同交易日的联动程度、相对强弱线、拐点先后与新低新高对照）。它们不参与规则分、评级、风控否决与计划价位；例如"大盘新低、个股未新低"只是对已发生走势的描述，不是买入理由。
 - 形态、浪型、市场状态的解读要点与常见误读见 [references/interpretation-guide.md](kline-structure-chart/references/interpretation-guide.md)。
 
 ---
