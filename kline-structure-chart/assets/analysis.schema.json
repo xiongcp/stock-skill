@@ -85,7 +85,22 @@
         "benchmark_missing": { "type": "boolean", "x-stability": "stable" },
         "source": { "type": ["string", "null"], "x-stability": "stable" },
         "bench_ret1": { "type": ["number", "null"], "x-stability": "experimental" },
-        "bench_ret5": { "type": ["number", "null"], "x-stability": "experimental" }
+        "bench_ret5": { "type": ["number", "null"], "x-stability": "experimental" },
+        "structure": {
+          "type": ["object", "null"],
+          "x-stability": "experimental",
+          "description": "基准指数的结构摘要：字段形状与顶层 structure / scenarios 的同名字段相同；标的自身即基准或缺少基准时为 null"
+        },
+        "cycle": {
+          "type": ["object", "null"],
+          "x-stability": "experimental",
+          "description": "周线阶段（ADVANCE / TOPPING / DECLINE / BASING）、已持续周数与月线相对 10 月均线的位置；basis 为 BENCHMARK 或 SELF"
+        },
+        "alignment": {
+          "type": ["object", "null"],
+          "x-stability": "experimental",
+          "description": "个股与大盘的对齐关系：联动程度、相对强弱线、拐点先后、新低新高对照、阶段对照"
+        }
       }
     },
     "structure": {
@@ -197,7 +212,12 @@
       "properties": {
         "price_decimals": { "type": "integer", "x-stability": "stable" },
         "tolerance": { "type": "number", "x-stability": "stable" },
-        "prices": { "type": "array", "items": { "type": "number" }, "x-stability": "stable" }
+        "prices": { "type": "array", "items": { "type": "number" }, "x-stability": "stable" },
+        "benchmark": {
+          "type": ["object", "null"],
+          "x-stability": "experimental",
+          "description": "基准指数的可引用价位 {price_decimals, tolerance, prices}；只在提到大盘的句子里可引用"
+        }
       }
     },
     "files": {

@@ -1,6 +1,7 @@
 """大盘结构与周期层：周期阶段、对齐关系、编排、契约与呈现（只用录制的真实行情）。"""
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -300,3 +301,57 @@ def test_causal_audit_reports_market_layer(replay_recorded) -> None:
     assert "market_layer" in res["modules_audited"] and res["modules_skipped"] == [] and res["passed"]
     res2 = run_causal_replay_audit(bundle["target"]["bars"])
     assert res2["modules_skipped"] == ["market_layer"] and "market_layer" not in res2["modules_audited"]
+
+
+def _result(rep: dict) -> dict:
+    return json.loads(Path(rep["rendered_paths"]["result_json"]).read_text(encoding="utf-8"))
+
+
+def test_contract_projects_market_layer(replay_recorded, tmp_path: Path) -> None:
+    from contracts import validate_report
+
+    rep = run_pipeline({"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ}, output_dir=tmp_path)
+    res = _result(rep)
+    validate_report(res)
+    mc = res["market_context"]
+    assert set(mc["structure"]) == {"last_close", "channel", "key_levels", "abc_scenario", "wave_counts",
+                                    "patterns", "scenarios"}
+    assert set(mc["structure"]["scenarios"]) == {"breakout_level", "breakdown_level", "active", "impulse_wave"}
+    for item in mc["structure"]["scenarios"]["active"]:
+        assert not {"waypoints_offset", "step_labels", "eta_bars", "target_within_horizon"} & set(item)
+    assert mc["cycle"]["basis"] == "BENCHMARK" and mc["alignment"]["common_day_count"] == 120
+    qb = res["quotable_prices"]["benchmark"]
+    assert qb["price_decimals"] == 2 and mc["cycle"]["ma30w_price"] in qb["prices"]
+    assert mc["structure"]["last_close"] in qb["prices"]
+    assert mc["cycle"]["range_week_count"] not in qb["prices"]  # 周数不是价格
+    size = Path(rep["rendered_paths"]["result_json"]).stat().st_size
+    assert size <= 80 * 1024, size
+
+
+def test_quotable_self_basis(replay_recorded, tmp_path: Path) -> None:
+    rep = run_pipeline({"symbol": "SPY.US", "market": "US", "asset_type": "etf", **REQ}, output_dir=tmp_path)
+    res = _result(rep)
+    mc = res["market_context"]
+    assert mc["structure"] is None and mc["alignment"] is None and mc["cycle"]["basis"] == "SELF"
+    assert res["quotable_prices"]["benchmark"] is None
+    assert mc["cycle"]["ma30w_price"] in res["quotable_prices"]["prices"]
+
+
+def test_market_context_nulls_without_benchmark() -> None:
+    import contract_v6
+
+    assert contract_v6._market_layer_fields(None) == {"structure": None, "cycle": None, "alignment": None}
+
+
+def test_lint_benchmark_price_needs_index_context(replay_recorded, tmp_path: Path) -> None:
+    from lint_response import lint_agent_response
+
+    rep = run_pipeline({"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ}, output_dir=tmp_path)
+    res = _result(rep)
+    px = res["market_context"]["cycle"]["ma30w_price"]
+    assert px not in res["quotable_prices"]["prices"]
+    tail = "\n\n以上内容不构成投资建议。"
+    ok = lint_agent_response(f"大盘周线均线附近的支撑位 {px}。{tail}", res)
+    bad = lint_agent_response(f"该股下方支撑位 {px}。{tail}", res)
+    assert not [e for e in ok if "白名单" in e]
+    assert [e for e in bad if "白名单" in e]
