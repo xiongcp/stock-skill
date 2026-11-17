@@ -10,6 +10,7 @@
 - **契约变更（`backtest.json`，不在 schema 约束内）**：`causal_replay_audit.modules_skipped`（没有基准或标的已收盘K线少于 460 根时为 `["market_layer"]`，表示该审计项未执行，不记为通过），`causal_replay_audit.modules_audited` 新增 `market_layer` 项。
 - 新字段只做描述：规则分、评级、否决条件与计划价位不读取它们（`test_decisions_do_not_depend_on_market_layer` 守护）。
 - `lint_response.py`：基准价位只在提到大盘、指数或基准名称的句子里可引用。
+- `result.json` 体积预算（80 KB）改为运行期执行：`contract_v6.build_result` 在投影末尾检查落盘字节数，超出时只裁剪 `market_context.structure`——先去掉基准 `wave_counts` 的备选计数，仍超出再把基准 `key_levels` 每侧截到离收盘最近的 5 个；裁剪时在 `quality.notes` 追加说明并重算 `quotable_prices.benchmark.prices`。标的自身的字段不裁剪，未超预算时输出逐字节不变，没有新增或删除契约字段。
 - `report.md` 第 2 节与看板第 1 栏呈现上述内容；PNG 不变。
 - `examples/` 四个示例按 `--as-of 2026-10-15` 重新生成，结果 JSON 与报告新增大盘层内容。
 

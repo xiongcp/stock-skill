@@ -676,3 +676,113 @@ def test_30_adversarial_agent_violations_are_caught_by_linter(
     errors = lint_agent_response(bad_reply, result_doc)
     assert len(errors) > 0, f"对抗用例 {case_id} 未被拦截: {injected_line!r}"
 
+
+
+def _result_bytes(result: dict) -> bytes:
+    return json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def _without(obj: dict, *keys: str) -> dict:
+    return {k: v for k, v in obj.items() if k not in keys}
+
+
+def _assert_only_benchmark_summary_differs(trimmed: dict, base: dict) -> None:
+    """裁剪只能动基准结构摘要的 wave_counts / key_levels、基准可引用价位与 quality.notes。"""
+    for key in V6_TOP - {"market_context", "quality", "quotable_prices"}:
+        assert trimmed[key] == base[key], f"{key} 被裁剪改动"
+    assert _without(trimmed["quality"], "notes") == _without(base["quality"], "notes")
+    assert trimmed["quality"]["notes"][: len(base["quality"]["notes"])] == base["quality"]["notes"]
+    assert _without(trimmed["quotable_prices"], "benchmark") == _without(base["quotable_prices"], "benchmark")
+    assert _without(trimmed["market_context"], "structure") == _without(base["market_context"], "structure")
+    assert _without(trimmed["market_context"]["structure"], "wave_counts", "key_levels") == _without(
+        base["market_context"]["structure"], "wave_counts", "key_levels"
+    )
+
+
+def _assert_benchmark_prices_consistent(result: dict) -> None:
+    from price_text import collect_price_whitelist
+
+    mc, bench = result["market_context"], result["quotable_prices"]["benchmark"]
+    wl = collect_price_whitelist({"structure": mc["structure"], "cycle": mc["cycle"]}, bench["price_decimals"], [])
+    assert bench["prices"] == wl["prices"]
+
+
+def test_v6_result_trims_benchmark_summary_in_spec_order(replay_recorded, tmp_path: Path, monkeypatch) -> None:
+    """规格 3.4：超出体积预算时先去掉基准备选计数，再截短基准关键价位；标的字段不动。只调低预算，不改行情。"""
+    import contract_v6
+    from contracts import validate_report
+
+    assert contract_v6.RESULT_SIZE_BUDGET_BYTES == 80 * 1024
+    keep = contract_v6.BENCH_KEY_LEVELS_KEEP
+    rep = run_pipeline({"symbol": "00700.HK", "market": "HK", "asset_type": "equity", **REQ_BASE}, output_dir=tmp_path)
+    on_disk = Path(rep["rendered_paths"]["result_json"]).read_bytes()
+    files = json.loads(on_disk)["files"]
+    build = lambda: contract_v6.build_result(rep, files)  # noqa: E731
+
+    # 未超预算：与落盘文件逐字节相同
+    base = build()
+    assert _result_bytes(base) == on_disk
+    s0 = base["market_context"]["structure"]
+    assert [w["role"] for w in s0["wave_counts"]] == ["主计数", "备选计数"]
+    assert max(len(s0["key_levels"]["supports"]), len(s0["key_levels"]["resistances"])) > keep
+
+    # 第一步：只去掉备选计数就够，关键价位保持原样
+    monkeypatch.setattr(contract_v6, "RESULT_SIZE_BUDGET_BYTES", len(on_disk) - 1)
+    r1 = build()
+    s1 = r1["market_context"]["structure"]
+    assert s1["wave_counts"] == s0["wave_counts"][:1]
+    assert s1["key_levels"] == s0["key_levels"]
+    assert len(_result_bytes(r1)) <= len(on_disk) - 1
+    assert len(r1["quality"]["notes"]) == len(base["quality"]["notes"]) + 1
+    assert "备选计数" in r1["quality"]["notes"][-1] and "关键价位" not in r1["quality"]["notes"][-1]
+
+    # 第二步：仍超预算时每侧只保留最近的 keep 个关键价位
+    monkeypatch.setattr(contract_v6, "RESULT_SIZE_BUDGET_BYTES", len(_result_bytes(r1)) - 1)
+    r2 = build()
+    s2 = r2["market_context"]["structure"]
+    assert s2["wave_counts"] == s0["wave_counts"][:1]
+    assert s2["key_levels"] == {side: levels[:keep] for side, levels in s0["key_levels"].items()}
+    assert len(_result_bytes(r2)) <= len(_result_bytes(r1)) - 1
+    assert "备选计数" in r2["quality"]["notes"][-1] and "关键价位" in r2["quality"]["notes"][-1]
+
+    # 两步都做完仍超预算：不再裁别的字段，如实注明
+    monkeypatch.setattr(contract_v6, "RESULT_SIZE_BUDGET_BYTES", 1)
+    r3 = build()
+    assert r3["market_context"]["structure"] == s2
+    assert "仍超出" in r3["quality"]["notes"][-1]
+
+    for trimmed in (r1, r2, r3):
+        validate_report(trimmed)
+        _assert_only_benchmark_summary_differs(trimmed, base)
+        _assert_benchmark_prices_consistent(trimmed)
+        assert set(trimmed["quotable_prices"]["benchmark"]["prices"]) <= set(base["quotable_prices"]["benchmark"]["prices"])
+    # 截掉的关键价位不再可引用（备选计数的价位在这份行情里同时出现在关键价位中，第一步不减少价位）
+    assert len(r2["quotable_prices"]["benchmark"]["prices"]) < len(base["quotable_prices"]["benchmark"]["prices"])
+
+    # 裁剪不回写内部报告：恢复预算后与未裁剪结果逐字节相同
+    monkeypatch.undo()
+    assert _result_bytes(build()) == on_disk
+
+
+def test_v6_trimmed_result_renders_and_lints_clean(replay_recorded, tmp_path: Path, monkeypatch) -> None:
+    """裁剪后的 result.json 仍能生成 report.md 与看板，报告通过回复校验；内部决策与未裁剪时一致。"""
+    import contract_v6
+    from contracts import validate_report
+    from lint_response import lint_agent_response
+
+    req = {"symbol": "00700.HK", "market": "HK", "asset_type": "equity", **REQ_BASE}
+    plain = run_pipeline(req, output_dir=tmp_path / "plain")
+    monkeypatch.setattr(contract_v6, "RESULT_SIZE_BUDGET_BYTES", 1)
+    rep = run_pipeline(req, output_dir=tmp_path / "trimmed")
+    result, _ = load_v6(rep)
+    validate_report(result)
+    structure = result["market_context"]["structure"]
+    assert len(structure["wave_counts"]) == 1
+    assert all(len(v) <= contract_v6.BENCH_KEY_LEVELS_KEEP for v in structure["key_levels"].values())
+    _assert_benchmark_prices_consistent(result)
+    md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    assert result["quality"]["notes"][-1] in md
+    assert lint_agent_response(md, result) == []
+    assert Path(rep["rendered_paths"]["dashboard_html"]).stat().st_size > 0
+    for key in ("meta_labeling_decision", "multi_timeframe_score", "debate_and_veto", "triple_barrier_plan"):
+        assert rep[key] == plain[key]

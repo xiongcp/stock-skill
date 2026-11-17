@@ -109,7 +109,12 @@
 2. 标的自身即基准或指数（没有外部基准）：`structure` 与 `alignment` 为 `null`，`cycle` 按标的自身计算并带 `basis = "SELF"`，此时 `cycle` 里的价位属于标的，收入 `quotable_prices.prices`。
 3. 基准已收盘K线少于结构窗口（`STRUCT_DAYS`）：`structure` 与 `alignment` 为 `null`，`cycle` 仍按基准给出。
 
-体积预算：三个新字段（含基准价位清单）未裁剪，五个录制配置下 `result.json` 落盘为 59005~63636 字节，仍在 80 KB（81920 字节）预算内；联网行情的K线与价位更多，体积会更大（仓库内 `300308.SZ` 示例为 71773 字节）。运行期不裁剪也不校验体积，80 KB 预算只由测试在录制配置上守护。
+体积预算：五个录制配置下三个新字段（含基准价位清单）完整输出，`result.json` 落盘为 59005~63636 字节，在 80 KB（81920 字节）预算内；联网行情的K线与价位更多，体积会更大（仓库内 `300308.SZ` 示例为 71773 字节）。运行期在投影末尾（`contract_v6.build_result`）按落盘的序列化方式计算 UTF-8 字节数，超出预算时只裁剪 `market_context.structure`，按下列顺序做到回到预算内为止：
+
+1. `wave_counts` 只保留主计数，去掉备选计数。
+2. `key_levels` 的 `supports` 与 `resistances` 各只保留离基准收盘最近的 5 个（`BENCH_KEY_LEVELS_KEEP`）。
+
+裁剪发生时：`quality.notes` 追加一句说明裁掉了什么；`quotable_prices.benchmark.prices` 按裁剪后的摘要重新收集，被裁掉的基准价位不再可引用；标的自身的字段、`market_context.cycle` 与 `market_context.alignment` 不裁剪，评级、否决、计划价位与回测不受影响；PNG 与 `chart_data.json` 不变。两步做完仍超出预算时不再裁剪其他字段，照常输出，并在同一条备注里写明"裁剪后仍超出预算"。未超预算时输出与没有这一步时逐字节相同。Windows 上落盘的换行符是 CRLF，文件会比这里计算的字节数略大。
 
 子字段内部也可能为 `null`（样本不足时不估算、不补数）：周线字段在已完成周少于 35 个时为 `null` 并给出 `cycle.reason`；月线字段在已结束月少于 11 个时为 `null`；联动程度在共同交易日少于 60 个时为 `null`；对照项在基准已确认拐点不足两个时为 `null`。
 
