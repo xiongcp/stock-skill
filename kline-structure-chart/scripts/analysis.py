@@ -33,6 +33,7 @@ from patterns import (
     detect_geometric_patterns,
     detect_smc_structures,
 )
+from market_structure import compute_market_layer
 from structure import HISTORY_BARS, STRUCT_DAYS, compute_structure_layer
 from risk import compute_triple_barrier_plan
 from strategies import (
@@ -237,6 +238,7 @@ def analyze_bundle(
     include_replay: bool = True,
     structure: dict[str, Any] | None = None,
     include_forecast: bool = True,
+    include_market_layer: bool = True,
 ) -> AnalysisReport:
     """100% 纯数学计算核心：从 OHLCV 矩阵计算全部指标、形态证据、SMC、多周期共振分、三重屏障与正常波动范围。"""
     target = bundle["target"]
@@ -371,6 +373,8 @@ def analyze_bundle(
         strategy_signals,
         benchmark_info,
     )
+    # 4b. 大盘结构与周期层：只做描述，单独存放，不并入 benchmark_info（评分与风控读不到它）
+    market_layer = compute_market_layer(bundle, layer, horizon_bars) if include_market_layer else None
 
     is_st = bool(inst.get("is_st") or request.get("is_st") or extra_ctx.get("is_st", False))
     is_ipo_no_limit = bool(request.get("is_ipo_no_limit") or extra_ctx.get("is_ipo_no_limit", False))
@@ -547,6 +551,7 @@ def analyze_bundle(
         "meta": meta,
         "request": request,
         "market_benchmark": benchmark_info,
+        "market_layer": market_layer,
         "mathematical_indicators": math_indicators,
         "algebraic_patterns_detected": all_algebraic_patterns,
         "smc_structures": smc_structures,

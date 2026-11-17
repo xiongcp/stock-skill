@@ -22,7 +22,10 @@
       "market": "CN",
       "asset_type": "equity",
       "display_bars": 120,
+      "structure_bars": 120,
       "horizon_bars": 15,
+      "max_risk_pct": 0.01,
+      "color_scheme": "auto",
       "as_of": "2026-10-15"
     }
   },
@@ -181,7 +184,636 @@
     "benchmark_missing": false,
     "source": "SINA_LIVE_DAILY",
     "bench_ret1": -0.01225,
-    "bench_ret5": -0.03347
+    "bench_ret5": -0.03347,
+    "structure": {
+      "last_close": 4166.01,
+      "channel": {
+        "pattern": "下降楔形",
+        "fitted": true,
+        "status": "below",
+        "status_run_bars": 9,
+        "status_text": "2026-09-28 起收盘跌破下轨，已连续 9 个交易日（向下突破）",
+        "status_short": "09-28起收盘跌破下轨·9日",
+        "upper": {
+          "start": {
+            "idx": 59,
+            "day": "2026-07-15",
+            "price": 4826.86
+          },
+          "end": {
+            "idx": 108,
+            "day": "2026-09-22",
+            "price": 4583.38
+          },
+          "touches": [
+            "2026-07-15",
+            "2026-07-22",
+            "2026-08-18",
+            "2026-09-22"
+          ]
+        },
+        "lower": {
+          "start": {
+            "idx": 61,
+            "day": "2026-07-17",
+            "price": 4492.09
+          },
+          "end": {
+            "idx": 104,
+            "day": "2026-09-16",
+            "price": 4417.6
+          },
+          "touches": [
+            "2026-07-17",
+            "2026-07-30",
+            "2026-09-16"
+          ]
+        },
+        "h1": {
+          "idx": 59,
+          "day": "2026-07-15",
+          "price": 4826.86
+        },
+        "h2": {
+          "idx": 108,
+          "day": "2026-09-22",
+          "price": 4583.38
+        },
+        "l1": {
+          "idx": 61,
+          "day": "2026-07-17",
+          "price": 4492.09
+        },
+        "l2": {
+          "idx": 104,
+          "day": "2026-09-16",
+          "price": 4417.6
+        },
+        "slope_upper_per_day": -4.969,
+        "slope_lower_per_day": -1.732,
+        "upper_today": 4528.72,
+        "lower_today": 4391.62,
+        "height_at_start": 324.83,
+        "width_ratio": 0.42,
+        "apex_bars_ahead": 42.4,
+        "apex_day": null,
+        "expired": false,
+        "fit_check": {
+          "flat_pct_per_bar": 0.0357,
+          "upper": {
+            "rail_slope_pct_per_bar": -0.1193,
+            "theil_sen_slope_pct_per_bar": -0.1111,
+            "consistent": true
+          },
+          "lower": {
+            "rail_slope_pct_per_bar": -0.0416,
+            "theil_sen_slope_pct_per_bar": -0.0416,
+            "consistent": true
+          }
+        }
+      },
+      "key_levels": {
+        "resistances": [
+          {
+            "price": 4176.1,
+            "sources": [
+              "缺口下沿 10-15",
+              "前高 2025-07-30"
+            ]
+          },
+          {
+            "price": 4214.01,
+            "sources": [
+              "缺口上沿 10-15"
+            ]
+          },
+          {
+            "price": 4327.51,
+            "sources": [
+              "前低 2025-09-04"
+            ]
+          },
+          {
+            "price": 4381.82,
+            "sources": [
+              "ABC 0.618倍位",
+              "已跌破的下轨(反压)"
+            ]
+          },
+          {
+            "price": 4394.29,
+            "sources": [
+              "前低 2026-03-24",
+              "MA20"
+            ]
+          },
+          {
+            "price": 4417.6,
+            "sources": [
+              "前低 09-16",
+              "前低 2025-11-24",
+              "缺口下沿 09-28"
+            ]
+          },
+          {
+            "price": 4439.14,
+            "sources": [
+              "缺口上沿 09-28"
+            ]
+          },
+          {
+            "price": 4477.66,
+            "sources": [
+              "0.382反弹位",
+              "前低 07-30",
+              "前低 2025-12-16"
+            ]
+          },
+          {
+            "price": 4490.87,
+            "sources": [
+              "前低 2025-10-13",
+              "前低 07-17",
+              "缺口下沿 09-24"
+            ]
+          },
+          {
+            "price": 4513.45,
+            "sources": [
+              "缺口上沿 09-24",
+              "ABC 0.382倍位"
+            ]
+          },
+          {
+            "price": 4528.72,
+            "sources": [
+              "形态上轨"
+            ]
+          },
+          {
+            "price": 4548.89,
+            "sources": [
+              "前高 2025-09-02",
+              "前低 2026-03-09",
+              "MA60"
+            ]
+          },
+          {
+            "price": 4578.21,
+            "sources": [
+              "前低 2026-02-03",
+              "前高 09-22"
+            ]
+          },
+          {
+            "price": 4589.67,
+            "sources": [
+              "0.500反弹位"
+            ]
+          },
+          {
+            "price": 4602.2,
+            "sources": [
+              "缺口下沿 09-02",
+              "缺口上沿 09-02"
+            ]
+          },
+          {
+            "price": 4640.63,
+            "sources": [
+              "前高 2025-12-08",
+              "前低 07-14"
+            ]
+          },
+          {
+            "price": 4677.57,
+            "sources": [
+              "前低 06-08"
+            ]
+          },
+          {
+            "price": 4701.68,
+            "sources": [
+              "0.618反弹位",
+              "MA120",
+              "前高 2025-11-11"
+            ]
+          },
+          {
+            "price": 4720.86,
+            "sources": [
+              "前高 2026-03-17",
+              "前高 2025-10-09"
+            ]
+          },
+          {
+            "price": 4734.87,
+            "sources": [
+              "前低 07-09",
+              "前高 08-18"
+            ]
+          },
+          {
+            "price": 4761.83,
+            "sources": [
+              "前高 2025-10-30",
+              "前高 2026-02-25",
+              "前高 07-22"
+            ]
+          },
+          {
+            "price": 4785.35,
+            "sources": [
+              "前低 05-22"
+            ]
+          },
+          {
+            "price": 4826.86,
+            "sources": [
+              "前高 07-15",
+              "前低 06-29",
+              "前高 2026-01-13"
+            ]
+          },
+          {
+            "price": 4906.49,
+            "sources": [
+              "前高 07-10"
+            ]
+          },
+          {
+            "price": 4937.93,
+            "sources": [
+              "前高 05-21"
+            ]
+          },
+          {
+            "price": 4991.85,
+            "sources": [
+              "前高 06-03"
+            ]
+          },
+          {
+            "price": 5017.38,
+            "sources": [
+              "前高 07-01"
+            ]
+          },
+          {
+            "price": 5030.52,
+            "sources": [
+              "前高 05-14"
+            ]
+          },
+          {
+            "price": 5064.27,
+            "sources": [
+              "前高 06-23",
+              "近120日最高 06-23"
+            ]
+          }
+        ],
+        "supports": [
+          {
+            "price": 4157.95,
+            "sources": [
+              "ABC 1.000倍位"
+            ]
+          },
+          {
+            "price": 4115.07,
+            "sources": [
+              "近期低点 10-15",
+              "近120日最低 10-15"
+            ]
+          },
+          {
+            "price": 4037.94,
+            "sources": [
+              "前低 2025-08-04"
+            ]
+          },
+          {
+            "price": 4025.3,
+            "sources": [
+              "前高 2025-03-19"
+            ]
+          },
+          {
+            "price": 3995.95,
+            "sources": [
+              "前高 2025-02-24"
+            ]
+          },
+          {
+            "price": 3960.52,
+            "sources": [
+              "前高 2025-05-14"
+            ]
+          },
+          {
+            "price": 3855.73,
+            "sources": [
+              "前低 2025-03-04"
+            ]
+          },
+          {
+            "price": 3827.08,
+            "sources": [
+              "前低 2025-06-23"
+            ]
+          },
+          {
+            "price": 3795.76,
+            "sources": [
+              "ABC 1.618倍位"
+            ]
+          },
+          {
+            "price": 3776.29,
+            "sources": [
+              "前低 2025-01-16"
+            ]
+          },
+          {
+            "price": 3514.12,
+            "sources": [
+              "前低 2025-04-07"
+            ]
+          }
+        ]
+      },
+      "abc_scenario": {
+        "direction": "down",
+        "label": "下跌ABC",
+        "reversal": 0.05,
+        "a_start": {
+          "idx": 43,
+          "day": "2026-06-23",
+          "price": 5064.27
+        },
+        "a_end": {
+          "idx": 70,
+          "day": "2026-07-30",
+          "price": 4478.21
+        },
+        "b_end": {
+          "idx": 83,
+          "day": "2026-08-18",
+          "price": 4744.01
+        },
+        "a_range": 586.06,
+        "b_retrace": 0.454,
+        "c_progress": {
+          "idx": 119,
+          "day": "2026-10-15",
+          "extreme": 4115.07,
+          "c_over_a": 1.073,
+          "phase": "C浪已越过A浪终点（创出新低）",
+          "deepest_level_reached": 1.0
+        },
+        "levels": [
+          {
+            "ratio": 0.382,
+            "price": 4520.14,
+            "state": "收盘已跌破",
+            "intraday": null,
+            "drawn": true
+          },
+          {
+            "ratio": 0.618,
+            "price": 4381.82,
+            "state": "收盘已跌破",
+            "intraday": null,
+            "drawn": true
+          },
+          {
+            "ratio": 1.0,
+            "price": 4157.95,
+            "state": "影线触及未收破",
+            "intraday": null,
+            "drawn": true
+          },
+          {
+            "ratio": 1.618,
+            "price": 3795.76,
+            "state": "未触及",
+            "intraday": null,
+            "drawn": true
+          }
+        ],
+        "intraday_note": null,
+        "invalidation": "日线收盘越过该线才算，盘中刺破不算",
+        "count_invalidation": {
+          "price": 4744.01,
+          "text": "日线收盘站上 B 浪终点 4744.01，此计数失效"
+        }
+      },
+      "wave_counts": [
+        {
+          "direction": "down",
+          "label": "下跌ABC",
+          "reversal": 0.05,
+          "a_start": {
+            "idx": 43,
+            "day": "2026-06-23",
+            "price": 5064.27
+          },
+          "a_end": {
+            "idx": 70,
+            "day": "2026-07-30",
+            "price": 4478.21
+          },
+          "b_end": {
+            "idx": 83,
+            "day": "2026-08-18",
+            "price": 4744.01
+          },
+          "a_range": 586.06,
+          "b_retrace": 0.454,
+          "c_progress": {
+            "idx": 119,
+            "day": "2026-10-15",
+            "extreme": 4115.07,
+            "c_over_a": 1.073,
+            "phase": "C浪已越过A浪终点（创出新低）",
+            "deepest_level_reached": 1.0
+          },
+          "levels": [
+            {
+              "ratio": 0.382,
+              "price": 4520.14,
+              "state": "收盘已跌破",
+              "intraday": null,
+              "drawn": true
+            },
+            {
+              "ratio": 0.618,
+              "price": 4381.82,
+              "state": "收盘已跌破",
+              "intraday": null,
+              "drawn": true
+            },
+            {
+              "ratio": 1.0,
+              "price": 4157.95,
+              "state": "影线触及未收破",
+              "intraday": null,
+              "drawn": true
+            },
+            {
+              "ratio": 1.618,
+              "price": 3795.76,
+              "state": "未触及",
+              "intraday": null,
+              "drawn": true
+            }
+          ],
+          "intraday_note": null,
+          "invalidation": "日线收盘越过该线才算，盘中刺破不算",
+          "count_invalidation": {
+            "price": 4744.01,
+            "text": "日线收盘站上 B 浪终点 4744.01，此计数失效"
+          },
+          "role": "主计数",
+          "a_range_atr": 9.9
+        }
+      ],
+      "patterns": [],
+      "scenarios": {
+        "breakout_level": {
+          "price": 4214.01,
+          "source": "缺口上沿 10-15"
+        },
+        "breakdown_level": {
+          "price": 4115.07,
+          "source": "近期低点 10-15/近120日最低 10-15"
+        },
+        "active": [
+          {
+            "id": "BREAKDOWN_DECLINE",
+            "name": "破位下行",
+            "direction": "BEARISH",
+            "status": "ACTIVE",
+            "status_cn": "已在进行中",
+            "selection_role": "PRECONDITION_MET",
+            "precondition_template": "收盘跌破下轨、颈线或前低",
+            "precondition_met": true,
+            "precondition_rationale": "收盘已跌破下轨/前低支撑 4289.79（09-28起收盘跌破下轨·9日）",
+            "applicability_score": 91.0,
+            "trigger": "已在进行中（已收盘跌破 4289.79，反抽受制于 4313.58）",
+            "trigger_price": null,
+            "reference_trigger_price": 4289.79,
+            "trigger_distance_atr": 2.08,
+            "target_price": 4037.94,
+            "target_source_template": "形态高度 / 前低",
+            "target_source": "形态高度 / 前低（前低 2025-08-04）",
+            "invalidation": "收盘收回破位位 4313.58 上方",
+            "invalidation_template": "收盘收回破位位",
+            "invalidation_price": 4313.58
+          },
+          {
+            "id": "BREAKOUT_RETEST",
+            "name": "突破回踩",
+            "direction": "BULLISH",
+            "status": "PENDING_TRIGGER",
+            "status_cn": "待触发（前提未成立，条件备选）",
+            "selection_role": "CONDITIONAL_FALLBACK",
+            "precondition_template": "刚收盘突破轨道或颈线 ≤ 5 根",
+            "precondition_met": false,
+            "precondition_rationale": "现价距上方突破位 4214.01（缺口上沿 10-15）约 0.8 个 ATR",
+            "applicability_score": 72.0,
+            "trigger": "日线放量收盘站上 4214.01（缺口上沿 10-15）",
+            "trigger_price": 4214.01,
+            "reference_trigger_price": 4214.01,
+            "trigger_distance_atr": 0.81,
+            "target_price": 4392.41,
+            "target_source_template": "形态高度测量",
+            "target_source": "形态高度测量 / 前低 2025-09-04",
+            "invalidation": "收盘跌回轨道内超过 0.5 个 ATR（跌破 4142.22）",
+            "invalidation_template": "收盘跌回轨道内超过 0.5 个 ATR",
+            "invalidation_price": 4142.22
+          }
+        ],
+        "impulse_wave": {
+          "direction": "down",
+          "label": "下降推动浪（第 3 浪推进中）",
+          "phase": "wave_3",
+          "wave1_start": {
+            "day": "2026-08-18",
+            "price": 4744.01
+          },
+          "wave1_end": {
+            "day": "2026-09-16",
+            "price": 4417.6
+          },
+          "wave2_end": {
+            "day": "2026-09-22",
+            "price": 4583.38
+          },
+          "wave3_1618_target": 4055.25,
+          "invalidation_price": 4744.01,
+          "invalidation_text": "收盘站上浪 1 起点 4744.01 则下降推动浪计数失效",
+          "hard_rules": {
+            "wave2_above_wave1_start": true,
+            "wave3_not_shortest": true,
+            "wave4_outside_wave1": true
+          }
+        }
+      }
+    },
+    "cycle": {
+      "basis": "BENCHMARK",
+      "phase": "DECLINE",
+      "phase_cn": "下降阶段",
+      "phase_weeks": 3,
+      "phase_weeks_capped": false,
+      "weekly_close": 4317.26,
+      "ma30w_price": 4666.08,
+      "slope_4w_pct": -0.77,
+      "pos_60w_pct": 22.2,
+      "range_week_count": 60,
+      "high_60w_price": 5064.27,
+      "low_60w_price": 4103.6,
+      "monthly_vs_ma10": "BELOW",
+      "ma10m_price": 4674.67,
+      "reason": null
+    },
+    "alignment": {
+      "common_day_count": 120,
+      "beta_120": -0.226,
+      "corr_120": -0.2,
+      "rs_trend_20": "UP",
+      "rs_trend_60": "UP",
+      "rs_at_60d_high": true,
+      "rs_at_60d_low": false,
+      "low_lead_lag_bars": 7,
+      "high_lead_lag_bars": null,
+      "low_compare": {
+        "benchmark_days": [
+          "2026-07-30",
+          "2026-09-16"
+        ],
+        "benchmark_extended": true,
+        "target_change_pct": -2.46,
+        "label": "LOWER_LOW_WITH_INDEX",
+        "label_cn": "与大盘同步新低",
+        "window_complete": true
+      },
+      "high_compare": {
+        "benchmark_days": [
+          "2026-08-18",
+          "2026-09-22"
+        ],
+        "benchmark_extended": false,
+        "target_change_pct": -5.52,
+        "label": "LOWER_HIGH_WITH_INDEX",
+        "label_cn": "与大盘同步压低高点",
+        "window_complete": true
+      },
+      "target_phase": "DECLINE",
+      "benchmark_phase": "DECLINE"
+    }
   },
   "structure": {
     "last_close": 1312.97,
@@ -1829,6 +2461,68 @@
       1531.75,
       1549.61,
       1561.85
-    ]
+    ],
+    "benchmark": {
+      "price_decimals": 2,
+      "tolerance": 0.01,
+      "prices": [
+        3514.12,
+        3776.29,
+        3795.76,
+        3827.08,
+        3855.73,
+        3960.52,
+        3995.95,
+        4025.3,
+        4037.94,
+        4055.25,
+        4103.6,
+        4115.07,
+        4142.22,
+        4157.95,
+        4166.01,
+        4176.1,
+        4214.01,
+        4289.79,
+        4313.58,
+        4317.26,
+        4327.51,
+        4381.82,
+        4391.62,
+        4392.41,
+        4394.29,
+        4417.6,
+        4439.14,
+        4477.66,
+        4478.21,
+        4490.87,
+        4492.09,
+        4513.45,
+        4520.14,
+        4528.72,
+        4548.89,
+        4578.21,
+        4583.38,
+        4589.67,
+        4602.2,
+        4640.63,
+        4666.08,
+        4674.67,
+        4677.57,
+        4701.68,
+        4720.86,
+        4734.87,
+        4744.01,
+        4761.83,
+        4785.35,
+        4826.86,
+        4906.49,
+        4937.93,
+        4991.85,
+        5017.38,
+        5030.52,
+        5064.27
+      ]
+    }
   }
 }

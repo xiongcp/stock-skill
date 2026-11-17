@@ -109,7 +109,7 @@ def run_pipeline(
             horizon_bars=int(request.get("horizon_bars") or 15),
             step=backtest_step,
         )
-        causal_audit = run_causal_replay_audit(bundle["target"]["bars"])
+        causal_audit = run_causal_replay_audit(bundle["target"]["bars"], bundle=bundle)
         bt_payload = {
             "schema_version": SCHEMA_VERSION,
             "symbol": meta["symbol"],

@@ -226,6 +226,17 @@ def lint_agent_response(
             prev_wl = (pr.get("quotable_prices") or {}).get("prices") or []
             wl_prices.extend(float(p) for p in prev_wl)
     wl_tol = float(whitelist.get("tolerance") or 0.01)
+    bench_wl = whitelist.get("benchmark") or {}
+    bench_prices: list[float] = [float(p) for p in bench_wl.get("prices") or []]
+    bench_tol = float(bench_wl.get("tolerance") or 0.01)
+    mc = report.get("market_context") or {}
+    idx_sym = str(mc.get("index_symbol") or "")
+    meta = report.get("meta") or {}
+    # 标的本身是指数时，"指数"一词会指向标的自身，不能当作基准语境
+    generic = ("大盘", "基准") if meta.get("asset_type") == "index" else ("大盘", "指数", "基准")
+    bench_words = [w for w in (mc.get("index_name"), idx_sym, idx_sym.split(".")[0], *generic) if w]
+    # 标的简称与固定术语里的"指数""基准"不指向基准指数，判定语境前先剔除
+    bench_noise = [str(meta.get("name") or ""), "相对强弱指数", "指数平滑", "指数移动", "指数加权", "基准情景"]
     wave_only_prices: list[float] = []
     for wc in list(struct.get("wave_counts") or []) + ([struct["abc_scenario"]] if struct.get("abc_scenario") else []):
         for lv in (wc or {}).get("levels") or []:
@@ -268,7 +279,17 @@ def lint_agent_response(
             seen_spans.add(span)
             cand = float(m.group(grp_idx))
             msg = f"回复中出现了不在 result.json 白名单中的价格: {m.group(0)!r} ({cand})"
-            if not price_in_whitelist(cand, wl_prices, wl_tol) and msg not in errors:
+            if price_in_whitelist(cand, wl_prices, wl_tol):
+                continue
+            # 基准指数的价位只在提到大盘的句子里可引用
+            sent = _sentence_around(cleaned, m.start(), m.end())
+            ctx_sent = sent
+            for noise in bench_noise:
+                if noise:
+                    ctx_sent = ctx_sent.replace(noise, "")
+            if bench_prices and price_in_whitelist(cand, bench_prices, bench_tol) and any(w in ctx_sent for w in bench_words):
+                continue
+            if msg not in errors:
                 errors.append(msg)
 
     # 6. 免责声明检查

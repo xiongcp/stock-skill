@@ -133,6 +133,10 @@ stderr 同时打印 `[CODE] message`。本节列出的命令行参数都是稳�
 0. **先答所问**：用 1~2 句话、只用报告里的数字直接回答用户的具体问题，再展开下面各部分。
 1. **数据说明**：数据源（`meta.data_source`）、截止日（`meta.as_of`）、复权口径（`meta.adjustment`），以及上一步需要转述的告警或备注。
 2. **大盘先行**：基准的 `market_context.regime`、`regime_score`，以及个股的 `market_context.relative_strength_vs_index`。
+   - 报告第 2 节若有大盘结构、周期阶段、个股与大盘三段（`market_context.structure` / `cycle` / `alignment`，实验字段，字段字典见 `references/output-fields.md`），先说大盘周线阶段（`cycle.phase_cn`）与日线通道，再说个股。
+   - 引用指数点位的句子必须出现"大盘""指数"或基准名称；`lint_response.py` 只在这样的句子里放行基准价位；标的本身是指数时，引用基准价位须写"大盘"或基准名称，只写"指数"不算。
+   - `alignment` 的新低新高对照中 `window_complete = false` 时，必须说明该标签"尚未稳定"，随后几根K线内可能改变。
+   - 这些字段只描述，不参与评级、否决与计划价位；不得说成概率、信号或买卖建议（例如"大盘新低、个股未新低"不是买入理由）。
 3. **结构与规则**：
    - `verdict.rule_score` 是 0~100 的确定性规则分，不是胜率或概率。`verdict.rule_detail.regime_adjustment.applied = true`（均值回归体制）时，规则分已按反转规则调整、不等于四组分项之和，必须原文转述 `regime_adjustment.note_cn`，不得把调整后的低分说成"多周期空头"。
    - `scenarios` 按"触发条件 → 目标位 → 失效条件"转述：三条主路径 `scenarios.paths`（上攻 / 震荡 / 下探），以及 `scenarios.active` 中 2~5 个适用情景及其状态（`status_cn`：`已在进行中` / `待触发`）。不为情景附加任何频率、用时或概率；`scenarios.contested_levels`（现价附近正在争夺的价位）不作触发条件。
@@ -197,8 +201,8 @@ stderr 同时打印 `[CODE] message`。本节列出的命令行参数都是稳�
 
 - `references/output-fields.md`：`result.json` / `backtest.json` 每个字段的含义、单位、取值范围、能否为空、稳定级别和对外怎么说，以及 6.x 的稳定性规则。用户追问某个字段时阅读。
 - `references/scenario-playbook.md`：8 类标准情景库的前提、触发、目标与失效条件。
-- `references/interpretation-guide.md`：形态、浪型、市场状态、风控计划、正常波动范围和回测的解读要点与常见误读。
-- `references/math-patterns.md`：用户追问某个指标、形态或正常波动范围如何计算时阅读。
+- `references/interpretation-guide.md`：形态、浪型、市场状态、大盘结构与周期、风控计划、正常波动范围和回测的解读要点与常见误读。
+- `references/math-patterns.md`：用户追问某个指标、形态、大盘周期阶段或正常波动范围如何计算时阅读。
 - `references/cn-market.md`：A股交易时段与集合竞价、涨跌停（主板 ±10%、双创 ±20%、北交所 ±30%，ST 按板块与日期区分）、科创板与北交所申报细则、T+1、融券限制、代码识别、复权与交易日历。
 - `references/hk-market.md`：港股交易时段与收市竞价、价位表（含 2025-08 / 2026-08 两期下调）、碎股、卖空规则、双边印花税、恒生科技指数数据源。
 - `references/us-market.md`：美股常规与盘前盘后时段、T+1 结算、PDT 规则取消后的过渡期、Reg SHO 卖空规则、VIX 与财报窗口说明。

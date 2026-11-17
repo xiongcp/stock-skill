@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 新增（大盘结构与周期层）
+
+- **契约变更（新增实验字段，`x-stability: experimental`）**：`market_context.structure`（基准指数的结构摘要）、`market_context.cycle`（周线阶段四分类、已持续周数、月线相对 10 月均线的位置）、`market_context.alignment`（个股与大盘的联动程度、相对强弱线、拐点先后、新低新高对照）与 `quotable_prices.benchmark`（基准可引用价位）。
+- **契约变更（`backtest.json`，不在 schema 约束内）**：`causal_replay_audit.modules_skipped`（没有基准或标的已收盘K线少于 460 根时为 `["market_layer"]`，表示该审计项未执行，不记为通过），`causal_replay_audit.modules_audited` 新增 `market_layer` 项。
+- 新字段只做描述：规则分、评级、否决条件与计划价位不读取它们（`test_decisions_do_not_depend_on_market_layer` 守护）。
+- `lint_response.py`：基准价位只在提到大盘、指数或基准名称的句子里可引用。
+- `report.md` 第 2 节与看板第 1 栏呈现上述内容；PNG 不变。
+- `examples/` 四个示例按 `--as-of 2026-10-15` 重新生成，结果 JSON 与报告新增大盘层内容。
+
 ### 文档
 
 - `SKILL.md` frontmatter 的 `license` 由 `MIT` 改为 `Apache-2.0`，与仓库根目录的 `LICENSE` 文件一致。

@@ -796,6 +796,7 @@ def test_c06_pipeline_is_days_invariant(replay_recorded, tmp_path: Path) -> None
     keys = (
         "meta",
         "market_benchmark",
+        "market_layer",
         "mathematical_indicators",
         "algebraic_patterns_detected",
         "smc_structures",

@@ -43,6 +43,31 @@ def _draw_only(item: dict[str, Any]) -> dict[str, Any]:
     return {k: item[k] for k in _SCENARIO_DRAW_KEYS if k in item}
 
 
+def _market_layer_fields(ml: dict[str, Any] | None) -> dict[str, Any]:
+    """内部 market_layer → market_context 的三个实验字段。缺少基准时三者都为 None。"""
+    if ml is None:
+        return {"structure": None, "cycle": None, "alignment": None}
+    s = ml.get("structure")
+    structure = None
+    if s is not None:
+        pj = s["projections"]
+        structure = {
+            "last_close": round(s["last_close"], int(ml["benchmark_price_decimals"])),
+            "channel": s["wedge"],
+            "key_levels": s["ladder"],
+            "abc_scenario": s["scenario"],
+            "wave_counts": s["wave_counts"],
+            "patterns": [{k: v for k, v in p.items() if k != "invalidated"} for p in s["patterns"]],
+            "scenarios": {
+                "breakout_level": pj["breakout_level"],
+                "breakdown_level": pj["breakdown_level"],
+                "active": [_strip_scenario(x) for x in pj.get("scenarios") or []],
+                "impulse_wave": pj.get("impulse_wave"),
+            },
+        }
+    return {"structure": structure, "cycle": ml["cycle"], "alignment": ml.get("alignment")}
+
+
 def build_result(report: dict[str, Any], files: dict[str, str]) -> dict[str, Any]:
     meta = report["meta"]
     request = report.get("request") or {}
@@ -50,6 +75,8 @@ def build_result(report: dict[str, Any], files: dict[str, str]) -> dict[str, Any
     mtf = report["multi_timeframe_score"]
     deb = report["debate_and_veto"]
     mb = report["market_benchmark"]
+    ml = report.get("market_layer")
+    ml_fields = _market_layer_fields(ml)
     mi = report["mathematical_indicators"]
     sl = mi["structure_levels"]
     rs = report["rule_scenarios"]
@@ -101,6 +128,7 @@ def build_result(report: dict[str, Any], files: dict[str, str]) -> dict[str, Any
             "source": mb.get("source"),
             "bench_ret1": mb.get("bench_ret1"),
             "bench_ret5": mb.get("bench_ret5"),
+            **ml_fields,
         },
         "structure": {
             "last_close": float(report["series_export"]["bars"][-1]["close"]),
@@ -160,12 +188,19 @@ def build_result(report: dict[str, Any], files: dict[str, str]) -> dict[str, Any
     }
     # 可引用价位只从 result.json 自己的价位字段与最近 20 根K线收集：前者能在 result.json 里找到出处，
     # 最近 20 根K线的价格只存在于 chart_data.json（result.json 不含K线序列）
-    wl = collect_price_whitelist(
-        {k: result[k] for k in _QUOTABLE_SECTIONS},
-        int(meta.get("price_decimals") or 2),
-        report["series_export"]["bars"],
-    )
+    sections = {k: result[k] for k in _QUOTABLE_SECTIONS}
+    self_basis = bool(ml_fields["cycle"]) and ml_fields["cycle"].get("basis") == "SELF"
+    if self_basis:
+        sections["cycle"] = ml_fields["cycle"]  # 标的自身的周期价位属于标的
+    wl = collect_price_whitelist(sections, int(meta.get("price_decimals") or 2), report["series_export"]["bars"])
     result["quotable_prices"] = {k: wl[k] for k in ("price_decimals", "tolerance", "prices")}
+    bench_wl = None
+    if ml is not None and not self_basis and ml.get("benchmark_price_decimals") is not None:
+        bw = collect_price_whitelist(
+            {"structure": ml_fields["structure"], "cycle": ml_fields["cycle"]}, int(ml["benchmark_price_decimals"]), []
+        )
+        bench_wl = {k: bw[k] for k in ("price_decimals", "tolerance", "prices")}
+    result["quotable_prices"]["benchmark"] = bench_wl
     return result
 
 

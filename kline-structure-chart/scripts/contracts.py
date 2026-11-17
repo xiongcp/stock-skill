@@ -99,6 +99,7 @@ class AnalysisReport(TypedDict, total=False):
     meta: dict[str, Any]
     request: AnalysisRequest
     market_benchmark: dict[str, Any]
+    market_layer: dict[str, Any] | None
     mathematical_indicators: dict[str, Any]
     algebraic_patterns_detected: list[dict[str, Any]]
     smc_structures: dict[str, Any]

@@ -38,6 +38,63 @@ def _num(value: Any, digits: int = 2) -> str:
     return "—" if value is None else f"{float(value):.{digits}f}"
 
 
+def _market_layer_lines(ctx: dict[str, Any], bench_decimals: int, subject: str = "个股") -> list[str]:
+    """第 2 节的大盘结构、周期阶段、个股与大盘三段；数字全部取自 result.json 的 market_context。"""
+
+    def bp(value: Any) -> str:
+        return "—" if value is None else f"{float(value):.{bench_decimals}f}"
+
+    lines: list[str] = []
+    s, cyc, ali = ctx.get("structure"), ctx.get("cycle"), ctx.get("alignment")
+    if s:
+        ch = s["channel"]
+        lines += ["### 大盘结构", "", f"- 大盘日线通道：{_cell(ch.get('status_text') or ch.get('status'))}（指数收盘 {bp(s['last_close'])}）。"]
+        primary = next((w for w in s.get("wave_counts") or [] if w.get("role") == "主计数"), None)
+        if primary:
+            lines.append(
+                f"- 大盘主计数：{primary['label']}，{primary['c_progress']['phase']}；"
+                f"否定条件：大盘{primary['count_invalidation']['text']}。"
+            )
+        sup = [bp(x["price"]) for x in (s["key_levels"].get("supports") or [])[:2]]
+        res = [bp(x["price"]) for x in (s["key_levels"].get("resistances") or [])[:2]]
+        if sup or res:
+            lines.append(f"- 大盘最近的支撑位 {' / '.join(sup) or '—'}，大盘最近的压力位 {' / '.join(res) or '—'}。")
+        lines.append("")
+    if cyc and cyc.get("phase"):
+        who = "大盘" if cyc.get("basis") == "BENCHMARK" else "标的自身"
+        weeks = f"{cyc['phase_weeks']}{' 周以上' if cyc['phase_weeks_capped'] else ' 周'}"
+        month = {"ABOVE": "之上", "BELOW": "之下"}.get(cyc.get("monthly_vs_ma10"))
+        lines += [
+            "### 周期阶段",
+            "",
+            f"- {who}周线处于{cyc['phase_cn']}，已持续 {weeks}；{who}周线收盘 {bp(cyc['weekly_close'])}，"
+            f"{who} 30 周均线 {bp(cyc['ma30w_price'])}。",
+        ]
+        if month:
+            lines.append(f"- {who}月线在 10 月均线（{bp(cyc['ma10m_price'])}）{month}。")
+        lines += ["- 阶段只在一周结束后更新，它描述位置，不预示方向。", ""]
+    elif cyc and cyc.get("reason"):
+        lines += ["### 周期阶段", "", f"- {cyc['reason']}。", ""]
+    if ali:
+        trend_cn = {"UP": "走强", "DOWN": "走弱", "FLAT": "走平", None: "样本不足"}
+        lines += [f"### {subject}与大盘", ""]
+        if ali.get("beta_120") is not None:
+            lines.append(f"- 近 {ali['common_day_count']} 个共同交易日：对大盘的回归斜率 {ali['beta_120']:.3f}，相关系数 {ali['corr_120']:.3f}。")
+        lines.append(f"- 相对强弱线：近 20 日{trend_cn[ali.get('rs_trend_20')]}，近 60 日{trend_cn[ali.get('rs_trend_60')]}。")
+        for key, name in (("low_lead_lag_bars", "低点"), ("high_lead_lag_bars", "高点")):
+            v = ali.get(key)
+            if v is not None:
+                rel = "同一根K线" if v == 0 else (f"早于大盘 {abs(v)} 根K线" if v < 0 else f"晚于大盘 {v} 根K线")
+                lines.append(f"- 最近一个已确认{name}：{subject}{rel}。")
+        for key in ("low_compare", "high_compare"):
+            c = ali.get(key)
+            if c:
+                tag = "" if c["window_complete"] else "（窗口未满 5 根K线，标签未稳定）"
+                lines.append(f"- {c['label_cn']}{tag}：对照的大盘拐点日为 {c['benchmark_days'][0]} 与 {c['benchmark_days'][1]}。")
+        lines += ["- 以上只是对已发生走势的描述，不构成交易信号，也不改变风控结论。", ""]
+    return lines
+
+
 def render_report_markdown(
     result: dict[str, Any],
     backtest: dict[str, Any] | None = None,
@@ -148,6 +205,9 @@ def render_report_markdown(
             "- 状态分低于 35 时风控会自动否决做多。",
             "",
         ]
+
+    bench_dec = int(((result.get("quotable_prices") or {}).get("benchmark") or {}).get("price_decimals") or decimals)
+    lines += _market_layer_lines(ctx, bench_dec, "个股" if asset_type == "equity" else "标的")
 
     # 3. 结构与条件推演
     wedge = st["channel"]

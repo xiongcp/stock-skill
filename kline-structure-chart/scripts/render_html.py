@@ -513,6 +513,17 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     const adxVal = ind.trend.adx14 || '--';
     addKv(regGrid, '当前标的 Regime', regLabel);
     addKv(regGrid, '大盘相对强弱 (RS)', rsVal);
+    const mlCycle = bench.cycle, mlStruct = bench.structure, mlAlign = bench.alignment;
+    if (mlCycle && mlCycle.phase) {{
+      addKv(regGrid, (mlCycle.basis === 'SELF' ? '周线阶段（标的自身）' : '大盘周线阶段'),
+        mlCycle.phase_cn + ' · 已持续 ' + mlCycle.phase_weeks + (mlCycle.phase_weeks_capped ? '+' : '') + ' 周');
+    }}
+    if (mlStruct) {{
+      addKv(regGrid, '大盘日线通道', mlStruct.channel.status_short || mlStruct.channel.status || '--');
+    }}
+    if (mlAlign && mlAlign.low_compare) {{
+      addKv(regGrid, '大盘低点对照', mlAlign.low_compare.label_cn + (mlAlign.low_compare.window_complete ? '' : '（未稳定）'));
+    }}
     addKv(regGrid, 'ADX(14) / RVOL(20)', adxVal + ' / ' + rvolVal + 'x');
     addKv(regGrid, 'BBW分位 / HV比值', (ind.volatility.bbw_percentile_120 || '--') + '% / ' + (ind.qlib_factors.hv_ratio_20_60 || '--'));
     addKv(regGrid, '成交分布 POC / VAH / VAL (近似)', fmtPrice(REPORT.volume_profile.poc_price) + ' / ' + fmtPrice(REPORT.volume_profile.vah_price) + ' / ' + fmtPrice(REPORT.volume_profile.val_price));

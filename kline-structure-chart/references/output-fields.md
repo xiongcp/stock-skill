@@ -99,6 +99,57 @@
 | `market_context.benchmark_missing` | 本地文件输入缺基准时为 `true` | 布尔 | 否 | stable | 缺基准时说明质量为 `PARTIAL` |
 | `market_context.source` | 基准数据来源 | 字符串 | 是 | stable | — |
 | `market_context.bench_ret1` / `bench_ret5` | 基准近 1 日、5 日涨跌幅 | 小数 | 是 | experimental | 追问时解释 |
+| `market_context.structure` | 基准指数的结构摘要（子字段见下表） | 对象 | 是（三种情形见下） | experimental | 先说大盘，再说个股；描述性，不参与评级、否决与计划价位 |
+| `market_context.cycle` | 周线阶段、已持续周数与月线位置（子字段见下表） | 对象 | 是（缺基准时） | experimental | 描述位置，不预示下一阶段何时到来 |
+| `market_context.alignment` | 个股与大盘的联动程度、相对强弱线、拐点先后与新低新高对照（子字段见下表） | 对象 | 是（三种情形见下） | experimental | 描述近 120 个共同交易日，不是信号 |
+
+三个新字段只做描述：规则分、评级、否决条件与计划价位不读取它们。公式与常量见 `references/math-patterns.md` 第 8 节。三种 `null` 情形：
+
+1. 缺少基准（本地文件输入）：`structure`、`cycle`、`alignment` 都为 `null`；`benchmark_missing = true` 与否决照旧。
+2. 标的自身即基准或指数（没有外部基准）：`structure` 与 `alignment` 为 `null`，`cycle` 按标的自身计算并带 `basis = "SELF"`，此时 `cycle` 里的价位属于标的，收入 `quotable_prices.prices`。
+3. 基准已收盘K线少于结构窗口（`STRUCT_DAYS`）：`structure` 与 `alignment` 为 `null`，`cycle` 仍按基准给出。
+
+体积预算：三个新字段（含基准价位清单）未裁剪，五个录制配置下 `result.json` 落盘为 59005~63636 字节，仍在 80 KB（81920 字节）预算内；联网行情的K线与价位更多，体积会更大（仓库内 `300308.SZ` 示例为 71773 字节）。运行期不裁剪也不校验体积，80 KB 预算只由测试在录制配置上守护。
+
+子字段内部也可能为 `null`（样本不足时不估算、不补数）：周线字段在已完成周少于 35 个时为 `null` 并给出 `cycle.reason`；月线字段在已结束月少于 11 个时为 `null`；联动程度在共同交易日少于 60 个时为 `null`；对照项在基准已确认拐点不足两个时为 `null`。
+
+### `market_context.structure`（基准指数的结构摘要）
+
+| 字段 | 含义 | 取值 / 单位 | 稳定级别 | 对外怎么说 |
+| --- | --- | --- | --- | --- |
+| `structure.last_close` | 基准最近已收盘K线的收盘价 | 价格（基准的小数位） | experimental | "大盘（指数）收盘 X" |
+| `structure.channel` | 基准的轨道形态，形状与标的 `structure.channel` 相同 | 对象 | experimental | 按 `status_text` 原文转述，带上"大盘"或基准名称 |
+| `structure.key_levels` | 基准的支撑压力阶梯，形状与标的 `structure.key_levels` 相同 | 价格 | experimental | 引用价位的句子必须出现"大盘""指数"或基准名称 |
+| `structure.abc_scenario` / `wave_counts` | 基准的主 ABC 计数与备选计数，形状与标的同名字段相同 | 价格 / 比例 | experimental | 先说主计数，再说备选；备选不代表可能性大小 |
+| `structure.patterns` | 基准的几何形态（双底、双顶、回归趋势） | 对象数组 | experimental | 只引用 `name_cn` 与 `formula_verified` |
+| `structure.scenarios` | 基准的 `breakout_level`、`breakdown_level`、`active`（适用情景）、`impulse_wave`，形状与标的 `scenarios` 同名字段相同（去掉只用于画图的键） | 价格 | experimental | 按"触发条件 → 目标位 → 失效条件"转述，不附任何频率或概率 |
+
+### `market_context.cycle`（周期阶段）
+
+| 字段 | 含义 | 取值 / 单位 | 稳定级别 | 对外怎么说 |
+| --- | --- | --- | --- | --- |
+| `cycle.basis` | 计算对象 | `BENCHMARK`（基准）或 `SELF`（标的自身即基准或指数） | experimental | — |
+| `cycle.phase` / `phase_cn` | 周线阶段：`ADVANCE` 上升阶段 / `DECLINE` 下降阶段 / `TOPPING` 高位震荡 / `BASING` 低位震荡 | 枚举，样本不足为 `null` | experimental | 用中文标签；只描述位置 |
+| `cycle.phase_weeks` / `phase_weeks_capped` | 当前阶段已连续的周数；回看到预热不足为止时 `phase_weeks_capped = true` | 周 / 布尔 | experimental | 为 `true` 时说"至少 N 周" |
+| `cycle.weekly_close` / `ma30w_price` | 最近已完成周的收盘与 30 周均线 | 价格 | experimental | 引用时带"大盘""指数"或基准名称 |
+| `cycle.slope_4w_pct` | 30 周均线近 4 周的变化 | % | experimental | — |
+| `cycle.pos_60w_pct` / `range_week_count` | 收盘在近 60 周高低区间中的位置（%）与实际用了多少周 | % / 周 | experimental | — |
+| `cycle.high_60w_price` / `low_60w_price` | 近 60 周最高、最低价 | 价格 | experimental | 同上 |
+| `cycle.monthly_vs_ma10` / `ma10m_price` | 最近已结束月的收盘相对 10 月均线（`ABOVE` / `BELOW`）与该均线 | 枚举 / 价格 | experimental | 样本不足时为 `null` |
+| `cycle.reason` | 样本不足时的原因 | 文本 | experimental | 有则原文转述 |
+
+### `market_context.alignment`（个股与大盘的对齐）
+
+| 字段 | 含义 | 取值 / 单位 | 稳定级别 | 对外怎么说 |
+| --- | --- | --- | --- | --- |
+| `alignment.common_day_count` | 实际用到的共同交易日数（最多 120） | 个 | experimental | — |
+| `alignment.beta_120` / `corr_120` | 日对数收益的回归斜率与相关系数 | 数值 / −1~1 | experimental | "近 120 个共同交易日的联动程度"，不是未来联动的承诺 |
+| `alignment.rs_trend_20` / `rs_trend_60` | 相对强弱线（标的 / 基准）近 20、60 日的方向：`UP` / `DOWN` / `FLAT`（±2% 带） | 枚举 | experimental | — |
+| `alignment.rs_at_60d_high` / `rs_at_60d_low` | 相对强弱线是否在近 60 个值的最高或最低 | 布尔 | experimental | — |
+| `alignment.low_lead_lag_bars` / `high_lead_lag_bars` | 标的拐点相对基准拐点的先后（根；负数表示标的先出现），找不到为 `null` | 整数 | experimental | 描述已发生的先后，不预示 |
+| `alignment.low_compare` / `high_compare` | 新低（新高）对照：`benchmark_days`、`benchmark_extended`、`target_change_pct`、`label`、`label_cn`、`window_complete` | 对象，不足两个拐点时为 `null` | experimental | 原文转述 `label_cn`；`window_complete = false` 时必须说明"尚未稳定" |
+| `alignment.target_phase` / `benchmark_phase` | 标的与基准各自的周线阶段 | 枚举 | experimental | 并列说明，不合成一个标签 |
+
 
 ## `structure`
 
@@ -203,6 +254,7 @@
 | `quotable_prices.price_decimals` | 价格小数位 | 整数 | 否 | stable | — |
 | `quotable_prices.tolerance` | 比对容差（一个最小价位） | 价格 | 否 | stable | — |
 | `quotable_prices.prices` | 回复中允许出现的全部价位：收集自 `structure`、`indicators`、`scenarios`、`plan`、`volatility_range` 中的价格字段，加上最近 20 根 K 线的开高低收（K 线本身在 `chart_data.json`） | 价格数组 | 否 | stable | `lint_response.py` 用它判断有没有编造价格；回复里的价格必须在其中 |
+| `quotable_prices.benchmark` | 基准价位的可引用清单，形状同外层：`price_decimals`、`tolerance`、`prices`，价位只收集自 `market_context.structure` 与 `market_context.cycle`；缺少基准、标的自身即基准或指数（`cycle.basis = "SELF"`）时为 `null` | 对象 | 是 | experimental | 基准价位只能出现在提到"大盘""指数"或基准名称的句子里，`lint_response.py` 据此放行 |
 
 ## `files`
 
@@ -228,7 +280,7 @@
 | 字段 | 含义 | 取值 / 单位 | 可否为空 | 对外怎么说 |
 | --- | --- | --- | --- | --- |
 | `schema_version` | 与 `result.json` 同一契约版本 | 如 `6.0.0` | 否 | 一般不需要提 |
-| `causal_replay_audit.*` | 无前视审计：`checked_cutoffs`、`modules_audited`、`mismatches_count`、`passed` | — | 否 | "无前视审计通过（检查 N 个截面）"；只说明没用到未来数据，不说明策略有效 |
+| `causal_replay_audit.*` | 无前视审计：`checked_cutoffs`、`modules_audited`（含 `market_layer` 项，审计大盘层只用截面日及之前的基准K线）、`modules_skipped`（没有基准或标的已收盘K线少于 460 根时为 `["market_layer"]`，表示该项未审计，不记为通过）、`mismatches_count`、`passed` | — | 否 | "无前视审计通过（检查 N 个截面）"；只说明没用到未来数据，不说明策略有效 |
 | `backtest.method` / `entry_rule` | `LIVE_PLAN_REPLAY_V6`：每个决策日只用当时数据调用线上同一流水线；次日开盘落在入场区才成交 | — | 否 | 原文转述规则 |
 | `backtest.decision_window` | 回放区间、决策日数、步长 | — | 否 | — |
 | `backtest.actions_seen` | 各动作标签出现次数 | 次 | 否 | — |
