@@ -231,7 +231,12 @@ def lint_agent_response(
     bench_tol = float(bench_wl.get("tolerance") or 0.01)
     mc = report.get("market_context") or {}
     idx_sym = str(mc.get("index_symbol") or "")
-    bench_words = [w for w in (mc.get("index_name"), idx_sym, idx_sym.split(".")[0], "大盘", "指数", "基准") if w]
+    meta = report.get("meta") or {}
+    # 标的本身是指数时，"指数"一词会指向标的自身，不能当作基准语境
+    generic = ("大盘", "基准") if meta.get("asset_type") == "index" else ("大盘", "指数", "基准")
+    bench_words = [w for w in (mc.get("index_name"), idx_sym, idx_sym.split(".")[0], *generic) if w]
+    # 标的简称与固定术语里的"指数""基准"不指向基准指数，判定语境前先剔除
+    bench_noise = [str(meta.get("name") or ""), "相对强弱指数", "指数平滑", "指数移动", "指数加权", "基准情景"]
     wave_only_prices: list[float] = []
     for wc in list(struct.get("wave_counts") or []) + ([struct["abc_scenario"]] if struct.get("abc_scenario") else []):
         for lv in (wc or {}).get("levels") or []:
@@ -278,7 +283,11 @@ def lint_agent_response(
                 continue
             # 基准指数的价位只在提到大盘的句子里可引用
             sent = _sentence_around(cleaned, m.start(), m.end())
-            if bench_prices and price_in_whitelist(cand, bench_prices, bench_tol) and any(w in sent for w in bench_words):
+            ctx_sent = sent
+            for noise in bench_noise:
+                if noise:
+                    ctx_sent = ctx_sent.replace(noise, "")
+            if bench_prices and price_in_whitelist(cand, bench_prices, bench_tol) and any(w in ctx_sent for w in bench_words):
                 continue
             if msg not in errors:
                 errors.append(msg)

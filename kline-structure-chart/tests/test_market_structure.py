@@ -357,6 +357,33 @@ def test_lint_benchmark_price_needs_index_context(replay_recorded, tmp_path: Pat
     assert [e for e in bad if "白名单" in e]
 
 
+def _bench_only_price(res: dict) -> float:
+    wl = set(res["quotable_prices"]["prices"])
+    return next(p for p in res["quotable_prices"]["benchmark"]["prices"]
+                if all(abs(p - q) > 0.05 for q in wl))
+
+
+def test_lint_benchmark_price_rejects_loose_index_words(replay_recorded, tmp_path: Path) -> None:
+    from lint_response import lint_agent_response
+
+    tail = "\n\n以上内容不构成投资建议。"
+
+    def walls(text: str, res: dict) -> list[str]:
+        return [e for e in lint_agent_response(text + tail, res) if "白名单" in e]
+
+    idx = _result(run_pipeline({"symbol": "000001.SH", "market": "CN", "asset_type": "index", **REQ}, output_dir=tmp_path / "i"))
+    px = _bench_only_price(idx)
+    assert walls(f"{idx['meta']['name']}下方支撑位 {px}。", idx)
+    assert not walls(f"大盘（沪深300）支撑位 {px}。", idx)
+
+    stk = _result(run_pipeline({"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ}, output_dir=tmp_path / "s"))
+    px = _bench_only_price(stk)
+    assert walls(f"该股相对强弱指数 RSI 偏弱，下方支撑位 {px}。", stk)
+    assert walls(f"基准情景下该股目标位 {px}。", stk)
+    assert not walls(f"大盘支撑位 {px}。", stk)
+    assert not walls(f"沪深300 支撑位 {px}。", stk)
+
+
 def test_report_md_has_market_layer_and_passes_lint(replay_recorded, tmp_path: Path) -> None:
     from lint_response import lint_agent_response
 
@@ -372,6 +399,52 @@ def test_report_md_has_market_layer_and_passes_lint(replay_recorded, tmp_path: P
                                     bool(ali["high_compare"] and not ali["high_compare"]["window_complete"]))
     assert "不构成交易信号，也不改变风控结论" in md
     assert lint_agent_response(md, res) == []
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("market,symbol,asset_type", FIVE)
+def test_report_md_passes_lint_for_five_targets(replay_recorded, tmp_path: Path, market, symbol, asset_type) -> None:
+    from lint_response import lint_agent_response
+
+    rep = run_pipeline({"symbol": symbol, "market": market, "asset_type": asset_type, **REQ}, output_dir=tmp_path)
+    md = Path(rep["rendered_paths"]["report_md"]).read_text(encoding="utf-8")
+    assert lint_agent_response(md, _result(rep)) == []
+
+
+def test_market_layer_lines_subject_wording(replay_recorded, tmp_path: Path) -> None:
+    from render_report_md import _market_layer_lines
+
+    def own_text(symbol: str, market: str, asset_type: str) -> str:
+        res = _result(run_pipeline({"symbol": symbol, "market": market, "asset_type": asset_type, **REQ}, output_dir=tmp_path / symbol))
+        ali = res["market_context"]["alignment"]
+        assert ali and ali["low_lead_lag_bars"] is not None
+        subject = "个股" if res["meta"]["asset_type"] == "equity" else "标的"
+        text = "\n".join(_market_layer_lines(res["market_context"], 2, subject))
+        for key in ("low_compare", "high_compare"):  # label_cn 来自契约字段，保持原样
+            if ali.get(key):
+                text = text.replace(ali[key]["label_cn"], "")
+        return text
+
+    idx = own_text("000001.SH", "CN", "index")
+    assert "个股" not in idx and "### 标的与大盘" in idx
+    stk = own_text("600519.SH", "CN", "equity")
+    assert "### 个股与大盘" in stk and "个股" in stk.split("### 个股与大盘")[1]
+
+
+def test_market_layer_audit_fails_when_truncation_is_bypassed(replay_recorded, monkeypatch) -> None:
+    import data_gateway
+    import evaluation
+
+    bundle = data_gateway.load_bundle({"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ})
+    real = evaluation.compute_market_layer
+    last_bar = bundle["target"]["bars"][-1]
+
+    def leaky(sub, layer, horizon):
+        # 模拟截断失效：让大盘层以为标的最后一个已收盘日是全序列最后一天
+        return real(sub, {**layer, "completed": layer["completed"] + [last_bar]}, horizon)
+
+    monkeypatch.setattr(evaluation, "compute_market_layer", leaky)
+    assert evaluation.audit_market_layer_causality(bundle) != []
 
 
 def test_report_md_market_layer_absent_cases(replay_recorded, tmp_path: Path) -> None:

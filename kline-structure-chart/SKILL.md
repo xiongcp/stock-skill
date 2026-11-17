@@ -134,7 +134,7 @@ stderr 同时打印 `[CODE] message`。本节列出的命令行参数都是稳�
 1. **数据说明**：数据源（`meta.data_source`）、截止日（`meta.as_of`）、复权口径（`meta.adjustment`），以及上一步需要转述的告警或备注。
 2. **大盘先行**：基准的 `market_context.regime`、`regime_score`，以及个股的 `market_context.relative_strength_vs_index`。
    - 报告第 2 节若有大盘结构、周期阶段、个股与大盘三段（`market_context.structure` / `cycle` / `alignment`，实验字段，字段字典见 `references/output-fields.md`），先说大盘周线阶段（`cycle.phase_cn`）与日线通道，再说个股。
-   - 引用指数点位的句子必须出现"大盘""指数"或基准名称；`lint_response.py` 只在这样的句子里放行基准价位。
+   - 引用指数点位的句子必须出现"大盘""指数"或基准名称；`lint_response.py` 只在这样的句子里放行基准价位；标的本身是指数时，引用基准价位须写"大盘"或基准名称，只写"指数"不算。
    - `alignment` 的新低新高对照中 `window_complete = false` 时，必须说明该标签"尚未稳定"，随后几根K线内可能改变。
    - 这些字段只描述，不参与评级、否决与计划价位；不得说成概率、信号或买卖建议（例如"大盘新低、个股未新低"不是买入理由）。
 3. **结构与规则**：

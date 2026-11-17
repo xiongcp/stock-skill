@@ -38,7 +38,7 @@ def _num(value: Any, digits: int = 2) -> str:
     return "—" if value is None else f"{float(value):.{digits}f}"
 
 
-def _market_layer_lines(ctx: dict[str, Any], bench_decimals: int) -> list[str]:
+def _market_layer_lines(ctx: dict[str, Any], bench_decimals: int, subject: str = "个股") -> list[str]:
     """第 2 节的大盘结构、周期阶段、个股与大盘三段；数字全部取自 result.json 的 market_context。"""
 
     def bp(value: Any) -> str:
@@ -77,7 +77,7 @@ def _market_layer_lines(ctx: dict[str, Any], bench_decimals: int) -> list[str]:
         lines += ["### 周期阶段", "", f"- {cyc['reason']}。", ""]
     if ali:
         trend_cn = {"UP": "走强", "DOWN": "走弱", "FLAT": "走平", None: "样本不足"}
-        lines += ["### 个股与大盘", ""]
+        lines += [f"### {subject}与大盘", ""]
         if ali.get("beta_120") is not None:
             lines.append(f"- 近 {ali['common_day_count']} 个共同交易日：对大盘的回归斜率 {ali['beta_120']:.3f}，相关系数 {ali['corr_120']:.3f}。")
         lines.append(f"- 相对强弱线：近 20 日{trend_cn[ali.get('rs_trend_20')]}，近 60 日{trend_cn[ali.get('rs_trend_60')]}。")
@@ -85,7 +85,7 @@ def _market_layer_lines(ctx: dict[str, Any], bench_decimals: int) -> list[str]:
             v = ali.get(key)
             if v is not None:
                 rel = "同一根K线" if v == 0 else (f"早于大盘 {abs(v)} 根K线" if v < 0 else f"晚于大盘 {v} 根K线")
-                lines.append(f"- 最近一个已确认{name}：个股{rel}。")
+                lines.append(f"- 最近一个已确认{name}：{subject}{rel}。")
         for key in ("low_compare", "high_compare"):
             c = ali.get(key)
             if c:
@@ -207,7 +207,7 @@ def render_report_markdown(
         ]
 
     bench_dec = int(((result.get("quotable_prices") or {}).get("benchmark") or {}).get("price_decimals") or decimals)
-    lines += _market_layer_lines(ctx, bench_dec)
+    lines += _market_layer_lines(ctx, bench_dec, "个股" if asset_type == "equity" else "标的")
 
     # 3. 结构与条件推演
     wedge = st["channel"]

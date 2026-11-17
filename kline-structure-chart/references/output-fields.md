@@ -109,7 +109,7 @@
 2. 标的自身即基准或指数（没有外部基准）：`structure` 与 `alignment` 为 `null`，`cycle` 按标的自身计算并带 `basis = "SELF"`，此时 `cycle` 里的价位属于标的，收入 `quotable_prices.prices`。
 3. 基准已收盘K线少于结构窗口（`STRUCT_DAYS`）：`structure` 与 `alignment` 为 `null`，`cycle` 仍按基准给出。
 
-体积预算：三个新字段（含基准价位清单）未裁剪，五种配置下 `result.json` 落盘为 59005~63636 字节，仍在 80 KB（81920 字节）预算内。
+体积预算：三个新字段（含基准价位清单）未裁剪，五个录制配置下 `result.json` 落盘为 59005~63636 字节，仍在 80 KB（81920 字节）预算内；联网行情的K线与价位更多，体积会更大（仓库内 `300308.SZ` 示例为 71773 字节）。运行期不裁剪也不校验体积，80 KB 预算只由测试在录制配置上守护。
 
 子字段内部也可能为 `null`（样本不足时不估算、不补数）：周线字段在已完成周少于 35 个时为 `null` 并给出 `cycle.reason`；月线字段在已结束月少于 11 个时为 `null`；联动程度在共同交易日少于 60 个时为 `null`；对照项在基准已确认拐点不足两个时为 `null`。
 
@@ -280,7 +280,7 @@
 | 字段 | 含义 | 取值 / 单位 | 可否为空 | 对外怎么说 |
 | --- | --- | --- | --- | --- |
 | `schema_version` | 与 `result.json` 同一契约版本 | 如 `6.0.0` | 否 | 一般不需要提 |
-| `causal_replay_audit.*` | 无前视审计：`checked_cutoffs`、`modules_audited`（含 `market_layer` 项，审计大盘层只用截面日及之前的基准K线）、`modules_skipped`（没有基准时为 `["market_layer"]`，表示该项未审计，不记为通过）、`mismatches_count`、`passed` | — | 否 | "无前视审计通过（检查 N 个截面）"；只说明没用到未来数据，不说明策略有效 |
+| `causal_replay_audit.*` | 无前视审计：`checked_cutoffs`、`modules_audited`（含 `market_layer` 项，审计大盘层只用截面日及之前的基准K线）、`modules_skipped`（没有基准或标的已收盘K线少于 460 根时为 `["market_layer"]`，表示该项未审计，不记为通过）、`mismatches_count`、`passed` | — | 否 | "无前视审计通过（检查 N 个截面）"；只说明没用到未来数据，不说明策略有效 |
 | `backtest.method` / `entry_rule` | `LIVE_PLAN_REPLAY_V6`：每个决策日只用当时数据调用线上同一流水线；次日开盘落在入场区才成交 | — | 否 | 原文转述规则 |
 | `backtest.decision_window` | 回放区间、决策日数、步长 | — | 否 | — |
 | `backtest.actions_seen` | 各动作标签出现次数 | 次 | 否 | — |

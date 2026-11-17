@@ -290,7 +290,7 @@
 
 大盘结构摘要的投影与标的结构共用代码：在 `contract_v6.py` 中把现有的结构与情景投影抽成小函数，两处调用。
 
-`lint_response.py` 的价格校验相应增加一条：回复中的价格不在 `quotable_prices.prices` 内，但在 `quotable_prices.benchmark.prices` 内，并且所在句子出现基准名称、基准代码，或"大盘""指数""基准"之一时放行；否则仍按捏造价格报错。
+`lint_response.py` 的价格校验相应增加一条：回复中的价格不在 `quotable_prices.prices` 内，但在 `quotable_prices.benchmark.prices` 内，并且所在句子出现基准名称、基准代码，或"大盘""指数""基准"之一时放行；否则仍按捏造价格报错。标的本身是指数时，引用基准价位须写"大盘"或基准名称，只写"指数"不算。
 
 不新增任何概率、频率或胜率字段。新字段名不得包含 `test_v6_contract.py` 中 `FORBIDDEN_KEY_PARTS` 列出的片段。
 
