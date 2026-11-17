@@ -1,7 +1,7 @@
 # 波动范围与风控前置、回测拆出大盘贡献：设计方案
 
 - 日期：2026-11-16
-- 状态：设计已在对话中确认（2026-11-16），待审阅本文后编写实施计划
+- 状态：已确认（2026-11-16）。实施计划见 `docs/superpowers/plans/2026-11-16-range-first-report-and-backtest-attribution.md`
 - 范围：main 上的两项改动。A：`report.md` 与回复契约把正常波动范围和风控提到结构之前，并加两句固定说明。B：`backtest.json` 新增 `backtest.market_attribution`，把单笔收益和同期基准收益放在一起
 - 相关：`2026-11-15-regime-attribution-and-market-layer-design.md`（阶段 0 结果）、`2026-10-22-v6-contract-design.md`（v6 定位与稳定性规则）
 
@@ -92,7 +92,7 @@
 | `references/failure-modes.md` | 新增一条：把大盘上涨带来的盈利说成分析准确 |
 | `README.md`、`README.en.md` | 第 5 节"回答顺序"与输出文件表里对 `report.md` 顺序的描述，两版同步 |
 | `examples/*/…_report.md` | 用现有 `result.json`（及 `backtest.json`）离线重新渲染，不重新取数 |
-| `examples/*/reply.md` | 四份标准回复按新顺序重排，逐份通过 `lint_response.py` |
+| `examples/600519.SH/reply.md` | 标准回复（仓库里只有茅台这一份）按新顺序重排，通过 `lint_response.py` |
 | `tests/test_report_and_metadata.py` 等 | 断言章节编号的用例改为新编号 |
 | `CHANGELOG.md` | `[Unreleased]` 记一条"报告与回复顺序调整" |
 
@@ -129,7 +129,7 @@
 | `mean_net_return_pct` | 单笔净收益的平均值 | 数或 `null` |
 | `mean_benchmark_hold_return_pct` | 各笔持有期内基准收益的平均值 | 数或 `null` |
 | `mean_excess_vs_benchmark_pct` | 单笔净收益减去该笔持有期基准收益，再取平均 | 数或 `null` |
-| `mean_excess_95ci_pct` | 上一项的 95% 区间，沿用 `_bootstrap_mean_ci`（少于 2 笔时为 `null`） | 两个数或 `null` |
+| `mean_excess_95ci_pct` | 上一项的 95% 区间，沿用 `_bootstrap_mean_ci`（少于 2 笔时为 `null`；该函数保留 2 位小数） | 两个数或 `null` |
 | `benchmark_up` | 持有期基准收益大于 0 的那些成交：`trades`、`mean_net_return_pct` | 对象 |
 | `benchmark_down_or_flat` | 其余成交（基准收益为 0 归入此组）：同上 | 对象 |
 | `note_cn` | 第 3.3 节的固定说明 | 字符串 |
@@ -139,7 +139,7 @@
 ### 3.2 计算口径
 
 - **持有期基准收益**：入场日之前最近一个基准收盘 → 出场日当天或之前最近一个基准收盘。与阶段 0 的事后变量 X1 相同；港股、美股个别日期基准没有K线时取前一个基准收盘，不报错。
-- **不可用的情形**（`available = false`，数值字段全部为 `null`，`trades` 为 0）：没有基准K线（本地文件输入缺基准）；标的自身就是该市场的默认基准；`all_long_signals.trades` 为 0；任一笔成交的入场日之前没有基准收盘。`reason_cn` 分别写明。
+- **不可用的情形**（`available = false`，数值字段全部为 `null`，`trades` 为 0）：没有基准K线（本地文件输入缺基准）；标的自身就是基准（代码等于基准代码或该市场的默认基准，此时流水线不加载基准）；`all_long_signals.trades` 为 0；任一笔成交的入场日之前没有基准收盘。`reason_cn` 分别写明。
 - **只读已完成的回放结果**：在回放循环结束之后、汇总阶段计算，不进入任何决策日的输入。已有字段的值不变。
 
 ### 3.3 固定说明（`note_cn`）
@@ -170,7 +170,7 @@
 | `SKILL.md`、`references/output-fields.md`、`references/interpretation-guide.md` | 第 3.5 节 |
 | `tests/fixtures/contract/backtest_v6_keypaths_600519.json` | 用 `UPDATE_V6_KEYPATHS=1` 重新生成，确认只多出新字段的键路径 |
 | `CHANGELOG.md` | `[Unreleased]` 的"契约变更（`backtest.json`）"小节 |
-| `examples/` | 带回测的示例按原截止日（`--as-of 2026-10-15`）联网重新生成；`result.json` 应逐字节不变，差异只在 `backtest.json` 与报告第 7 节 |
+| `examples/` | 只有茅台示例带回测：用 `tests/fixtures/recorded/` 的录制行情回放同一条流水线（`as_of` 为 2026-10-15，不联网）重新生成 `600519.SH_backtest.json`；`result.json` 应逐字节不变，差异只在 `backtest.json`、报告第 7 节与标准回复的回测段 |
 
 ### 3.7 测试
 
@@ -179,7 +179,7 @@
 | 逐笔核对 | 用录制行情跑回测，按第 3.2 节的定义在测试里独立算每笔的基准持有期收益，三个均值与输出相同 |
 | 守恒 | `benchmark_up.trades + benchmark_down_or_flat.trades == trades == all_long_signals.trades` |
 | 区间 | `mean_excess_95ci_pct` 的下沿不大于均值、上沿不小于均值；少于 2 笔时为 `null` |
-| 基准缺K线的日子 | 构造入场日、出场日不在基准交易日的成交（取自港股录制数据里的真实日期），取前一个基准收盘 |
+| 基准缺K线的日子 | 用录制的真实恒生指数K线，成交的入场日、出场日取基准没有K线的日历日（周六），取之前最近一个基准收盘 |
 | 不可用情形 | 无基准、标的即基准、零成交三种配置下 `available = false`、`reason_cn` 非空、数值为 `null` |
 | 已有字段不变 | 新旧代码在同一录制配置下，`backtest` 去掉 `market_attribution` 后逐项相同（实施时对照一次，贴进 PR） |
 | 键路径快照 | `test_v6_backtest_keypaths_match_snapshot` 通过，快照差异只有新增路径 |
@@ -191,7 +191,7 @@
 
 1. 日常与合并前两级门禁全部通过（`pytest -n auto -m "not slow"`、全量 `pytest -v -n auto`、`check_days_invariance.py`）。
 2. 四个示例的 `result.json` 与改前逐字节相同。
-3. 四份标准回复通过 `lint_response.py`。
+3. 茅台的标准回复与三份受检的示例报告通过 `lint_response.py`。
 4. `README.md` 与 `README.en.md` 对顺序的描述一致，文档契约测试通过。
 
 ## 5. 风险
@@ -208,6 +208,6 @@
 | 1 | A：`render_report_md.py` 的顺序、摘要与两句固定说明，及其测试 | 第 2.6 节 |
 | 2 | A：`SKILL.md`、`references/`、README 两版、示例报告离线重渲染、标准回复重排 | 文档契约测试、`lint_response.py` |
 | 3 | B：`evaluation.py` 的 `market_attribution` 及其测试、键路径快照 | 第 3.7 节前七项 |
-| 4 | B：报告第 7 节、回复契约、字段字典、示例联网重新生成 | 第 3.7 节最后一项、第 4 节 |
+| 4 | B：报告第 7 节、回复契约、字段字典、茅台示例回测用录制行情重新生成 | 第 3.7 节最后一项、第 4 节 |
 
 A 与 B 互不依赖，可以分成两个 PR。
