@@ -187,7 +187,7 @@ def test_coverage_sampling_and_record() -> None:
     path = sorted((ROOT / ra.reference("CN")["scan_dir"]).glob("shard_*.jsonl.gz"))[0]
     rows = list(ra.read_shard(path))
     picked = [r for r in rows if ra.coverage_sampled(r["sym"], r["day"])]
-    assert 0.01 < len(picked) / len(rows) < 0.03  # 约 2%
+    assert 0.002 < len(picked) / len(rows) < 0.01  # 约 0.5%
     assert [ra.coverage_sampled(r["sym"], r["day"]) for r in rows[:50]] == [ra.coverage_sampled(r["sym"], r["day"]) for r in rows[:50]]
     recs = ra.coverage_shard(str(path))
     assert len(recs) == len(picked)

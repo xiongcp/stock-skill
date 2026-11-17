@@ -41,7 +41,7 @@ SCORE_EDGES = (35.0, 45.0, 55.0, 70.0)
 SCORE_LABELS = ("<35", "35-45", "45-55", "55-70", ">=70")
 MIN_EPISODES, MIN_DAYS = 100, 30
 N_BOOT, BOOT_SEED = 2000, 20261020
-COV_MOD = 50
+COV_MOD = 200  # 约 0.5%。覆盖与否在同一天内高度相关，精度主要取决于日期数；降低每日抽样数基本不损失精度，耗时降到约四分之一
 COV_STEPS = (5, 10, 15)
 COV_MIN_SAMPLES, COV_MIN_DAYS = 300, 30
 
@@ -250,7 +250,7 @@ def run_attribution(market: str, workers: int) -> dict:
 
 
 def coverage_sampled(sym: str, day: str) -> bool:
-    """确定性抽样（约 2%）：sha256(标的 + 日期) 的前 8 位十六进制数对 50 取模为 0，不依赖随机种子。"""
+    """确定性抽样（约 0.5%）：sha256(标的 + 日期) 的前 8 位十六进制数对 COV_MOD 取模为 0，不依赖随机种子。"""
     return int(hashlib.sha256(f"{sym}{day}".encode()).hexdigest()[:8], 16) % COV_MOD == 0
 
 
@@ -319,7 +319,7 @@ def _coverage_init(market: str) -> None:
 
 
 def run_coverage(market: str, workers: int) -> dict:
-    """0B：约 2% 的股票-日重算正常波动范围，按大盘状态统计名义 50% / 80% 区间的实际覆盖率。"""
+    """0B：约 0.5% 的股票-日重算正常波动范围，按大盘状态统计名义 50% / 80% 区间的实际覆盖率。"""
     shards = [str(p) for p in sorted((ROOT / reference(market)["scan_dir"]).glob("shard_*.jsonl.gz"))]
     if workers <= 1:
         _coverage_init(market)
