@@ -143,7 +143,7 @@ stderr 同时打印 `[CODE] message`。本节列出的命令行参数都是稳�
    - 必须同时给出 `calibration_audit` 的实测覆盖率与 `effective_independent_samples`。
    - `promotion_status` 为 `RESEARCH_CALIBRATION_WARMUP` 时称"校准观察期"，不得把覆盖率说成区间已验证可靠；有效独立样本低于 `min_effective_independent_samples`（20）时不会晋级（判定见 `references/math-patterns.md` 第 5 节）。
 4. **风控**：
-   - 原文转述报告第 4 节第一行："做多计划的盈亏主要取决于持有期大盘涨跌；计划的作用是把亏损限定在预算内，不代表方向判断。"
+   - 原文转述报告第 4 节第一行："多个市场的长周期回放显示，做多计划的盈亏大体跟随持有期大盘涨跌；单只股票可能不同，带回测运行时见第 7 节的大盘贡献拆解。计划的作用是把亏损限定在预算内，不代表方向判断。"
    - `verdict.risk_veto` 为 `true` 时，**置顶**列出 `verdict.veto_reasons`，不得给出做多建议。
    - 否则给出 `plan.long` 的入场区、止损（盘中触及硬止损屏障离场，A 股受 T+1 约束自入场次日起生效）、TP1/TP2、时间屏障与 `breakeven_ratchet` 移动保本规则（盘中触及 `+0.90R` 且收盘 `≥ +0.30R` 后，自次日起止损上移至 `+0.08R` 保本位）。
    - **分板块/制度差异化提醒**：

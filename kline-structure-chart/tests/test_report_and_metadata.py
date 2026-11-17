@@ -227,7 +227,10 @@ def test_report_md_puts_range_and_risk_before_structure(cn_pipeline) -> None:
 def test_report_md_lead_sentences_in_both_veto_states(cn_pipeline) -> None:
     from render_report_md import RISK_LEAD_CN, STRUCTURE_LEAD_CN
 
-    assert RISK_LEAD_CN == "做多计划的盈亏主要取决于持有期大盘涨跌；计划的作用是把亏损限定在预算内，不代表方向判断。"
+    assert RISK_LEAD_CN == (
+        "多个市场的长周期回放显示，做多计划的盈亏大体跟随持有期大盘涨跌；单只股票可能不同，带回测运行时见第 7 节的大盘贡献拆解。"
+        "计划的作用是把亏损限定在预算内，不代表方向判断。"
+    )
     assert STRUCTURE_LEAD_CN == "以下只描述价格结构和条件路径，不预示涨跌方向。"
     report, _, backtest = cn_pipeline
     result = load_v6(report)[0]
@@ -644,7 +647,8 @@ def test_report_md_backtest_without_market_attribution_still_renders(cn_pipeline
     old = copy.deepcopy(backtest)
     old["backtest"].pop("market_attribution")
     md = render_report_markdown(load_v6(report)[0], old)
-    assert "## 7. 历史计划回放回测" in md and "大盘贡献拆解" not in md
+    assert "## 7. 历史计划回放回测" in md
+    assert not any(ln.startswith("- 大盘贡献拆解") for ln in md.splitlines())
 
 
 def test_market_attribution_respects_benchmark_override(replay_recorded) -> None:
