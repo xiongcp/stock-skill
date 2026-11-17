@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### 调整（报告与回复顺序）
+
+- `report.md` 与 `SKILL.md` 回复契约改为先给正常波动范围和风控计划、后给结构与条件推演：第 3 节为正常波动范围，第 5 节为结构与条件推演，第 6 节为形态与信号证据；第 2、4、7、8 节编号不变。直出摘要的分句顺序同步调整，每个分句的文字与数字不变。
+- 报告第 4 节与第 5 节的第一行各加一句固定说明（"做多计划的盈亏主要取决于持有期大盘涨跌…""以下只描述价格结构和条件路径…"）。原因：开发区回放显示做多计划的单笔盈亏跟随持有期大盘，而正常波动范围在各大盘状态下的覆盖率都接近名义值（见 `docs/superpowers/specs/2026-11-15-regime-attribution-and-market-layer-design.md` 的阶段 0 结果）。
+- `result.json`、评级标签、看板与 PNG 不变。
+
 ### 新增（大盘结构与周期层）
 
 - **契约变更（新增实验字段，`x-stability: experimental`）**：`market_context.structure`（基准指数的结构摘要）、`market_context.cycle`（周线阶段四分类、已持续周数、月线相对 10 月均线的位置）、`market_context.alignment`（个股与大盘的联动程度、相对强弱线、拐点先后、新低新高对照）与 `quotable_prices.benchmark`（基准可引用价位）。

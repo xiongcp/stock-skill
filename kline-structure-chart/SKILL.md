@@ -131,18 +131,19 @@ stderr 同时打印 `[CODE] message`。本节列出的命令行参数都是稳�
 `*_report.md` 已按以下顺序写好，直接据此转述即可：不得改动其中任何数字，不得补充报告里没有的价位；用户追问细节时再查 `*_result.json`（字段字典见 `references/output-fields.md`，解读要点见 `references/interpretation-guide.md`）。
 
 0. **先答所问**：用 1~2 句话、只用报告里的数字直接回答用户的具体问题，再展开下面各部分。
+   - 用户问"能不能买""会不会涨"时，先给风控结论（是否否决、止损位、仓位）和正常波动范围，不给方向判断。
 1. **数据说明**：数据源（`meta.data_source`）、截止日（`meta.as_of`）、复权口径（`meta.adjustment`），以及上一步需要转述的告警或备注。
 2. **大盘先行**：基准的 `market_context.regime`、`regime_score`，以及个股的 `market_context.relative_strength_vs_index`。
    - 报告第 2 节若有大盘结构、周期阶段、个股与大盘三段（`market_context.structure` / `cycle` / `alignment`，实验字段，字段字典见 `references/output-fields.md`），先说大盘周线阶段（`cycle.phase_cn`）与日线通道，再说个股。
    - 引用指数点位的句子必须出现"大盘""指数"或基准名称；`lint_response.py` 只在这样的句子里放行基准价位；标的本身是指数时，引用基准价位须写"大盘"或基准名称，只写"指数"不算。
    - `alignment` 的新低新高对照中 `window_complete = false` 时，必须说明该标签"尚未稳定"，随后几根K线内可能改变。
    - 这些字段只描述，不参与评级、否决与计划价位；不得说成概率、信号或买卖建议（例如"大盘新低、个股未新低"不是买入理由）。
-3. **结构与规则**：
-   - `verdict.rule_score` 是 0~100 的确定性规则分，不是胜率或概率。`verdict.rule_detail.regime_adjustment.applied = true`（均值回归体制）时，规则分已按反转规则调整、不等于四组分项之和，必须原文转述 `regime_adjustment.note_cn`，不得把调整后的低分说成"多周期空头"。
-   - `scenarios` 按"触发条件 → 目标位 → 失效条件"转述：三条主路径 `scenarios.paths`（上攻 / 震荡 / 下探），以及 `scenarios.active` 中 2~5 个适用情景及其状态（`status_cn`：`已在进行中` / `待触发`）。不为情景附加任何频率、用时或概率；`scenarios.contested_levels`（现价附近正在争夺的价位）不作触发条件。
-   - 浪型先说主计数，再说 `structure.wave_counts` 里的备选数法及各自的否定条件；备选数法不代表可能性大小。形态为"形态不明确"时不套用教科书形态。
-   - 形态只引用 `structure.patterns` 里的 `name_cn` 和 `formula_verified`。
+3. **未来 15 日正常波动范围**：
+   - `volatility_range` 以最新收盘价为中心（`q50_method = MARTINGALE_LAST_CLOSE`），只描述波动幅度，不包含方向判断，不得把 q75/q25 说成看涨/看跌概率。
+   - 必须同时给出 `calibration_audit` 的实测覆盖率与 `effective_independent_samples`。
+   - `promotion_status` 为 `RESEARCH_CALIBRATION_WARMUP` 时称"校准观察期"，不得把覆盖率说成区间已验证可靠；有效独立样本低于 `min_effective_independent_samples`（20）时不会晋级（判定见 `references/math-patterns.md` 第 5 节）。
 4. **风控**：
+   - 原文转述报告第 4 节第一行："做多计划的盈亏主要取决于持有期大盘涨跌；计划的作用是把亏损限定在预算内，不代表方向判断。"
    - `verdict.risk_veto` 为 `true` 时，**置顶**列出 `verdict.veto_reasons`，不得给出做多建议。
    - 否则给出 `plan.long` 的入场区、止损（盘中触及硬止损屏障离场，A 股受 T+1 约束自入场次日起生效）、TP1/TP2、时间屏障与 `breakeven_ratchet` 移动保本规则（盘中触及 `+0.90R` 且收盘 `≥ +0.30R` 后，自次日起止损上移至 `+0.08R` 保本位）。
    - **分板块/制度差异化提醒**：
@@ -152,10 +153,12 @@ stderr 同时打印 `[CODE] message`。本节列出的命令行参数都是稳�
    - **仓位**：只转述 `plan.long.position_sizing.recommended_shares`（按入场区上沿到止损的距离含交易成本计算）与 `gap_risk_note`（跳空、跌停时亏损可能超出预算）。风控否决或评级不是做多确认/条件观察时该字段为 `null`，转述 `reason`，**不得**自行用风险预算 ÷ 止损距离换算股数。
    - 用户已持有该标的时，转述报告里的"持仓防守计划"（`plan.holder_defense.rules`）。
    - 港股、美股报告带"破位做空计划"（`plan.short`）：转述时必须同时说明卖空限制（`constraints`）、`warnings`，以及盈亏比未计融券费用。A 股与指数没有做空计划（`plan.short.available = false`），卖空限制只按制度手册（`references/cn-market.md`、`references/hk-market.md`、`references/us-market.md`）说明，不得给出报告中没有的做空点位。
-5. **未来 15 日正常波动范围**：
-   - `volatility_range` 以最新收盘价为中心（`q50_method = MARTINGALE_LAST_CLOSE`），只描述波动幅度，不包含方向判断，不得把 q75/q25 说成看涨/看跌概率。
-   - 必须同时给出 `calibration_audit` 的实测覆盖率与 `effective_independent_samples`。
-   - `promotion_status` 为 `RESEARCH_CALIBRATION_WARMUP` 时称"校准观察期"，不得把覆盖率说成区间已验证可靠；有效独立样本低于 `min_effective_independent_samples`（20）时不会晋级（判定见 `references/math-patterns.md` 第 5 节）。
+5. **结构与规则**：
+   - 原文转述报告第 5 节第一行："以下只描述价格结构和条件路径，不预示涨跌方向。"
+   - `verdict.rule_score` 是 0~100 的确定性规则分，不是胜率或概率。`verdict.rule_detail.regime_adjustment.applied = true`（均值回归体制）时，规则分已按反转规则调整、不等于四组分项之和，必须原文转述 `regime_adjustment.note_cn`，不得把调整后的低分说成"多周期空头"。
+   - `scenarios` 按"触发条件 → 目标位 → 失效条件"转述：三条主路径 `scenarios.paths`（上攻 / 震荡 / 下探），以及 `scenarios.active` 中 2~5 个适用情景及其状态（`status_cn`：`已在进行中` / `待触发`）。不为情景附加任何频率、用时或概率；`scenarios.contested_levels`（现价附近正在争夺的价位）不作触发条件。
+   - 浪型先说主计数，再说 `structure.wave_counts` 里的备选数法及各自的否定条件；备选数法不代表可能性大小。形态为"形态不明确"时不套用教科书形态。
+   - 形态只引用 `structure.patterns` 里的 `name_cn` 和 `formula_verified`。
 6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率（带 95% 区间）、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。规则分 IC 的结论（`rule_score_ic.verdict`）原文转述，`informative = false` 时说明规则分在该标的上只作描述。
 7. **文件**：给出 `result.json` 与 `dashboard.html` 的路径（取自 `files`）；客户端能显示图片时再内嵌 `preview.png`，否则只给路径。
 8. **免责声明**：结尾注明"以上为规则化技术分析，仅供研究参考，不构成投资建议"。
@@ -189,7 +192,7 @@ stderr 同时打印 `[CODE] message`。本节列出的命令行参数都是稳�
 
 > 风控已否决做多：大盘环境评分偏弱（沪深300 状态分 6.0 < 35），以下点位只用于观察，不构成做多建议。
 >
-> 数据为新浪日线，截至 2026-10-15，前复权含分红，数据质量 OK。规则分 36.8/100（均值回归体制评分偏空）：近 240 日均线偏离与随后 15 日收益负相关，四组规则分项合计 55.5 经反转调整为 36.8，衡量的是追高风险，不代表多周期空头；这是规则加权分，不是胜率。结构上是扩散喇叭形，收盘仍在上下轨之间运行（最新 K 线上影线触及上轨后回落）：上攻需日线放量收盘站上 1328.58，目标 1351.22，收盘跌回 1320.32 下方视为假突破；下探以收盘跌破 1300.01 为触发，目标 1281.70。现价附近的 1318.83、1315.39、1309.21 是正在争夺的价位，不作触发条件。浪型主计数为上涨 ABC（收盘跌破 1228.10 失效）。……（大盘、风控与持仓防守、正常波动范围、回测与 IC、文件、免责声明依次展开）
+> 数据为新浪日线，截至 2026-10-15，前复权含分红，数据质量 OK。最新收盘 1312.97，未来 15 日 80% 正常波动范围为 1227.99 ~ 1397.95（中枢就是最新收盘价，只描述波动幅度，不含方向预测）；风控计划只供观察：观察区 1308.61 ~ 1320.60、止损 1289.10、TP1 1351.22。规则分 36.8/100（均值回归体制评分偏空）：近 240 日均线偏离与随后 15 日收益负相关，四组规则分项合计 55.5 经反转调整为 36.8，衡量的是追高风险，不代表多周期空头；这是规则加权分，不是胜率。结构上是扩散喇叭形，收盘仍在上下轨之间运行（最新 K 线上影线触及上轨后回落）：上攻需日线放量收盘站上 1328.58，目标 1351.22，收盘跌回 1320.32 下方视为假突破；下探以收盘跌破 1300.01 为触发，目标 1281.70。现价附近的 1318.83、1315.39、1309.21 是正在争夺的价位，不作触发条件。浪型主计数为上涨 ABC（收盘跌破 1228.10 失效）。……（大盘、正常波动范围与实测覆盖率、风控与持仓防守、结构与规则、回测与 IC、文件、免责声明依次展开）
 
 错误的回复（不得这样写）：
 
