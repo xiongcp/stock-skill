@@ -645,3 +645,18 @@ def test_report_md_backtest_without_market_attribution_still_renders(cn_pipeline
     old["backtest"].pop("market_attribution")
     md = render_report_markdown(load_v6(report)[0], old)
     assert "## 7. 历史计划回放回测" in md and "大盘贡献拆解" not in md
+
+
+def test_market_attribution_respects_benchmark_override(replay_recorded) -> None:
+    """用 --benchmark 换基准时："标的自身即基准"只按实际（或请求）的基准判断，不拿市场默认基准比较。"""
+    from evaluation import _market_attribution
+
+    req = {"symbol": "00700.HK", "market": "HK", "asset_type": "equity", **REQ_BASE}
+    hsi = load_bundle(req, now=NOW)["benchmark"]
+    trade = {"entry_day": hsi["bars"][-20]["day"], "exit_day": hsi["bars"][-10]["day"], "net_return": 0.01}
+    # 标的是 CN 的默认基准 000300.SH，但基准已换成另一只并且行情已加载：应正常拆解
+    got = _market_attribution([trade], hsi, "000300.SH", "CN", intended_benchmark="HSI.HK")
+    assert got["available"] is True and got["benchmark_symbol"] == "HSI.HK"
+    # 换的基准恰好就是标的本身：流水线不加载基准，原因应是"标的自身即基准"，而不是"没有大盘基准行情"
+    same = _market_attribution([trade], None, "600519.SH", "CN", intended_benchmark="600519.SH")
+    assert same["available"] is False and "标的自身即基准" in same["reason_cn"]

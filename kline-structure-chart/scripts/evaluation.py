@@ -13,6 +13,7 @@ from market_rules import (
     calendar_covers,
     count_missing_trading_sessions,
     daily_limit_prices,
+    default_benchmark_for,
     get_daily_price_limit_pct,
     get_market_microstructure_rules,
     rescale_bars_as_of,
@@ -532,7 +533,13 @@ MARKET_ATTRIBUTION_NOTE_CN = (
 )
 
 
-def _market_attribution(all_trades: list[dict[str, Any]], bench: dict[str, Any] | None, target_symbol: str, market: str) -> dict[str, Any]:
+def _market_attribution(
+    all_trades: list[dict[str, Any]],
+    bench: dict[str, Any] | None,
+    target_symbol: str,
+    market: str,
+    intended_benchmark: str | None = None,
+) -> dict[str, Any]:
     """把"全部做多信号"的成交和同一批持有期内的基准收益放在一起（规格 2026-11-16 第 3 节）。
 
     持有期基准收益：入场日之前最近一个基准收盘 → 出场日当天或之前最近一个基准收盘。
@@ -549,8 +556,9 @@ def _market_attribution(all_trades: list[dict[str, Any]], bench: dict[str, Any] 
     }
     bars = (bench or {}).get("bars") or []
     b_symbol = str(bench["instrument"]["symbol"]) if bars else None
-    default_symbol = DEFAULT_BENCHMARKS.get(market, {}).get("symbol", "")
-    if target_symbol.upper() in {(b_symbol or "").upper(), default_symbol.upper()}:
+    # 有基准行情时按实际加载的基准判断；没有时按请求的基准（--benchmark 或板块默认基准）判断
+    self_check = b_symbol if bars else (intended_benchmark or DEFAULT_BENCHMARKS.get(market, {}).get("symbol", ""))
+    if target_symbol.upper() == str(self_check).upper():
         out["reason_cn"] = "标的自身即基准，不做拆解"
         return out
     if not bars:
@@ -935,7 +943,10 @@ def run_plan_backtest(
         "long_confirmed": _summarize_returns([float(x["net_return"]) for x in trades["LONG_CONFIRMED"]], years),
         "watch_long_setup": _summarize_returns([float(x["net_return"]) for x in trades["WATCH_LONG_SETUP"]], years),
         "buy_and_hold_return_pct": round(bh_ret, 2),
-        "market_attribution": _market_attribution(all_trades, bench, symbol, market),
+        "market_attribution": _market_attribution(
+            all_trades, bench, symbol, market,
+            intended_benchmark=request.get("benchmark_symbol") or default_benchmark_for(market, symbol, asset_type)["symbol"],
+        ),
         "veto_reason_counts": dict(sorted(veto_counts.items(), key=lambda kv: -kv[1])),
         **_decision_diagnostics(decision_rows, horizon_bars, step),
         "sample_trades": all_trades[-3:],
