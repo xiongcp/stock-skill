@@ -9,6 +9,7 @@ from typing import Any
 from forecast import _local_sigma, compute_conformal_forecast
 from indicators import atr_series, compute_all_indicators
 from market_rules import (
+    DEFAULT_BENCHMARKS,
     calendar_covers,
     count_missing_trading_sessions,
     daily_limit_prices,
@@ -524,6 +525,65 @@ def _bootstrap_mean_ci(rets: list[float], n_boot: int = 400) -> list[float] | No
     return [round(mean_rets[lo_i], 2), round(mean_rets[hi_i], 2)]
 
 
+MARKET_ATTRIBUTION_NOTE_CN = (
+    "超额是相对同一批持有期内的基准收益，不是相对随机选股；单只股票的回测没有股票池，无法判断选股本身有没有贡献。"
+    "持有期大盘涨跌是事后才知道的，两组数字只用于拆解已发生的成交，不能用来择时。"
+    "基准收益不含交易成本；个股用含分红的复权价，基准若是价格指数则不含分红，两者口径略有差异。"
+)
+
+
+def _market_attribution(all_trades: list[dict[str, Any]], bench: dict[str, Any] | None, target_symbol: str, market: str) -> dict[str, Any]:
+    """把"全部做多信号"的成交和同一批持有期内的基准收益放在一起（规格 2026-11-16 第 3 节）。
+
+    持有期基准收益：入场日之前最近一个基准收盘 → 出场日当天或之前最近一个基准收盘。
+    只读已完成的回放结果，不进入任何决策日的输入。
+    """
+    def group(nets: list[float]) -> dict[str, Any]:
+        return {"trades": len(nets), "mean_net_return_pct": round(sum(nets) / len(nets) * 100.0, 3) if nets else None}
+
+    out: dict[str, Any] = {
+        "available": False, "reason_cn": None, "basis": "ALL_LONG_SIGNALS", "benchmark_symbol": None, "trades": 0,
+        "mean_net_return_pct": None, "mean_benchmark_hold_return_pct": None, "mean_excess_vs_benchmark_pct": None,
+        "mean_excess_95ci_pct": None, "benchmark_up": group([]), "benchmark_down_or_flat": group([]),
+        "note_cn": MARKET_ATTRIBUTION_NOTE_CN,
+    }
+    bars = (bench or {}).get("bars") or []
+    b_symbol = str(bench["instrument"]["symbol"]) if bars else None
+    default_symbol = DEFAULT_BENCHMARKS.get(market, {}).get("symbol", "")
+    if target_symbol.upper() in {(b_symbol or "").upper(), default_symbol.upper()}:
+        out["reason_cn"] = "标的自身即基准，不做拆解"
+        return out
+    if not bars:
+        out["reason_cn"] = "没有大盘基准行情，无法拆出大盘贡献"
+        return out
+    out["benchmark_symbol"] = b_symbol
+    if not all_trades:
+        out["reason_cn"] = "回放区间内没有成交"
+        return out
+    days = [str(b["day"]) for b in bars]
+    closes = [float(b["close"]) for b in bars]
+    pairs: list[tuple[float, float]] = []
+    for t in all_trades:
+        i = bisect.bisect_left(days, str(t["entry_day"])) - 1
+        j = bisect.bisect_right(days, str(t["exit_day"])) - 1
+        if i < 0:
+            out["reason_cn"] = f"入场日 {t['entry_day']} 之前没有基准收盘，无法计算持有期基准收益"
+            return out
+        pairs.append((float(t["net_return"]), closes[j] / closes[i] - 1.0))
+    n = len(pairs)
+    out.update(
+        available=True,
+        trades=n,
+        mean_net_return_pct=round(sum(a for a, _ in pairs) / n * 100.0, 3),
+        mean_benchmark_hold_return_pct=round(sum(b for _, b in pairs) / n * 100.0, 3),
+        mean_excess_vs_benchmark_pct=round(sum(a - b for a, b in pairs) / n * 100.0, 3),
+        mean_excess_95ci_pct=_bootstrap_mean_ci([a - b for a, b in pairs]),
+        benchmark_up=group([a for a, b in pairs if b > 0]),
+        benchmark_down_or_flat=group([a for a, b in pairs if b <= 0]),
+    )
+    return out
+
+
 def _summarize_returns(rets: list[float], years: float) -> dict[str, Any]:
     if not rets:
         return {
@@ -875,6 +935,7 @@ def run_plan_backtest(
         "long_confirmed": _summarize_returns([float(x["net_return"]) for x in trades["LONG_CONFIRMED"]], years),
         "watch_long_setup": _summarize_returns([float(x["net_return"]) for x in trades["WATCH_LONG_SETUP"]], years),
         "buy_and_hold_return_pct": round(bh_ret, 2),
+        "market_attribution": _market_attribution(all_trades, bench, symbol, market),
         "veto_reason_counts": dict(sorted(veto_counts.items(), key=lambda kv: -kv[1])),
         **_decision_diagnostics(decision_rows, horizon_bars, step),
         "sample_trades": all_trades[-3:],

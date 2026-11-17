@@ -516,3 +516,104 @@ def test_report_md_explains_settlement_codes_in_chinese() -> None:
         for m, a, s in (("CN", "equity", "600519.SH"), ("CN", "index", "000300.SH"), ("HK", "equity", "00700.HK"), ("US", "equity", "NVDA.US"))
     }
     assert codes <= set(SETTLEMENT_CN), f"报告缺少交收制度的中文说明: {codes - set(SETTLEMENT_CN)}"
+
+
+# ---------------------------------------------------------------------------
+# 回测拆出大盘贡献（backtest.market_attribution）
+# ---------------------------------------------------------------------------
+MA_KEYS = {
+    "available", "reason_cn", "basis", "benchmark_symbol", "trades", "mean_net_return_pct",
+    "mean_benchmark_hold_return_pct", "mean_excess_vs_benchmark_pct", "mean_excess_95ci_pct",
+    "benchmark_up", "benchmark_down_or_flat", "note_cn",
+}
+MA_NOTE = (
+    "超额是相对同一批持有期内的基准收益，不是相对随机选股；单只股票的回测没有股票池，无法判断选股本身有没有贡献。"
+    "持有期大盘涨跌是事后才知道的，两组数字只用于拆解已发生的成交，不能用来择时。"
+    "基准收益不含交易成本；个股用含分红的复权价，基准若是价格指数则不含分红，两者口径略有差异。"
+)
+
+
+def _moutai_backtest():
+    from evaluation import run_plan_backtest
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ_BASE}
+    bundle = load_bundle(req, now=NOW)
+    return bundle, run_plan_backtest(bundle, req, horizon_bars=15, step=10)
+
+
+@pytest.mark.slow
+def test_market_attribution_conserves_and_matches_hand_computation(replay_recorded) -> None:
+    from evaluation import _market_attribution
+
+    bundle, bt = _moutai_backtest()
+    ma = bt["market_attribution"]
+    assert set(ma) == MA_KEYS and ma["note_cn"] == MA_NOTE and ma["basis"] == "ALL_LONG_SIGNALS"
+    assert ma["available"] is True and ma["reason_cn"] is None and ma["benchmark_symbol"] == "000300.SH"
+    assert ma["trades"] == bt["all_long_signals"]["trades"] >= 3
+    assert ma["benchmark_up"]["trades"] + ma["benchmark_down_or_flat"]["trades"] == ma["trades"]
+    lo, hi = ma["mean_excess_95ci_pct"]
+    assert lo - 0.01 <= ma["mean_excess_vs_benchmark_pct"] <= hi + 0.01
+    # 用回放给出的最近三笔真实成交，在测试里按定义独立算一遍
+    trades = bt["sample_trades"]
+    bars = bundle["benchmark"]["bars"]
+    days = [b["day"] for b in bars]
+    close = {b["day"]: float(b["close"]) for b in bars}
+    nets, holds = [], []
+    for t in trades:
+        i = days.index(t["entry_day"])  # A 股标的的交易日都是沪深300 的交易日
+        nets.append(float(t["net_return"]))
+        holds.append(close[t["exit_day"]] / close[days[i - 1]] - 1.0)
+    got = _market_attribution(trades, bundle["benchmark"], "600519.SH", "CN")
+    n = len(trades)
+    assert got["trades"] == n
+    assert got["mean_net_return_pct"] == pytest.approx(sum(nets) / n * 100.0, abs=5e-4)
+    assert got["mean_benchmark_hold_return_pct"] == pytest.approx(sum(holds) / n * 100.0, abs=5e-4)
+    assert got["mean_excess_vs_benchmark_pct"] == pytest.approx(sum(a - b for a, b in zip(nets, holds)) / n * 100.0, abs=5e-4)
+    up = [a for a, b in zip(nets, holds) if b > 0]
+    assert got["benchmark_up"]["trades"] == len(up)
+    assert got["benchmark_up"]["mean_net_return_pct"] == (pytest.approx(sum(up) / len(up) * 100.0, abs=5e-4) if up else None)
+
+
+def test_market_attribution_uses_previous_benchmark_close_on_missing_days(replay_recorded) -> None:
+    """入场日、出场日落在基准没有K线的日历日（用周六代表）：取之前最近一个基准收盘，不报错。"""
+    from datetime import date, timedelta
+
+    from evaluation import _market_attribution
+
+    req = {"symbol": "00700.HK", "market": "HK", "asset_type": "equity", **REQ_BASE}
+    bench = load_bundle(req, now=NOW)["benchmark"]
+    days = [b["day"] for b in bench["bars"]]
+    close = [float(b["close"]) for b in bench["bars"]]
+    i = next(k for k in range(len(days) - 30, 20, -1) if date.fromisoformat(days[k]).weekday() == 4)  # 某个周五
+    sat = (date.fromisoformat(days[i]) + timedelta(days=1)).isoformat()
+    assert sat not in days
+    # 周六"入场"：之前最近的基准收盘是周五 days[i]；周六"出场"：当天或之前最近的也是 days[i]
+    t_in = {"entry_day": sat, "exit_day": days[i + 5], "net_return": 0.01}
+    t_out = {"entry_day": days[i - 5], "exit_day": sat, "net_return": -0.02}
+    got = _market_attribution([t_in, t_out], bench, "00700.HK", "HK")
+    want = ((close[i + 5] / close[i] - 1.0) + (close[i] / close[i - 6] - 1.0)) / 2 * 100.0
+    assert got["available"] is True and got["benchmark_symbol"] == "HSI.HK"
+    assert got["mean_benchmark_hold_return_pct"] == pytest.approx(want, abs=5e-4)
+
+
+def test_market_attribution_unavailable_cases(replay_recorded) -> None:
+    from evaluation import _market_attribution
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", **REQ_BASE}
+    bench = load_bundle(req, now=NOW)["benchmark"]
+    trade = {"entry_day": bench["bars"][-20]["day"], "exit_day": bench["bars"][-10]["day"], "net_return": 0.01}
+    early = {"entry_day": bench["bars"][0]["day"], "exit_day": bench["bars"][5]["day"], "net_return": 0.01}
+    cases = [
+        (_market_attribution([trade], None, "600519.SH", "CN"), "没有大盘基准行情"),
+        (_market_attribution([trade], None, "000300.SH", "CN"), "标的自身即基准"),
+        (_market_attribution([trade], bench, "000300.SH", "CN"), "标的自身即基准"),
+        (_market_attribution([], bench, "600519.SH", "CN"), "没有成交"),
+        (_market_attribution([early], bench, "600519.SH", "CN"), "之前没有基准收盘"),
+    ]
+    for got, reason in cases:
+        assert set(got) == MA_KEYS and got["available"] is False and reason in got["reason_cn"], reason
+        assert got["trades"] == 0 and got["mean_excess_95ci_pct"] is None
+        assert got["mean_net_return_pct"] is None and got["mean_benchmark_hold_return_pct"] is None
+        assert got["benchmark_up"] == {"trades": 0, "mean_net_return_pct": None} == got["benchmark_down_or_flat"]
+    one = _market_attribution([trade], bench, "600519.SH", "CN")
+    assert one["available"] is True and one["trades"] == 1 and one["mean_excess_95ci_pct"] is None  # 少于 2 笔不给区间
