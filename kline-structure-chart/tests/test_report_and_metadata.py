@@ -199,6 +199,70 @@ def test_report_md_zero_trade_rows_show_dash(cn_pipeline) -> None:
     assert "| 确认做多 | 0 | — | — | — | — |" in md
 
 
+RANGE_FIRST_HEADERS = [
+    "## 1. 结论速览", "## 2. 大盘环境", "## 3. 未来 ", "## 4. 风控计划", "## 5. 结构与条件推演",
+    "## 6. 形态与信号证据", "## 7. 历史计划回放回测", "## 8. 产物文件",
+]
+
+
+def _lead_after(md: str, header: str) -> str:
+    """标题行之后隔一个空行的那一行。"""
+    lines = md.splitlines()
+    i = next(k for k, ln in enumerate(lines) if ln.startswith(header))
+    assert lines[i + 1] == ""
+    return lines[i + 2]
+
+
+@pytest.mark.slow
+def test_report_md_puts_range_and_risk_before_structure(cn_pipeline) -> None:
+    _, md, _ = cn_pipeline
+    headers = [ln for ln in md.splitlines() if ln.startswith("## ")]
+    assert len(headers) == len(RANGE_FIRST_HEADERS)
+    for got, want in zip(headers, RANGE_FIRST_HEADERS):
+        assert got.startswith(want), (got, want)
+    assert "正常波动范围" in headers[2]
+
+
+@pytest.mark.slow
+def test_report_md_lead_sentences_in_both_veto_states(cn_pipeline) -> None:
+    from render_report_md import RISK_LEAD_CN, STRUCTURE_LEAD_CN
+
+    assert RISK_LEAD_CN == "做多计划的盈亏主要取决于持有期大盘涨跌；计划的作用是把亏损限定在预算内，不代表方向判断。"
+    assert STRUCTURE_LEAD_CN == "以下只描述价格结构和条件路径，不预示涨跌方向。"
+    report, _, backtest = cn_pipeline
+    result = load_v6(report)[0]
+    flipped = copy.deepcopy(result)
+    flipped["verdict"]["risk_veto"] = not result["verdict"]["risk_veto"]
+    flipped["verdict"]["veto_reasons"] = [] if result["verdict"]["risk_veto"] else ["大盘环境评分偏弱"]
+    for res in (result, flipped):
+        md = render_report_markdown(res, backtest)
+        assert _lead_after(md, "## 4. 风控计划") == RISK_LEAD_CN
+        assert _lead_after(md, "## 5. 结构与条件推演") == STRUCTURE_LEAD_CN
+        assert md.count(RISK_LEAD_CN) == 1 and md.count(STRUCTURE_LEAD_CN) == 1
+
+
+@pytest.mark.slow
+def test_report_md_digest_and_summary_order(cn_pipeline) -> None:
+    report, md, _ = cn_pipeline
+    digest = next(ln for ln in md.splitlines() if "直出摘要" in ln)
+    order = [digest.index(k) for k in ("最新收盘", "正常波动范围", "三重屏障计划", "当前评级为")]
+    assert order == sorted(order)
+    if load_v6(report)[0]["verdict"]["risk_veto"]:
+        assert digest.split("：", 1)[1].startswith("【风控否决")
+    bullets = [md.index(k) for k in ("- 直出摘要", "- 最新收盘：", "- 结论：", "- 规则分：")]
+    assert bullets == sorted(bullets)
+
+
+@pytest.mark.slow
+def test_report_md_unavailable_has_no_lead_sentences(cn_pipeline) -> None:
+    from render_report_md import RISK_LEAD_CN, STRUCTURE_LEAD_CN
+
+    broken = copy.deepcopy(load_v6(cn_pipeline[0])[0])
+    broken["quality"]["status"] = "UNAVAILABLE"
+    md = render_report_markdown(broken)
+    assert RISK_LEAD_CN not in md and STRUCTURE_LEAD_CN not in md and "## " not in md
+
+
 def test_report_md_uses_market_tick_precision(replay_recorded, tmp_path: Path) -> None:
     hk = run_pipeline(
         {"symbol": "01810.HK", "market": "HK", "asset_type": "equity", **REQ_BASE}, output_dir=tmp_path / "hk"
