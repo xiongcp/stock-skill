@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from market_rules import MARKET_SESSIONS
@@ -20,6 +21,9 @@ _REQUEST_KEYS = (
 _SCENARIO_DRAW_KEYS = ("waypoints_offset", "step_labels", "eta_bars")
 _SCENARIO_DROP_KEYS = (*_SCENARIO_DRAW_KEYS, "target_within_horizon")
 _QUOTABLE_SECTIONS = ("structure", "indicators", "scenarios", "plan", "volatility_range")
+# result.json 落盘（UTF-8、indent=2）的体积预算；超出时只裁剪基准结构摘要，见 _trim_to_size_budget
+RESULT_SIZE_BUDGET_BYTES = 80 * 1024
+BENCH_KEY_LEVELS_KEEP = 5  # 裁剪关键价位时每侧保留离基准收盘最近的档数
 
 
 def artifact_files(safe_sym: str, has_backtest: bool) -> dict[str, str]:
@@ -201,7 +205,52 @@ def build_result(report: dict[str, Any], files: dict[str, str]) -> dict[str, Any
         )
         bench_wl = {k: bw[k] for k in ("price_decimals", "tolerance", "prices")}
     result["quotable_prices"]["benchmark"] = bench_wl
+    _trim_to_size_budget(result)
     return result
+
+
+def _result_size(result: dict[str, Any]) -> int:
+    """与 analyze_and_forecast 落盘同一种序列化下的 UTF-8 字节数。"""
+    return len(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
+
+
+def _trim_to_size_budget(result: dict[str, Any]) -> None:
+    """超出体积预算时按规格 3.4 的顺序裁剪基准结构摘要：先去掉备选浪型计数，再截短关键价位。
+
+    只动 market_context.structure 的 wave_counts / key_levels、随之重算的 quotable_prices.benchmark 与
+    quality.notes；标的自身的字段不裁。新建对象替换，不回写内部报告。
+    """
+    budget = RESULT_SIZE_BUDGET_BYTES
+    structure = result["market_context"]["structure"]
+    if structure is None or _result_size(result) <= budget:
+        return
+    base_notes = list(result["quality"].get("notes") or [])
+    steps = (
+        (
+            "去掉基准浪型的备选计数",
+            lambda s: {**s, "wave_counts": [w for w in s["wave_counts"] if w.get("role") == "主计数"] or s["wave_counts"][:1]},
+        ),
+        (
+            "基准关键价位每侧只保留离收盘最近的几档",
+            lambda s: {**s, "key_levels": {k: v[:BENCH_KEY_LEVELS_KEEP] for k, v in s["key_levels"].items()}},
+        ),
+    )
+    done: list[str] = []
+    for label, trim in steps:
+        structure = trim(structure)
+        done.append(label)
+        result["market_context"]["structure"] = structure
+        bench = result["quotable_prices"]["benchmark"]
+        if bench is not None:
+            bw = collect_price_whitelist(
+                {"structure": structure, "cycle": result["market_context"]["cycle"]}, bench["price_decimals"], []
+            )
+            result["quotable_prices"]["benchmark"] = {**bench, "prices": bw["prices"]}
+        note = f"result.json 超出体积预算，已裁剪大盘结构摘要（{'；'.join(done)}）；标的自身的字段未裁剪"
+        result["quality"]["notes"] = [*base_notes, note]
+        if _result_size(result) <= budget:
+            return
+    result["quality"]["notes"] = [*base_notes, note + "；裁剪后仍超出预算"]
 
 
 def build_chart_data(report: dict[str, Any]) -> dict[str, Any]:
