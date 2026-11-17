@@ -300,7 +300,7 @@ uv run --directory kline-structure-chart python scripts/analyze_and_forecast.py 
 1. 只说了名称时，先用 `scripts/resolve_symbol.py` 通过腾讯证券搜索查代码；匹配到多个证券（比如"腾讯"）时会请你选择，不会凭记忆猜。
 2. 按问题类型选择参数并运行脚本（比如给了账户净值才计算股数，问回测才加 `--backtest`）。
 3. 先检查数据质量：`UNAVAILABLE` 不给任何价位；`PARTIAL` 把告警放在回答最前面。
-4. 以生成的 `*_report.md` 为骨架回答，顺序为：大盘 → 结构与条件推演 → 风控计划 → 未来正常波动范围 → 回测 → 文件路径 → 免责声明。报告中的数字不得改动。
+4. 以生成的 `*_report.md` 为骨架回答，顺序为：大盘 → 未来正常波动范围 → 风控计划 → 结构与条件推演 → 回测 → 文件路径 → 免责声明。报告中的数字不得改动。
 5. 风控否决了做多时，否决原因放在最前面。不会给出"上涨概率"之类的数字。
 
 完整示例（真实行情生成的报告、图和标准回复）见 [examples/](examples/README.md)。
@@ -380,7 +380,7 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 
 | 文件 | 内容 |
 | --- | --- |
-| `*_report.md` | 中文分析报告，依次为：数据说明、风控否决、结论、大盘、结构与条件推演、风控计划、形态证据、未来正常波动范围、回测、文件路径、免责声明。数字全部取自 `*_result.json` |
+| `*_report.md` | 中文分析报告，依次为：数据说明、风控否决、结论、大盘、未来正常波动范围、风控计划、结构与条件推演、形态证据、回测、文件路径、免责声明。数字全部取自 `*_result.json` |
 | `*_result.json` | v6 稳定契约（通过 `assets/analysis.schema.json` 全量校验） |
 | `*_chart_data.json` | K 线序列、回放快照等渲染数据；不是稳定接口 |
 | `*_preview.png` | 1920×1160 结构推演图；数据有问题时带红色告警和水印 |

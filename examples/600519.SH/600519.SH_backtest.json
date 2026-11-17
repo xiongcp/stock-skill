@@ -90,6 +90,29 @@
       "profit_factor": 1.42
     },
     "buy_and_hold_return_pct": -6.99,
+    "market_attribution": {
+      "available": true,
+      "reason_cn": null,
+      "basis": "ALL_LONG_SIGNALS",
+      "benchmark_symbol": "000300.SH",
+      "trades": 16,
+      "mean_net_return_pct": 0.733,
+      "mean_benchmark_hold_return_pct": 0.189,
+      "mean_excess_vs_benchmark_pct": 0.545,
+      "mean_excess_95ci_pct": [
+        -1.82,
+        3.21
+      ],
+      "benchmark_up": {
+        "trades": 9,
+        "mean_net_return_pct": -0.704
+      },
+      "benchmark_down_or_flat": {
+        "trades": 7,
+        "mean_net_return_pct": 2.582
+      },
+      "note_cn": "超额是相对同一批持有期内的基准收益，不是相对随机选股；单只股票的回测没有股票池，无法判断选股本身有没有贡献。持有期大盘涨跌是事后才知道的，两组数字只用于拆解已发生的成交，不能用来择时。基准收益不含交易成本；个股用含分红的复权价，基准若是价格指数则不含分红，两者口径略有差异。"
+    },
     "veto_reason_counts": {
       "RR_INSUFFICIENT": 98,
       "BELOW_LOWER_RAIL": 57,

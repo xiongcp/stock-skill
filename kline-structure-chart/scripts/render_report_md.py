@@ -23,6 +23,8 @@ SETTLEMENT_CN = {
     "INDEX_NON_TRADABLE": "指数本身不可交易",
 }
 DISCLAIMER = "以上为规则化技术分析，仅供研究参考，不构成投资建议。"
+RISK_LEAD_CN = "多个市场的长周期回放显示，做多计划的盈亏大体跟随持有期大盘涨跌；单只股票可能不同，带回测运行时见第 7 节的大盘贡献拆解。计划的作用是把亏损限定在预算内，不代表方向判断。"
+STRUCTURE_LEAD_CN = "以下只描述价格结构和条件路径，不预示涨跌方向。"
 
 
 def _cell(text: Any) -> str:
@@ -164,19 +166,20 @@ def render_report_markdown(
     flash_digest = (
         f"{partial_prefix}{veto_prefix}数据截至 {meta['as_of']}（数据源 {meta['data_source']}，{ADJUSTMENT_CN.get(meta.get('adjustment'), meta.get('adjustment'))}，质量 {quality['status']}）。"
         f"基准 {bench['index_name']}（{bench['index_symbol']}）处于{bench['regime_label_cn']}（状态分 {bench['regime_score']:.1f}/100）。"
-        f"本标的规则分 {verdict['rule_score']:.1f}/100（{verdict['rating_cn']}，确定性规则加权分，不是胜率或上涨概率），{mr_note}"
-        f"当前评级为「{verdict['action_cn']}」（{verdict['setup_label_cn']}），最新收盘 {price(last_close)}，"
+        f"最新收盘 {price(last_close)}，"
+        f"未来 {vr['horizon_bars']} 日 80% 正常波动范围为 {price(vr['q10'][-1])} ~ {price(vr['q90'][-1])}（中枢 q50 = {price(vr['q50'][-1])}，只描述波动幅度，不含方向预测）；"
         f"三重屏障计划{plan_zone_label} {price(plan['entry_zone'][0])} ~ {price(plan['entry_zone'][1])}、止损 {price(plan['stop_loss_barrier'])}、"
-        f"TP1 {price(plan['take_profit_1'])}（扣费后净盈亏比 {plan['risk_reward_ratio']:.2f}）；"
-        f"未来 {vr['horizon_bars']} 日 80% 正常波动范围为 {price(vr['q10'][-1])} ~ {price(vr['q90'][-1])}（中枢 q50 = {price(vr['q50'][-1])}，只描述波动幅度，不含方向预测）。"
+        f"TP1 {price(plan['take_profit_1'])}（扣费后净盈亏比 {plan['risk_reward_ratio']:.2f}）。"
+        f"本标的规则分 {verdict['rule_score']:.1f}/100（{verdict['rating_cn']}，确定性规则加权分，不是胜率或上涨概率），{mr_note}"
+        f"当前评级为「{verdict['action_cn']}」（{verdict['setup_label_cn']}）。"
     )
     lines += [
         "## 1. 结论速览",
         "",
         f"- 直出摘要（供 Agent / Flash 模型首段原样引用）：{flash_digest}",
+        f"- 最新收盘：{price(last_close)}；计划类型：{verdict['setup_label_cn']}。",
         f"- 结论：{verdict['headline_cn']}",
         f"- 规则分：**{verdict['rule_score']:.1f} / 100**（{verdict['rating_cn']}）。这是确定性规则加权分，不是胜率，也不是上涨概率。",
-        f"- 最新收盘：{price(last_close)}；计划类型：{verdict['setup_label_cn']}。",
         "",
     ]
 
@@ -209,73 +212,50 @@ def render_report_markdown(
     bench_dec = int(((result.get("quotable_prices") or {}).get("benchmark") or {}).get("price_decimals") or decimals)
     lines += _market_layer_lines(ctx, bench_dec, "个股" if asset_type == "equity" else "标的")
 
-    # 3. 结构与条件推演
-    wedge = st["channel"]
-    sp = sc["paths"]
+    # 3. 未来区间
+    audit = vr["calibration_audit"]
+    horizon = int(vr["horizon_bars"])
+    steps = sorted({h for h in (1, 5, 10, horizon) if 1 <= h <= horizon})
     lines += [
-        "## 3. 结构与条件推演（触发 → 目标 → 失效）",
+        f"## 3. 未来 {horizon} 个交易日正常波动范围（只描述波动幅度，不含方向判断）",
         "",
-        f"- 当前结构（近 120 日）：{wedge['pattern']}，{wedge['status_text']}。",
-        "",
-        "| 路径 | 触发条件 | 目标位（来源） | 失效条件 |",
-        "| --- | --- | --- | --- |",
-        f"| 上攻 | {_cell(sp['bull']['trigger'])} | {price(sp['bull']['target_price'])}（{_cell(sp['bull']['target_source'])}） "
-        f"| {_cell(sp['bull']['invalidation'])} |",
-        f"| 震荡 | {_cell(sp['neutral']['condition'])} | 区间 {price(sp['neutral']['range'][0])} ~ {price(sp['neutral']['range'][1])} | — |",
-        f"| 下探 | {_cell(sp['bear']['trigger'])} | {price(sp['bear']['target_price'])}（{_cell(sp['bear']['target_source'])}） "
-        f"| {_cell(sp['bear']['invalidation'])} |",
-        "",
+        "| 日期 | 第几日 | 80% 下沿 q10 | 50% 下沿 q25 | 中枢 q50 | 50% 上沿 q75 | 80% 上沿 q90 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
-    multi_scenarios = sc.get("active") or []
-    if multi_scenarios:
+    for h in steps:
+        i = h - 1
         lines += [
-            "**多情景推演**",
-            "",
-            "| 情景 | 状态 | 触发条件 | 目标位（来源） | 失效条件 |",
-            "| --- | --- | --- | --- | --- |",
+            f"| {vr['horizon_dates'][i]} | {h} | {price(vr['q10'][i])} | {price(vr['q25'][i])} | {price(vr['q50'][i])} "
+            f"| {price(vr['q75'][i])} | {price(vr['q90'][i])} |"
         ]
-        for item in multi_scenarios:
-            lines += [
-                f"| {_cell(item['name'])} | {_cell(item.get('status_cn', item.get('status')))} "
-                f"| {_cell(item['trigger'])} | {price(item['target_price'])}（{_cell(item['target_source'])}） "
-                f"| {_cell(item['invalidation'])} |"
-            ]
-        lines += [""]
-    imp = sc.get("impulse_wave")
-    if imp:
-        lines += [f"- 推动浪识别：{imp['label']}（{imp['invalidation_text']}；1.618×浪1 测算位 {price(imp['wave3_1618_target'])}）。"]
-    contested = sc.get("contested_levels") or []
-    if contested:
-        items = "；".join(f"{price(c['price'])}（{'/'.join(c['sources'])}）" for c in contested)
-        lines += [
-            f"- 现价 {sc['min_trigger_distance_atr']} 个 ATR 以内正在争夺的价位：{items}。这些价位落在日常波动范围内，不作触发条件。"
-        ]
-    counts = [wc for wc in (st.get("wave_counts") or []) if wc.get("role") == "主计数"] or (st.get("wave_counts") or [])[:1]
-    if counts:
-        lines += ["", "| 浪型计数 | A 浪 | B 浪终点 | C 浪进度 | 1.0 倍测算位 | 否定条件 |", "| --- | --- | --- | --- | --- | --- |"]
-        for wc in counts:
-            lvl_1 = next((lv for lv in wc["levels"] if lv["ratio"] == 1.0), None)
-            lines += [
-                f"| {wc['role']}：{wc['label']} | {wc['a_start']['day']} {price(wc['a_start']['price'])} → "
-                f"{wc['a_end']['day']} {price(wc['a_end']['price'])}（{wc['a_range_atr']:.1f} 个 ATR） "
-                f"| {wc['b_end']['day']} {price(wc['b_end']['price'])} | {_cell(wc['c_progress']['phase'])} "
-                f"| {price(lvl_1['price']) if lvl_1 else '—'}（{lvl_1['state'] if lvl_1 else '—'}） | {_cell(wc['count_invalidation']['text'])} |"
-            ]
-    lines += [""]
-    ladder = st.get("key_levels") or {}
-    res = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("resistances") or [])[:3]]
-    sup = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("supports") or [])[:3]]
+    promoted = "已达标" if vr["promotion_status"] == "PROMOTED" else "校准观察期"
     lines += [
-        f"- 上方压力（由近到远）：{'；'.join(res) if res else '无'}",
-        f"- 下方支撑（由近到远）：{'；'.join(sup) if sup else '无'}",
         "",
+        "- 中枢 q50 就是最新收盘价（不加任何漂移），区间宽度来自历史波动的分期限校准。",
+        (
+            f"- 历史样本外实测覆盖率：50% 区间 {_pct(audit['nominal_50pct_empirical_coverage'])}，"
+            f"80% 区间 {_pct(audit['nominal_80pct_empirical_coverage'])}（评估样本 {audit['evaluation_samples']} 个，"
+            f"相邻样本结果期重叠，约等于 {audit['effective_independent_samples']} 个独立样本；状态：{promoted}）。"
+        ),
+        (
+            f"- 「已达标」要求约 {audit['min_effective_independent_samples']} 个以上独立样本，且两档覆盖率与名义值相差都不超过 10 个百分点；"
+            "否则为「校准观察期」，覆盖率仅供参考。"
+        ),
     ]
+    if audit.get("uncalibrated_overlays"):
+        lines += [f"- 未经历史校准的放大项：{'；'.join(audit['uncalibrated_overlays'])}。"]
+    cal = vr.get("calendar_coverage") or {}
+    if cal and not cal.get("covered", True):
+        lines += [f"- {len(cal['estimated_dates'])} 个未来日期超出休市表覆盖范围（至 {cal['coverage_end']}），按工作日估算。"]
+    lines += ["- 这是逐日的边际区间，不代表整条价格路径的联合概率。", ""]
 
     # 4. 风控计划
     rules = plan["market_microstructure"]
     sizing = plan["position_sizing"]
     lines += [
         "## 4. 风控计划（三重屏障）",
+        "",
+        RISK_LEAD_CN,
         "",
         f"| 计划类型 | {plan_zone_label} | 止损 | TP1 | TP2 | 时间屏障 | 扣费后盈亏比 |",
         "| --- | --- | --- | --- | --- | --- | --- |",
@@ -353,8 +333,72 @@ def render_report_markdown(
         lines += ["", f"- 做空：{short['reason']}。"]
     lines += [""]
 
-    # 5. 形态与信号证据
-    lines += ["## 5. 形态与信号证据（公式可复核）", ""]
+    # 5. 结构与条件推演
+    wedge = st["channel"]
+    sp = sc["paths"]
+    lines += [
+        "## 5. 结构与条件推演（触发 → 目标 → 失效）",
+        "",
+        STRUCTURE_LEAD_CN,
+        "",
+        f"- 当前结构（近 120 日）：{wedge['pattern']}，{wedge['status_text']}。",
+        "",
+        "| 路径 | 触发条件 | 目标位（来源） | 失效条件 |",
+        "| --- | --- | --- | --- |",
+        f"| 上攻 | {_cell(sp['bull']['trigger'])} | {price(sp['bull']['target_price'])}（{_cell(sp['bull']['target_source'])}） "
+        f"| {_cell(sp['bull']['invalidation'])} |",
+        f"| 震荡 | {_cell(sp['neutral']['condition'])} | 区间 {price(sp['neutral']['range'][0])} ~ {price(sp['neutral']['range'][1])} | — |",
+        f"| 下探 | {_cell(sp['bear']['trigger'])} | {price(sp['bear']['target_price'])}（{_cell(sp['bear']['target_source'])}） "
+        f"| {_cell(sp['bear']['invalidation'])} |",
+        "",
+    ]
+    multi_scenarios = sc.get("active") or []
+    if multi_scenarios:
+        lines += [
+            "**多情景推演**",
+            "",
+            "| 情景 | 状态 | 触发条件 | 目标位（来源） | 失效条件 |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for item in multi_scenarios:
+            lines += [
+                f"| {_cell(item['name'])} | {_cell(item.get('status_cn', item.get('status')))} "
+                f"| {_cell(item['trigger'])} | {price(item['target_price'])}（{_cell(item['target_source'])}） "
+                f"| {_cell(item['invalidation'])} |"
+            ]
+        lines += [""]
+    imp = sc.get("impulse_wave")
+    if imp:
+        lines += [f"- 推动浪识别：{imp['label']}（{imp['invalidation_text']}；1.618×浪1 测算位 {price(imp['wave3_1618_target'])}）。"]
+    contested = sc.get("contested_levels") or []
+    if contested:
+        items = "；".join(f"{price(c['price'])}（{'/'.join(c['sources'])}）" for c in contested)
+        lines += [
+            f"- 现价 {sc['min_trigger_distance_atr']} 个 ATR 以内正在争夺的价位：{items}。这些价位落在日常波动范围内，不作触发条件。"
+        ]
+    counts = [wc for wc in (st.get("wave_counts") or []) if wc.get("role") == "主计数"] or (st.get("wave_counts") or [])[:1]
+    if counts:
+        lines += ["", "| 浪型计数 | A 浪 | B 浪终点 | C 浪进度 | 1.0 倍测算位 | 否定条件 |", "| --- | --- | --- | --- | --- | --- |"]
+        for wc in counts:
+            lvl_1 = next((lv for lv in wc["levels"] if lv["ratio"] == 1.0), None)
+            lines += [
+                f"| {wc['role']}：{wc['label']} | {wc['a_start']['day']} {price(wc['a_start']['price'])} → "
+                f"{wc['a_end']['day']} {price(wc['a_end']['price'])}（{wc['a_range_atr']:.1f} 个 ATR） "
+                f"| {wc['b_end']['day']} {price(wc['b_end']['price'])} | {_cell(wc['c_progress']['phase'])} "
+                f"| {price(lvl_1['price']) if lvl_1 else '—'}（{lvl_1['state'] if lvl_1 else '—'}） | {_cell(wc['count_invalidation']['text'])} |"
+            ]
+    lines += [""]
+    ladder = st.get("key_levels") or {}
+    res = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("resistances") or [])[:3]]
+    sup = [f"{price(x['price'])}（{'/'.join(x['sources'])}）" for x in (ladder.get("supports") or [])[:3]]
+    lines += [
+        f"- 上方压力（由近到远）：{'；'.join(res) if res else '无'}",
+        f"- 下方支撑（由近到远）：{'；'.join(sup) if sup else '无'}",
+        "",
+    ]
+
+    # 6. 形态与信号证据
+    lines += ["## 6. 形态与信号证据（公式可复核）", ""]
     struct_bars = int((meta.get("request") or {}).get("structure_bars") or 120)
     patterns = [
         p
@@ -391,43 +435,6 @@ def render_report_markdown(
         lines += ["- 当前窗口未触发蜡烛形态、背离或策略信号。"]
     lines += [""]
 
-    # 6. 未来区间
-    audit = vr["calibration_audit"]
-    horizon = int(vr["horizon_bars"])
-    steps = sorted({h for h in (1, 5, 10, horizon) if 1 <= h <= horizon})
-    lines += [
-        f"## 6. 未来 {horizon} 个交易日正常波动范围（只描述波动幅度，不含方向判断）",
-        "",
-        "| 日期 | 第几日 | 80% 下沿 q10 | 50% 下沿 q25 | 中枢 q50 | 50% 上沿 q75 | 80% 上沿 q90 |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
-    ]
-    for h in steps:
-        i = h - 1
-        lines += [
-            f"| {vr['horizon_dates'][i]} | {h} | {price(vr['q10'][i])} | {price(vr['q25'][i])} | {price(vr['q50'][i])} "
-            f"| {price(vr['q75'][i])} | {price(vr['q90'][i])} |"
-        ]
-    promoted = "已达标" if vr["promotion_status"] == "PROMOTED" else "校准观察期"
-    lines += [
-        "",
-        "- 中枢 q50 就是最新收盘价（不加任何漂移），区间宽度来自历史波动的分期限校准。",
-        (
-            f"- 历史样本外实测覆盖率：50% 区间 {_pct(audit['nominal_50pct_empirical_coverage'])}，"
-            f"80% 区间 {_pct(audit['nominal_80pct_empirical_coverage'])}（评估样本 {audit['evaluation_samples']} 个，"
-            f"相邻样本结果期重叠，约等于 {audit['effective_independent_samples']} 个独立样本；状态：{promoted}）。"
-        ),
-        (
-            f"- 「已达标」要求约 {audit['min_effective_independent_samples']} 个以上独立样本，且两档覆盖率与名义值相差都不超过 10 个百分点；"
-            "否则为「校准观察期」，覆盖率仅供参考。"
-        ),
-    ]
-    if audit.get("uncalibrated_overlays"):
-        lines += [f"- 未经历史校准的放大项：{'；'.join(audit['uncalibrated_overlays'])}。"]
-    cal = vr.get("calendar_coverage") or {}
-    if cal and not cal.get("covered", True):
-        lines += [f"- {len(cal['estimated_dates'])} 个未来日期超出休市表覆盖范围（至 {cal['coverage_end']}），按工作日估算。"]
-    lines += ["- 这是逐日的边际区间，不代表整条价格路径的联合概率。", ""]
-
     # 7. 回测
     if backtest:
         bt = backtest.get("backtest") or {}
@@ -458,6 +465,23 @@ def render_report_markdown(
             "- 口径说明：「确认做多」与「观察做多」各自按独立持仓锁统计；「全部做多信号」按单一合并组合持仓锁统计（持仓期间不重复开仓），因此笔数不等于两分项直接相加。",
             f"- 同期买入持有收益：{bt.get('buy_and_hold_return_pct', 0):.2f}%。",
         ]
+        ma = bt.get("market_attribution")
+        if ma and ma.get("available"):
+            ci = ma.get("mean_excess_95ci_pct")
+            ci_text = f"（95% 区间 {ci[0]:.2f}% ~ {ci[1]:.2f}%）" if ci else ""
+
+            def _grp(g: dict[str, Any]) -> str:
+                mean = g.get("mean_net_return_pct")
+                return f"{g['trades']} 笔" + ("" if mean is None else f"、单笔平均净收益 {mean:.3f}%")
+
+            lines += [
+                f"- 大盘贡献拆解（全部做多信号 {ma['trades']} 笔，基准 {ma['benchmark_symbol']}）：单笔平均净收益 {ma['mean_net_return_pct']:.3f}%，"
+                f"同期基准平均收益 {ma['mean_benchmark_hold_return_pct']:.3f}%，相对基准的超额 {ma['mean_excess_vs_benchmark_pct']:.3f}%{ci_text}；"
+                f"持有期大盘上涨的 {_grp(ma['benchmark_up'])}，大盘不涨的 {_grp(ma['benchmark_down_or_flat'])}。"
+                "这是相对同期基准，不是相对随机选股；持有期大盘涨跌是事后变量，只用于拆解，不能用来择时。"
+            ]
+        elif ma:
+            lines += [f"- 大盘贡献拆解：未计算（{ma.get('reason_cn')}）。"]
         if bt.get("sample_size_warning"):
             lines += [f"- 样本提示：{bt['sample_size_warning']}。"]
         ic = bt.get("rule_score_ic") or {}

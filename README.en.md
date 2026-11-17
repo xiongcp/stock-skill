@@ -300,7 +300,7 @@ The agent follows the skill's rules:
 1. If only a name is given, it first looks up the ticker with `scripts/resolve_symbol.py` via Tencent securities search. If several securities match (for example "腾讯" / Tencent), it asks you to choose instead of guessing from memory.
 2. It picks arguments by question type (share counts only when you give an account size, `--backtest` only when you ask for a backtest) and runs the script.
 3. It checks data quality first: `UNAVAILABLE` gives no price levels at all; `PARTIAL` puts the warning at the top of the answer.
-4. It builds the answer on the generated `*_report.md`, in this order: market → structure and conditional scenarios → risk plan → future normal volatility range → backtest → file paths → disclaimer. Numbers from the report must not be changed.
+4. It builds the answer on the generated `*_report.md`, in this order: market → future normal volatility range → risk plan → structure and conditional scenarios → backtest → file paths → disclaimer. Numbers from the report must not be changed.
 5. If the risk officer vetoes a long setup, the veto reason comes first. It never gives numbers like "probability of going up".
 
 Complete examples (reports, charts and a reference reply generated from real data) are in [examples/](examples/README.md).
@@ -380,7 +380,7 @@ If something is wrong with the environment, run `scripts/doctor.py` (see 3.5); `
 
 | File | Content |
 | --- | --- |
-| `*_report.md` | Chinese analysis report, in order: data notes, risk veto, conclusion, market, structure and conditional scenarios, risk plan, pattern evidence, future normal volatility range, backtest, file paths, disclaimer. Every number comes from `*_result.json` |
+| `*_report.md` | Chinese analysis report, in order: data notes, risk veto, conclusion, market, future normal volatility range, risk plan, structure and conditional scenarios, pattern evidence, backtest, file paths, disclaimer. Every number comes from `*_result.json` |
 | `*_result.json` | v6 stable contract (fully validated against `assets/analysis.schema.json`) |
 | `*_chart_data.json` | Bar series, replay snapshots and other rendering data; not a stable interface |
 | `*_preview.png` | 1920×1160 structure chart; carries a red warning banner and watermark when data has problems |
