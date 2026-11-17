@@ -292,6 +292,7 @@
 | `backtest.no_fill_outside_entry_zone` | 次日开盘不在入场区、未成交的次数 | 次 | 否 | — |
 | `backtest.all_long_signals` / `long_confirmed` / `watch_long_setup` | 三个口径的成交统计：`trades`、`cumulative_return_pct`、`win_rate_pct` 与 `win_rate_95ci_pct`（Wilson）、`mean_return_95ci_pct`（Bootstrap）、`sharpe`、`max_drawdown_pct`、`profit_factor` | 笔 / % | 无成交时部分可空 | 唯一允许出现的概率类数字：胜率必须带 95% 区间与笔数；是已发生成交的统计，不是未来概率 |
 | `backtest.buy_and_hold_return_pct` | 同期买入持有收益 | % | 否 | 与策略累计收益对比 |
+| `backtest.market_attribution` | "全部做多信号"成交与同期基准的对照：`available`、`reason_cn`、`basis`（固定 `ALL_LONG_SIGNALS`）、`benchmark_symbol`、`trades`、`mean_net_return_pct`、`mean_benchmark_hold_return_pct`（入场日前一个基准收盘 → 出场日基准收盘）、`mean_excess_vs_benchmark_pct` 与 `mean_excess_95ci_pct`（Bootstrap）、`benchmark_up` / `benchmark_down_or_flat`（持有期基准收益大于 0 与否两组的 `trades`、`mean_net_return_pct`）、`note_cn` | 笔 / % | `available = false` 时数值为空 | 相对同期基准，不是相对随机选股；两组数字是事后拆解，不能说成择时依据或预期收益 |
 | `backtest.rule_score_ic` | 规则分与未来 H 日收益的 Spearman 秩相关：`spearman`、`decisions`、`effective_independent_samples`（≈ 决策数 × 步长 / H）、`informative`（独立样本 ≥ 20 且 \|IC\| ≥ 0.05）、`verdict` | −1~1 / 个数 | `spearman` 可空 | 原文转述 `verdict`；`informative = false` 时说"规则分在该标的上只作描述" |
 | `backtest.rule_score_buckets[]` | 按规则分 [0,38)、[38,52)、[52,65)、[65,100] 分层的决策日数、未来 H 日平均/中位收益、上涨占比 | 个 / % | 无样本的层为空 | 不对外转述（只供维护者诊断）；上涨占比是频率数字 |
 | `backtest.action_forward_returns.*` | 各动作标签之后的未来 H 日平均/中位收益与上涨占比 | 个 / % | 无样本时为空 | 不对外转述（只供维护者诊断）；上涨占比是频率数字，不要说成上涨概率 |

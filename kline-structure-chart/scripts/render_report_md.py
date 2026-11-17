@@ -465,6 +465,23 @@ def render_report_markdown(
             "- 口径说明：「确认做多」与「观察做多」各自按独立持仓锁统计；「全部做多信号」按单一合并组合持仓锁统计（持仓期间不重复开仓），因此笔数不等于两分项直接相加。",
             f"- 同期买入持有收益：{bt.get('buy_and_hold_return_pct', 0):.2f}%。",
         ]
+        ma = bt.get("market_attribution")
+        if ma and ma.get("available"):
+            ci = ma.get("mean_excess_95ci_pct")
+            ci_text = f"（95% 区间 {ci[0]:.2f}% ~ {ci[1]:.2f}%）" if ci else ""
+
+            def _grp(g: dict[str, Any]) -> str:
+                mean = g.get("mean_net_return_pct")
+                return f"{g['trades']} 笔" + ("" if mean is None else f"、单笔平均净收益 {mean:.3f}%")
+
+            lines += [
+                f"- 大盘贡献拆解（全部做多信号 {ma['trades']} 笔，基准 {ma['benchmark_symbol']}）：单笔平均净收益 {ma['mean_net_return_pct']:.3f}%，"
+                f"同期基准平均收益 {ma['mean_benchmark_hold_return_pct']:.3f}%，相对基准的超额 {ma['mean_excess_vs_benchmark_pct']:.3f}%{ci_text}；"
+                f"持有期大盘上涨的 {_grp(ma['benchmark_up'])}，大盘不涨的 {_grp(ma['benchmark_down_or_flat'])}。"
+                "这是相对同期基准，不是相对随机选股；持有期大盘涨跌是事后变量，只用于拆解，不能用来择时。"
+            ]
+        elif ma:
+            lines += [f"- 大盘贡献拆解：未计算（{ma.get('reason_cn')}）。"]
         if bt.get("sample_size_warning"):
             lines += [f"- 样本提示：{bt['sample_size_warning']}。"]
         ic = bt.get("rule_score_ic") or {}

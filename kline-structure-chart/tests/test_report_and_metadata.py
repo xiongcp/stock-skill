@@ -617,3 +617,31 @@ def test_market_attribution_unavailable_cases(replay_recorded) -> None:
         assert got["benchmark_up"] == {"trades": 0, "mean_net_return_pct": None} == got["benchmark_down_or_flat"]
     one = _market_attribution([trade], bench, "600519.SH", "CN")
     assert one["available"] is True and one["trades"] == 1 and one["mean_excess_95ci_pct"] is None  # 少于 2 笔不给区间
+
+
+@pytest.mark.slow
+def test_report_md_backtest_shows_market_attribution(cn_pipeline) -> None:
+    report, md, backtest = cn_pipeline
+    ma = backtest["backtest"]["market_attribution"]
+    assert ma["available"] is True
+    line = next(ln for ln in md.splitlines() if ln.startswith("- 大盘贡献拆解"))
+    assert md.index("- 同期买入持有收益") < md.index(line)
+    for key in ("mean_net_return_pct", "mean_benchmark_hold_return_pct", "mean_excess_vs_benchmark_pct"):
+        assert f"{ma[key]:.3f}%" in line, key
+    assert f"{ma['benchmark_up']['trades']} 笔" in line and f"{ma['benchmark_down_or_flat']['trades']} 笔" in line
+    assert "不是相对随机选股" in line
+    # 不可用时写一行原因，不给数字
+    off = copy.deepcopy(backtest)
+    off["backtest"]["market_attribution"] = {**ma, "available": False, "reason_cn": "没有大盘基准行情，无法拆出大盘贡献"}
+    md_off = render_report_markdown(load_v6(report)[0], off)
+    assert "- 大盘贡献拆解：未计算（没有大盘基准行情，无法拆出大盘贡献）。" in md_off
+
+
+@pytest.mark.slow
+def test_report_md_backtest_without_market_attribution_still_renders(cn_pipeline) -> None:
+    """旧版本生成的 backtest.json 没有 market_attribution：重渲染不报错，也不出现归因一行。"""
+    report, _, backtest = cn_pipeline
+    old = copy.deepcopy(backtest)
+    old["backtest"].pop("market_attribution")
+    md = render_report_markdown(load_v6(report)[0], old)
+    assert "## 7. 历史计划回放回测" in md and "大盘贡献拆解" not in md

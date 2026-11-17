@@ -10,6 +10,12 @@
 - 报告第 4 节与第 5 节的第一行各加一句固定说明（"做多计划的盈亏主要取决于持有期大盘涨跌…""以下只描述价格结构和条件路径…"）。原因：开发区回放显示做多计划的单笔盈亏跟随持有期大盘，而正常波动范围在各大盘状态下的覆盖率都接近名义值（见 `docs/superpowers/specs/2026-11-15-regime-attribution-and-market-layer-design.md` 的阶段 0 结果）。
 - `result.json`、评级标签、看板与 PNG 不变。
 
+### 新增（回测拆出大盘贡献）
+
+- **契约变更（`backtest.json`，不在 schema 约束内）**：新增 `backtest.market_attribution`，按"全部做多信号"的成交给出单笔平均净收益、同一批持有期内基准的平均收益、相对基准的超额及 95% 区间，以及持有期大盘上涨与不涨两组的笔数和平均净收益。没有基准、标的自身即基准或零成交时 `available = false` 并给出 `reason_cn`。已有字段不变。
+- `report.md` 第 7 节在"同期买入持有收益"之后加"大盘贡献拆解"一行；`SKILL.md` 回复契约、字段字典与解读指南同步。
+- 不做同日随机对照（单标的没有股票池）与回归（单只股票成交笔数太少）。
+
 ### 新增（大盘结构与周期层）
 
 - **契约变更（新增实验字段，`x-stability: experimental`）**：`market_context.structure`（基准指数的结构摘要）、`market_context.cycle`（周线阶段四分类、已持续周数、月线相对 10 月均线的位置）、`market_context.alignment`（个股与大盘的联动程度、相对强弱线、拐点先后、新低新高对照）与 `quotable_prices.benchmark`（基准可引用价位）。
