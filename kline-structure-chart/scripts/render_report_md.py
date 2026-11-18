@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from market_rules import price_decimals
 
@@ -95,6 +95,46 @@ def _market_layer_lines(ctx: dict[str, Any], bench_decimals: int, subject: str =
                 lines.append(f"- {c['label_cn']}{tag}：对照的大盘拐点日为 {c['benchmark_days'][0]} 与 {c['benchmark_days'][1]}。")
         lines += ["- 以上只是对已发生走势的描述，不构成交易信号，也不改变风控结论。", ""]
     return lines
+
+
+def _tested_zone_lines(tz: dict[str, Any] | None, price: Callable[[Any], str]) -> list[str]:
+    """第 5 节"多次测试价区"小节：主级别在前，再列平台、头肩与"与上一交易日相比"的变化。数字全部取自 tested_zones。"""
+    if not tz:
+        return []
+    lines = ["**多次测试价区**（触点数只是计数，不代表支撑或压力更强）", ""]
+    first_day = {z["zone_id"]: z["touches"][0]["day"] for s in tz["scales"] for z in s["zones"] if "touches" in z}
+    names = {z["zone_id"]: z["name_cn"].split("（")[0] for s in tz["scales"] for z in s["zones"] if "name_cn" in z}
+    for sc in tz["scales"]:
+        label = f"{sc['scale_cn']}（ZigZag {sc['zigzag_threshold_pct']:.2f}%）"
+        if sc["skipped_reason"]:
+            lines.append(f"- {sc['scale_cn']}：{sc['skipped_reason']}。")
+            continue
+        if not sc["zones"]:
+            lines.append(f"- {label}：近 120 日没有满足条件的价区。")
+        for z in sc["zones"]:
+            if "same_as_zone_id" in z:
+                ref = z["same_as_zone_id"]
+                lines.append(f"- {label}：与主级别{names[ref]}（首触点 {first_day[ref]}）相同。")
+                continue
+            text = z.get("summary_cn") or (
+                f"{z['name_cn']}（{z['state_cn']}）：价区 {price(z['zone_low_price'])}~{price(z['zone_high_price'])}，"
+                f"失效价 {price(z['break_price'])}。"
+            )
+            lines.append(f"- {label}：{text}")
+            if z.get("intraday_note"):
+                lines.append(f"  - {z['intraday_note']}")
+        if sc["platform"]:
+            lines.append(f"- {label}：{sc['platform']['summary_cn']}")
+        for hs in sc["head_shoulders"]:
+            lines.append(f"- {label}：{hs['summary_cn']}")
+    if tz["prev_bar_day"]:
+        scale_cn = {s["scale"]: s["scale_cn"] for s in tz["scales"]}
+        if tz["changes"]:
+            lines.append(f"- 与上一交易日（{tz['prev_bar_day']}）相比：")
+            lines += [f"  - {scale_cn[c['scale']]}：{c['detail_cn']}" for c in tz["changes"]]
+        else:
+            lines.append("- 与上一交易日相比无变化。")
+    return lines + [""]
 
 
 def render_report_markdown(
@@ -396,6 +436,7 @@ def render_report_markdown(
         f"- 下方支撑（由近到远）：{'；'.join(sup) if sup else '无'}",
         "",
     ]
+    lines += _tested_zone_lines(st.get("tested_zones"), price)
 
     # 6. 形态与信号证据
     lines += ["## 6. 形态与信号证据（公式可复核）", ""]
@@ -412,6 +453,8 @@ def render_report_markdown(
             f"- {p['name_cn']}（{DIRECTION_CN.get(p['direction'], p['direction'])}，{p.get('confirmed_at') or p.get('observed_at')}）"
         ]
         formula_lines.append(f"- {p['name_cn']}：`{p['formula_verified']}`")
+    if st.get("tested_zones") and any(p.get("category") != "candlestick" and ("双底" in p["name_cn"] or "双顶" in p["name_cn"]) for p in patterns[:6]):
+        lines += ["- 波段双底 / 双顶只比较最近两个已确认低点（高点）；同一区域的全部触点见第 5 节多次测试价区。"]
     for s in verdict.get("strategy_signals") or []:
         if s.get("direction") != "NEUTRAL":
             lines += [f"- 策略 {s['name_cn']} → {s['state']}"]

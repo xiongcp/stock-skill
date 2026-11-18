@@ -430,3 +430,78 @@ def test_causal_replay_audit_covers_tested_zones() -> None:
     audit = run_causal_replay_audit(load_recorded(SH), check_steps=4)
     assert "tested_zones" in audit["modules_audited"]
     assert audit["passed"], audit["mismatches"]
+
+
+# ---------------------------------------------------------------------------
+# 任务 6：报告第 5 节与回复校验
+# ---------------------------------------------------------------------------
+
+_LINT_STUB = {
+    "quality": {"status": "OK"}, "verdict": {"risk_veto": False}, "plan": {}, "scenarios": {}, "structure": {},
+    "meta": {"asset_type": "equity"}, "market_context": {},
+}
+
+
+def _section(tz: dict | None) -> str:
+    from render_report_md import _tested_zone_lines
+
+    return "\n".join(_tested_zone_lines(tz, lambda v: "—" if v is None else f"{float(v):.2f}"))
+
+
+def _without_minor_summaries(tz: dict) -> dict:
+    """与 contract_v6 裁剪第四步相同：去掉次级别价区的 summary_cn。"""
+    return {**tz, "scales": [
+        {**s, "zones": [{k: v for k, v in z.items() if k != "summary_cn"} for z in s["zones"]]} if s["scale"] == "MINOR" else s
+        for s in tz["scales"]
+    ]}
+
+
+def test_report_section_lists_zones_platform_and_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    tz = _tz(CASE, "2026-11-17")
+    md = _section(tz)
+    assert md.startswith("**多次测试价区**（触点数只是计数，不代表支撑或压力更强）")
+    assert f"- 主级别（ZigZag {_scale(tz, 'MAJOR')['zigzag_threshold_pct']:.2f}%）：{_zone(tz, 'MAJOR', 'MAJOR-' + SUP)['summary_cn']}" in md
+    assert _scale(tz, "MAJOR")["platform"]["summary_cn"] in md
+    assert "- 与上一交易日（2026-11-16）相比：" in md
+    assert "  - 主级别：三重底的未确认低点更新为 2026-11-17 3565.59" in md
+    assert "与主级别双底（首触点 2026-10-23）相同。" in _section(_tz(CASE, "2026-11-13"))
+    assert _section(None) == ""
+    monkeypatch.setattr(__import__("tested_zones"), "minor_threshold", lambda atr_frac, major_thr: None)
+    assert "- 次级别：次级别阈值" in _section(_tz(CASE, "2026-11-17"))
+
+
+def test_report_section_quotes_only_whitelisted_prices_across_history() -> None:
+    """逐截面生成第 5 节的价区小节（含盘中标注、裁掉次级别摘要后的写法），每个价格都必须能在可引用价位里找到。"""
+    from lint_response import lint_agent_response
+    from price_text import collect_price_whitelist
+    from tested_zones import compute_tested_zones
+
+    checked = 0
+    for rel in (SH, MOUTAI, BYD, "yahoo_daily/NVDA.json", "yahoo_daily/0700.HK.json"):
+        bars = _bars(rel)
+        for cut in range(450, len(bars) + 1, 15):
+            sub = bars[:cut]
+            live = bars[cut] if cut < len(bars) and cut % 2 == 0 else None
+            tz = compute_tested_zones(sub, live)
+            for variant in (tz, _without_minor_summaries(tz)):
+                wl = collect_price_whitelist({"structure": {"tested_zones": variant}}, 2, sub)
+                report = {**_LINT_STUB, "quotable_prices": {"prices": wl["prices"], "tolerance": wl["tolerance"]}}
+                assert lint_agent_response(_section(variant) + "\n不构成投资建议", report) == [], (rel, sub[-1]["day"])
+            checked += 1
+    assert checked > 100
+
+
+def test_lint_blocks_touch_count_strength_claims_but_allows_negations() -> None:
+    from lint_response import lint_agent_response
+
+    report = {**_LINT_STUB, "quotable_prices": {"prices": [], "tolerance": 0.01}}
+
+    def flagged(text: str) -> bool:
+        return any("测试次数只是计数" in e for e in lint_agent_response(text + "不构成投资建议。", report))
+
+    for text in ("测试次数越多，支撑越强。", "这个平台越测越牢。", "三重底更可靠。", "4 次测试的支撑区必破。",
+                 "三重底的成功率很高。", "多次测试后更坚固。", "双顶易破。"):
+        assert flagged(text), text
+    for text in ("测试次数只是计数，不代表支撑更强。", "三重底（第 3 次测试进行中，未确认）。", "不能说三重底更可靠。",
+                 "多次测试价区先说主级别。", "4 次测试的支撑区（价区守住、未过颈线）。", "波段双底结构（看多，2026-10-09）。"):
+        assert not flagged(text), text

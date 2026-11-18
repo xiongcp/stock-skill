@@ -44,6 +44,14 @@ _UNVALIDATED_PROB_PHRASES = (
     ),
     re.compile(r"[一二三四五六七八九]成(?:把握|胜算|概率|机会|以上)?(?=[^\d]|$)"),
 )
+# 多次测试价区：测试次数只是计数，不得说成支撑压力更强、更可靠、更容易破，也不得给"几重底"配概率
+_ZONE_NAME = r"(?:多次测试|\d+\s*次测试|[二三四五六七八九两]次测试|[三四五多]重[底顶]|双[底顶])"
+_TOUCH_COUNT_PHRASES = (
+    re.compile(r"(?:测试|触及|触碰|回踩|探底|冲高)次数越多"),
+    re.compile(r"越测越(?:强|弱|稳|牢|坚固|可靠|容易|难)"),
+    re.compile(_ZONE_NAME + r"[^。；\n]{0,8}?(?:更可靠|更坚固|更牢固|更强|更有效|必破|易破|必守|守得住|撑得住)"),
+    re.compile(_ZONE_NAME + r"[^。；\n]{0,6}?(?:概率|成功率|胜率|准确率)"),
+)
 _NEGATION_RE = re.compile(r"不是|不叫|不代表|并非|不得|不能|严禁|禁止|不构成|不等于|不要|不应|不宜|而非|不含|没有")
 # 唯一允许的概率类数字：回测成交胜率，同一句必须出现「回测」并给出 95% 区间
 _BACKTEST_SENTENCE_RE = re.compile(r"回测")
@@ -188,6 +196,12 @@ def lint_agent_response(
             before_hit = text[sent_start : hit.start()]
             if not _NEGATION_RE.search(hit.group(0)) and not _NEGATION_RE.search(before_hit):
                 errors.append(f"检测到违规表述: {hit.group(0)!r}（禁止将规则分称为胜率/概率/置信度，禁止将成交分布称为真实持仓筹码）")
+                break
+    for pat in _TOUCH_COUNT_PHRASES:
+        for hit in pat.finditer(text):
+            sent_start = max((sm.end() for sm in _SENTENCE_SPLIT_RE.finditer(text, 0, hit.start())), default=0)
+            if not _NEGATION_RE.search(text[sent_start : hit.start()]):
+                errors.append(f"检测到违规表述: {hit.group(0)!r}（测试次数只是计数，不得说成支撑压力更强、更可靠或更容易破）")
                 break
     for hit in dict.fromkeys(_unvalidated_probability_hits(text)):
         errors.append(
