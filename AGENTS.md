@@ -108,6 +108,7 @@ kline-structure-chart/
     ├── test_report_and_metadata.py   # 代码校验、行情快照元数据（简称/ST/每手股数）与 Markdown 报告
     ├── test_tools.py                 # 名称转代码（录制回放）、doctor 离线自检、插件市场清单与 install.sh 语法
     ├── test_market_structure.py      # 大盘结构与周期层：阶段规则、对齐关系、决策不变、契约与呈现（录制真实行情）
+    ├── test_tested_zones.py          # 多次测试价区：固定样例、性质与边界、决策不变、报告与看板呈现（录制真实行情）
     ├── test_v6_contract.py           # v6 输出契约：去预测化、schema、体积预算与命令行信封
     ├── check_days_invariance.py      # 跨展示窗口 (60~500日) 结构层不变性回归校验
     ├── record_fixtures.py            # 联网录制真实行情 fixture（手动执行）
@@ -176,7 +177,7 @@ uv run --directory kline-structure-chart python tests/check_days_invariance.py -
 ### 3.4 重新录制真实行情 fixture（需联网，按需手动执行）
 ```bash
 uv run --directory kline-structure-chart python tests/record_fixtures.py
-# 只补录某一类（sina / yahoo / tencent / events / quotes / search），其余文件与 MANIFEST 条目保持不变
+# 只补录某一类（sina / yahoo / tencent / events / quotes / search / cases），其余文件与 MANIFEST 条目保持不变
 uv run --directory kline-structure-chart python tests/record_fixtures.py --only quotes
 ```
 
