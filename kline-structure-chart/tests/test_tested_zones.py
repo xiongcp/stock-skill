@@ -505,3 +505,44 @@ def test_lint_blocks_touch_count_strength_claims_but_allows_negations() -> None:
     for text in ("测试次数只是计数，不代表支撑更强。", "三重底（第 3 次测试进行中，未确认）。", "不能说三重底更可靠。",
                  "多次测试价区先说主级别。", "4 次测试的支撑区（价区守住、未过颈线）。", "波段双底结构（看多，2026-10-09）。"):
         assert not flagged(text), text
+
+
+# ---------------------------------------------------------------------------
+# 任务 7：PNG 与看板
+# ---------------------------------------------------------------------------
+
+
+def test_png_and_dashboard_carry_tested_zones(replay_recorded, tmp_path) -> None:
+    import re
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from analyze_and_forecast import run_pipeline
+    from conftest import load_v6
+    from render_html import render_html
+
+    req = {"symbol": "000001.SH", "market": "CN", "asset_type": "index", "display_bars": 120, "structure_bars": 120, "horizon_bars": 15}
+    rep = run_pipeline(req, output_dir=tmp_path)
+    result, chart = load_v6(rep)
+    tz = result["structure"]["tested_zones"]
+    assert any("touches" in z for z in _scale(tz, "MAJOR")["zones"]), "主级别应有价区，PNG 才有东西可画"
+    assert Path(rep["rendered_paths"]["preview_png"]).stat().st_size > 0
+    html_text = render_html(result, chart, tmp_path / "dash.html").read_text(encoding="utf-8")
+    assert 'data-layer="zones"' in html_text and 'id="zoneScaleBtn"' in html_text and "lk === 'zones'" in html_text
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("本机没有 node，无法执行看板脚本")
+    # 与 test_v6_html_adapter_joins_scenario_paths_by_id 同样截取看板的数据适配段，确认价区原样交给画布
+    payload = re.search(r'<script id="report-data" type="application/json">(.*?)</script>', html_text, re.S).group(1)
+    start = html_text.index("const DATA = JSON.parse")
+    end = html_text.index("\n  };", html_text.index("rule_scenarios:", start)) + len("\n  };")
+    script = (
+        f"const document = {{ getElementById: () => ({{ textContent: {json.dumps(payload)} }}) }};\n"
+        + html_text[start:end]
+        + "\nconsole.log(JSON.stringify(REPORT.tested_zones));\n"
+    )
+    script_file = tmp_path / "zones_check.js"
+    script_file.write_text(script, encoding="utf-8")
+    out = subprocess.run([node, str(script_file)], capture_output=True, text=True, timeout=30, check=True).stdout
+    assert json.loads(out) == tz
