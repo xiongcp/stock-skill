@@ -3,10 +3,10 @@
 
 用法：
   uv run python tests/record_fixtures.py                    # 全量重录，写入 tests/fixtures/recorded/
-  uv run python tests/record_fixtures.py --only quotes      # 只录指定分组（sina / yahoo / tencent / events / quotes / search，可逗号分隔）
+  uv run python tests/record_fixtures.py --only quotes      # 只录指定分组（sina / yahoo / tencent / events / quotes / search / cases，可逗号分隔）
 
 录制内容：新浪不复权日线、Yahoo 日线、腾讯指数日线、Yahoo 除权除息事件、腾讯行情快照中的证券简称与港股每手股数，
-以及腾讯证券搜索（名称转代码）的原始响应。
+以及腾讯证券搜索（名称转代码）的原始响应；cases 组录制截止到固定交易日的新浪日线，供多次测试价区的固定样例使用。
 只保存已收盘K线（按交易所时区与收盘时间判定），并在 MANIFEST.json 记录每个文件的录制时间、来源与 sha256。
 """
 from __future__ import annotations
@@ -68,7 +68,9 @@ SEARCH = {
     "brk": "brk",
     "not_found": "zzqqxxnotexist",
 }
-GROUPS = ("sina", "yahoo", "tencent", "events", "quotes", "search")
+# 固定截止日的新浪日线（多次测试价区的固定样例）：文件名 -> (代码, 市场, 截止日)。截止日之后的K线不写入（以后重录时起始日会随 datalen 后移，截止日附近的K线不变）
+CASES = {"sh000001_2026-11-17": ("sh000001", "CN", "2026-11-17")}
+GROUPS = ("sina", "yahoo", "tencent", "events", "quotes", "search", "cases")
 
 
 def _completed(bars: list[dict], market: str, now: datetime) -> list[dict]:
@@ -137,6 +139,13 @@ def main() -> None:
             payload = {"query": query, "raw": fetch_tencent_search_raw(query)}
             _write(f"tencent_search/{fname}.json", payload, manifest, f"TENCENT smartbox.gtimg.cn/s3 q={query}（原始响应）", now)
             written.append(f"tencent_search/{fname}.json")
+    if "cases" in groups:
+        for fname, (code, market, last_day) in CASES.items():
+            bars = [b for b in _completed(fetch_sina_daily_bars(code, datalen=1023), market, now) if b["day"] <= last_day]
+            if not bars or bars[-1]["day"] != last_day:
+                raise SystemExit(f"{code}: 数据源里没有 {last_day} 的已收盘K线，无法录制 {fname}")
+            _write(f"sina_daily_cases/{fname}.json", bars, manifest, f"SINA getKLineData symbol={code} scale=240 (不复权)，截至 {last_day}", now)
+            written.append(f"sina_daily_cases/{fname}.json")
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: (manifest["files"][k]["rows"], manifest["files"][k]["last_day"]) for k in written}, ensure_ascii=False))
 

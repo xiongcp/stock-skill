@@ -459,6 +459,15 @@
       "first_day": null,
       "last_day": null,
       "sha256": "71a50d115862ee63c4d7172b6e8973fa46594a72e9080a6bede4677245b547b9"
+    },
+    "sina_daily_cases/sh000001_2026-11-17.json": {
+      "kind": "rows",
+      "source": "SINA getKLineData symbol=sh000001 scale=240 (不复权)，截至 2026-11-17",
+      "recorded_at_utc": "2026-11-18T02:14:53+00:00",
+      "rows": 1023,
+      "first_day": "2022-08-25",
+      "last_day": "2026-11-17",
+      "sha256": "0feec50897f15449d3d7b4fd58eedce50ee16f41cbac27f02f98dd9fa248f97c"
     }
   }
 }

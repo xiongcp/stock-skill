@@ -204,8 +204,9 @@ def test_versions_are_in_sync() -> None:
 
 
 # 已核实未实现或已移除的能力，任何文档、注释与界面文案都不得再宣称
+# "头肩"已于多次测试价区（scripts/tested_zones.py，规格 2026-11-17 第 4 节）实现并由 test_tested_zones.py 的 G5/G6 守护，不再列入
 OVERCLAIMS = (
-    "Lo, Mamaysky", "头肩", "MACD 背离", "MACD底背离", "RSI/MACD", "CHoCH 特征", "BEARISH_CHoCH",
+    "Lo, Mamaysky", "MACD 背离", "MACD底背离", "RSI/MACD", "CHoCH 特征", "BEARISH_CHoCH",
     "正交特征", "量价正交", "筹码峰", "公式证据。", "KERNEL_DOUBLE", "WLS_", "confidence_score",
     "Walk-Forward", "Meta-Labeling 过滤", "隔夜跳空波动率修正", "动态修正保形", "defaults.json",
 )

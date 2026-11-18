@@ -94,7 +94,7 @@ SSAA = 2                       # 2× 超采样抗锯齿倍率（3840×2320 渲�
 
 def datalen_for(days: int) -> int:
     """拉取日K根数：结构层固定 HISTORY_BARS 根；展示 N 根时多拉 250 根，让主图最左侧也有 MA250。"""
-    return max(HISTORY_BARS, days + 250)
+    return max(HISTORY_BARS + 1, days + 250)
 
 
 def fetch(url: str, encoding: str = "utf-8") -> str:
@@ -936,6 +936,19 @@ def render(
                 dashed_hline(draw, left, div_x, y_fib, (*SCEN, 140))
                 right_gutter_tags.append((y_fib, f"Fib {flvl['ratio']:.3f}{fibs.get('kind', '')} {fp(fp_val)}", SCEN))
 
+    # ---------------- 绘制多次测试价区的横带与颈线（只画主级别已筛选的价区；次级别只在 HTML 中切换查看） ----------------
+    tz_major = next((s["zones"] for s in (layer.get("tested_zones") or {}).get("scales", []) if s["scale"] == "MAJOR"), [])
+    tz_major = [z for z in tz_major if "touches" in z]  # 与主级别相同的次级别引用不会出现在主级别，这里只是防御
+    view_pos = {b["day"]: i for i, b in enumerate(view)}
+    for z in tz_major:
+        zc = UP if z["side"] == "SUPPORT" else DOWN
+        x0 = x_of(view_pos.get(z["touches"][0]["day"], 0))
+        y_hi = yp(min(max(z["zone_high_price"], pmin), pmax))
+        y_lo = yp(min(max(z["zone_low_price"], pmin), pmax))
+        draw.rectangle((x0, min(y_hi, y_lo), div_x, max(y_hi, y_lo) + 1), fill=(*zc, 34))
+        if pmin <= z["neckline_price"] <= pmax:
+            dashed_hline(draw, x0, div_x, yp(z["neckline_price"]), (*zc, 150))
+
     # ---------------- 绘制真实 K 线与盘中 K 线 ----------------
     kline_obstacles: list[tuple[int, int, int, int]] = []
     for i, bar in enumerate(plot):
@@ -952,6 +965,19 @@ def render(
         half = max(4.0, step * 0.42) if not bar["complete"] else bar_half
         draw.rectangle((x - half, body_top, x + half, body_bot), fill=color)
         kline_obstacles.append((int(x - half - 2), int(y_high - 4), int(x + half + 2), int(y_low + 4)))
+
+    # ---------------- 多次测试价区的触点编号（画在K线之上；未确认触点空心；标签在拐点徽标之后画，同样避让） ----------------
+    for z in tz_major:
+        zc = UP if z["side"] == "SUPPORT" else DOWN
+        offset = z["touch_count"] - len(z["touches"])  # 触点被截断时，第 2 个起的编号接着真实序号
+        for k, t in enumerate(z["touches"]):
+            if t["day"] not in view_pos or not pmin <= t["price"] <= pmax:
+                continue
+            tx, ty = x_of(view_pos[t["day"]]), yp(t["price"])
+            draw.ellipse((tx - 7, ty - 7, tx + 7, ty + 7), fill=(*zc, 235) if t["confirmed"] else PANEL_BG, outline=zc, width=1.6)
+            num = str(1 if k == 0 else k + 1 + offset)
+            nw, nh = text_size(draw, num, f_tiny_sm)
+            draw.text((tx - nw / 2, ty - nh / 2 - 1), num, font=f_tiny_sm, fill=PANEL_BG if t["confirmed"] else zc)
 
     # ---------------- 绘制均线（在K线之上叠绘带暗晕的平滑曲线，清晰不糊） ----------------
     for n, color in MA.items():
@@ -1201,6 +1227,28 @@ def render(
             f_tiny,
             m["color"],
             m["side"],
+            left,
+            div_x - 6,
+            top + 36,
+            main_bottom - 6,
+            occupied_badges,
+            obstacles=kline_obstacles,
+            peer_anchors=peer_anchors,
+        )
+    # 多次测试价区的标签（名称 · 状态）：锚在首个触点，与拐点徽标同样避让K线与已画徽标
+    for z in tz_major:
+        t0 = z["touches"][0]
+        if t0["day"] not in view_pos or not pmin <= t0["price"] <= pmax:
+            continue
+        support = z["side"] == "SUPPORT"
+        draw_callout_badge(
+            draw,
+            x_of(view_pos[t0["day"]]),
+            yp(t0["price"]),
+            f"{z['name_cn'].split('（')[0]} · {z['state_cn']}",
+            f_tiny,
+            UP if support else DOWN,
+            "below" if support else "above",
             left,
             div_x - 6,
             top + 36,
@@ -1520,6 +1568,7 @@ def render(
         "recent_gaps": gaps,
         "scenario": scenario,
         "projections": projections,
+        "tested_zones": layer["tested_zones"],
         "intraday": None
         if not active_intra
         else {

@@ -15,7 +15,7 @@
 3. 每个字段标注稳定级别：`stable` 按第 1 条承诺；`experimental` 可在次版本中变动，变动写进 `CHANGELOG.md` 对应版本的"契约变更"小节。
 4. `*_chart_data.json` 不是稳定接口，只供本技能的 PNG / HTML 渲染使用，字段可能在任何版本变化；回答用户时不要引用。
 5. 契约边界由测试守护：新增或移除契约字段时，必须同时更新 `assets/analysis.schema.json` 的 `x-stability`、`CHANGELOG.md` 的"契约变更"小节，以及 `tests/fixtures/contract/result_v6_keypaths_{600519_plain,600519_equity_backtest,00700_hk,nvda_us,000001_index}.json` 各配置的全键路径快照（`tests/test_v6_contract.py::test_v6_result_keypaths_match_snapshot` 按配置参数化：A 股基线、带账户净值与回测、港股、美股、指数）；`backtest.json` 的键结构由 `tests/fixtures/contract/backtest_v6_keypaths_600519.json` 守护（以动作代码、否决代码为键的统计表折叠为 `{*}`）。
-6. `result.json` 落盘（`indent=2`）不超过 80 KB。
+6. `result.json` 落盘（`indent=2`）不超过 80 KB；超出时的裁剪顺序见 `market_context` 一节的"体积预算"。
 
 ## 顶层
 
@@ -109,12 +109,14 @@
 2. 标的自身即基准或指数（没有外部基准）：`structure` 与 `alignment` 为 `null`，`cycle` 按标的自身计算并带 `basis = "SELF"`，此时 `cycle` 里的价位属于标的，收入 `quotable_prices.prices`。
 3. 基准已收盘K线少于结构窗口（`STRUCT_DAYS`）：`structure` 与 `alignment` 为 `null`，`cycle` 仍按基准给出。
 
-体积预算：五个录制配置下三个新字段（含基准价位清单）完整输出，`result.json` 落盘为 59005~63636 字节，在 80 KB（81920 字节）预算内；联网行情的K线与价位更多，体积会更大（仓库内 `300308.SZ` 示例为 71773 字节）。运行期在投影末尾（`contract_v6.build_result`）按落盘的序列化方式计算 UTF-8 字节数，超出预算时只裁剪 `market_context.structure`，按下列顺序做到回到预算内为止：
+体积预算：运行期在投影末尾（`contract_v6.build_result`）按落盘的序列化方式计算 UTF-8 字节数，超出 80 KB（81920 字节）时按下列顺序裁剪，每做一步重新计算一次，回到预算内为止。加入 `structure.tested_zones` 后，录制行情截至 2026-10-15 的配置里只有腾讯（00700.HK）超出预算，做完前两步为 81912 字节；按历史截面估算，约 5% 的运行会触发裁剪。
 
-1. `wave_counts` 只保留主计数，去掉备选计数。
-2. `key_levels` 的 `supports` 与 `resistances` 各只保留离基准收盘最近的 5 个（`BENCH_KEY_LEVELS_KEEP`）。
+1. 基准 `market_context.structure.wave_counts` 只保留主计数，去掉备选计数。
+2. 基准 `market_context.structure.key_levels` 的 `supports` 与 `resistances` 各只保留离基准收盘最近的 5 个（`BENCH_KEY_LEVELS_KEEP`）。
+3. 去掉 `structure.tested_zones` 次级别已破位（`BROKEN`）的价区，连同 `changes` 中指向它们的条目。
+4. 去掉 `structure.tested_zones` 次级别价区的 `summary_cn`。
 
-裁剪发生时：`quality.notes` 追加一句说明裁掉了什么；`quotable_prices.benchmark.prices` 按裁剪后的摘要重新收集，被裁掉的基准价位不再可引用；标的自身的字段、`market_context.cycle` 与 `market_context.alignment` 不裁剪，评级、否决、计划价位与回测不受影响；PNG 与 `chart_data.json` 不变。两步做完仍超出预算时不再裁剪其他字段，照常输出，并在同一条备注里写明"裁剪后仍超出预算"。未超预算时输出与没有这一步时逐字节相同。Windows 上落盘的换行符是 CRLF，文件会比这里计算的字节数略大。
+裁剪发生时：`quality.notes` 追加一句说明依次裁掉了什么；第 1、2 步之后按裁剪后的摘要重新收集 `quotable_prices.benchmark.prices`，第 3、4 步之后按裁剪后的内容重新收集 `quotable_prices.prices`，被裁掉的价位不再可引用；主级别价区、标的自身的其余字段、`market_context.cycle` 与 `market_context.alignment` 不裁剪，评级、否决、计划价位与回测不受影响；PNG 与 `chart_data.json` 不变。四步做完仍超出预算时不再裁剪其他字段，照常输出，并在同一条备注里写明"裁剪后仍超出预算"。未超预算时输出与没有这一步时逐字节相同。Windows 上落盘的换行符是 CRLF，文件会比这里计算的字节数略大。
 
 子字段内部也可能为 `null`（样本不足时不估算、不补数）：周线字段在已完成周少于 35 个时为 `null` 并给出 `cycle.reason`；月线字段在已结束月少于 11 个时为 `null`；联动程度在共同交易日少于 60 个时为 `null`；对照项在基准已确认拐点不足两个时为 `null`。
 
@@ -172,6 +174,28 @@
 | `structure.patterns` | 识别到的蜡烛、波段与背离形态：`pattern`、`name_cn`、`category`、`direction`、`observed_at`（形态日）、`confirmed_at`（确认日）、`volume_confirmed`、`formula_verified`（代入数值的判定公式） | 对象数组 | 否（可为空数组） | stable | 只引用 `name_cn` 与 `formula_verified` |
 | `structure.smc` | 算法结构区：`fvgs[]`（公允价值缺口，`status` 为 `ACTIVE` / `MITIGATED` 等）、`order_blocks[]`、`structure_breaks[]`、`note` | 价格区间 | 否（子数组可为空） | experimental | "算法结构区"，不说成机构真实挂单 |
 | `structure.volume_profile` | Volume Profile 近似成交分布的 `poc_price`（成交最密集价位）、`vah_price` / `val_price`（70% 价值区上下沿），另有 `value_area_coverage`、`lookback_bars`、`approximation_method`、`note`；24 个价格桶明细在 `chart_data.json` | 价格 | 数据不足时三个价位可空 | stable | "成交密集区"，**不是真实持仓筹码** |
+| `structure.tested_zones` | 多次测试价区：`atr_abs`、`atr_basis`、`prev_bar_day`；`scales[]` 依次为主级别 `MAJOR` 与次级别 `MINOR`，各含 `zigzag_threshold_pct`、`skipped_reason`、`zones[]`、`head_shoulders[]`、`platform`；`changes[]` 为与上一根已收盘K线相比的变化。明细见下表 | 对象 | 结构层不计算时为 `null`；级别跳过时 `skipped_reason` 非空、`zones` 为空 | experimental | 先说主级别再说次级别，按 `summary_cn` 原文转述；测试次数只是计数 |
+
+### `structure.tested_zones`（多次测试价区）
+
+公式与常量见 `references/math-patterns.md` 第 9 节。只做描述，规则分、评级、否决条件与计划价位不读取它；回测逐日回放与历史回放快照不计算它。
+
+| 字段 | 含义 | 取值 / 单位 | 稳定级别 | 对外怎么说 |
+| --- | --- | --- | --- | --- |
+| `zones[].zone_id` | `{级别}-{SUPPORT\|RESISTANCE}-{首触点日期}`；次级别与主级别触点完全相同且没有未确认触点时，该项只有 `zone_id` 与 `same_as_zone_id` | 字符串 | experimental | 说"与主级别某价区相同" |
+| `zones[].side` / `side_cn` / `name_cn` | 支撑或压力；名称为双底 / 三重底 / N 次测试的支撑区（压力侧镜像），有未确认触点时带"（第 N 次测试进行中，未确认）" | 枚举 / 字符串 | experimental | 原文转述名称 |
+| `zones[].touch_count` / `confirmed_touch_count` | 触点数（含未确认）与已确认触点数 | 整数 | experimental | 只是计数，不代表支撑或压力更强 |
+| `zones[].touches[]` / `touches_truncated` | `{day, price, confirmed, confirmed_at_day}`，最多 8 个；超过时列第 1 个与最后 7 个 | 对象数组 / 布尔 | experimental | 未确认触点必须说"未确认" |
+| `zones[].zone_low_price` / `zone_high_price` / `neckline_price` | 已确认触点的最低价、最高价，首末触点之间的反向极值（颈线） | 价格 | experimental | — |
+| `zones[].break_price` / `confirm_price` / `measured_move_price` | 失效价（已确认边缘外 0.5 ATR）、未确认触点的确认价（没有时为 `null`）、测量位（颈线 ± 高度） | 价格 | experimental | 失效价引用 `break_price`；测量位不是目标价 |
+| `zones[].height_abs` / `height_atr` / `first_last_atr` | 形态高度及其 ATR 倍数、末触点减首触点（ATR 倍数） | 价格差 / 倍数 | experimental | 不是价位，不当价格引用 |
+| `zones[].sequence` / `sequence_cn` | `RISING` 逐次抬高 / `FALLING` 逐次降低 / `MIXED` | 枚举 | experimental | — |
+| `zones[].state` / `state_cn` / `state_since_day` | `TESTING` / `HOLDING` / `NECKLINE_CROSSED` / `FALSE_BREAK` / `BROKEN`（破位后 20 根内输出）；`TESTING` 与 `HOLDING` 的 `state_since_day` 为 `null` | 枚举 / 日期 | experimental | 按 `state_cn` 转述 |
+| `zones[].selected_because[]` | `NEAREST_ACTIVE`（离最新收盘最近的未破位价区）/ `RECENT`（最后触点或状态变化在最近 20 根内） | 枚举数组 | experimental | — |
+| `zones[].intraday_note` / `summary_cn` | 盘中标注（未收盘，不作确认；没有时为 `null`）与按状态生成的一句摘要；体积超出预算时次级别的 `summary_cn` 可能被裁掉 | 字符串 | experimental | 原文转述 |
+| `head_shoulders[]` | 头肩底 / 头肩顶：`name_cn`、`left_shoulder` / `head` / `right_shoulder`（`{day, price}`）、`right_shoulder_confirmed`、`neckline_points`、`neckline_today_price`、`height_abs`、`measured_move_price`、`state`（`FORMING` / `NECKLINE_CROSSED` / `FAILED`）、`state_cn`、`summary_cn`；每级别每侧最多一个 | 对象数组 | experimental | 右肩未确认时必须说"未确认" |
+| `platform` | 同级别一个支撑价区与一个压力价区组成的平台：`lower_price` / `upper_price`、`lower_zone_id` / `upper_zone_id`、`lower_touch_count` / `upper_touch_count`、`gap_atr`、`since_day`、`summary_cn`；不成立时为 `null` | 对象 | experimental | 组合描述，不单独判定状态 |
+| `changes[]` | `scale`、`object_type`、`object_id`、`change`（`ZONE_NEW` / `TOUCH_ADDED` / `TOUCH_UPDATED` / `TOUCH_CONFIRMED` / `TOUCH_LEFT_ZONE` / `STATE_CHANGED` / `ZONE_DISSOLVED` / `HS_NEW` / `HS_STATE_CHANGED` / `HS_ENDED` / `PLATFORM_NEW` / `PLATFORM_CHANGED` / `PLATFORM_ENDED`）、`change_cn`、`from` / `to`、`reason`、`threshold_changed`、`detail_cn`；最多 12 条，主级别优先 | 对象数组 | experimental | 按 `detail_cn` 转述；`threshold_changed = true` 时说明是阈值变化后的重算，不说成结构变化 |
 
 ## `indicators`
 

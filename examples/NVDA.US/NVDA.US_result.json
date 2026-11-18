@@ -1556,6 +1556,432 @@
       "lookback_bars": 120,
       "approximation_method": "ohlcv_range_partition_v1",
       "note": "由 OHLCV 价格区间近似计算的成交分布，不等于真实持仓筹码成本。"
+    },
+    "tested_zones": {
+      "atr_abs": 5.316,
+      "atr_basis": "STRUCTURE_ATR20",
+      "prev_bar_day": "2026-10-14",
+      "scales": [
+        {
+          "scale": "MAJOR",
+          "scale_cn": "主级别",
+          "zigzag_threshold_pct": 4.89,
+          "skipped_reason": null,
+          "zones": [
+            {
+              "zone_id": "MAJOR-SUPPORT-2026-08-24",
+              "side": "SUPPORT",
+              "side_cn": "支撑",
+              "name_cn": "双底",
+              "touch_count": 2,
+              "confirmed_touch_count": 2,
+              "touches": [
+                {
+                  "day": "2026-08-24",
+                  "price": 207.02,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-08-27"
+                },
+                {
+                  "day": "2026-09-14",
+                  "price": 208.93,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-09-17"
+                }
+              ],
+              "touches_truncated": false,
+              "zone_low_price": 207.02,
+              "zone_high_price": 208.93,
+              "neckline_price": 234.5,
+              "height_abs": 27.48,
+              "height_atr": 5.17,
+              "measured_move_price": 261.98,
+              "break_price": 204.36,
+              "confirm_price": null,
+              "sequence": "RISING",
+              "sequence_cn": "低点逐次抬高",
+              "first_last_atr": 0.36,
+              "state": "HOLDING",
+              "state_cn": "价区守住、未过颈线",
+              "state_since_day": null,
+              "selected_because": [
+                "NEAREST_ACTIVE"
+              ],
+              "intraday_note": null,
+              "summary_cn": "双底：2026-08-24 207.02、2026-09-14 208.93；价区 207.02~208.93，颈线 234.50。收盘站上颈线 234.50 为突破，测量位 261.98；收盘跌破 204.36 判定破位。"
+            },
+            {
+              "zone_id": "MAJOR-RESISTANCE-2026-06-02",
+              "side": "RESISTANCE",
+              "side_cn": "压力",
+              "name_cn": "双顶",
+              "touch_count": 2,
+              "confirmed_touch_count": 2,
+              "touches": [
+                {
+                  "day": "2026-06-02",
+                  "price": 231.75,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-06-03"
+                },
+                {
+                  "day": "2026-08-27",
+                  "price": 230.21,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-08-28"
+                }
+              ],
+              "touches_truncated": false,
+              "zone_low_price": 230.21,
+              "zone_high_price": 231.75,
+              "neckline_price": 189.59,
+              "height_abs": 42.16,
+              "height_atr": 7.93,
+              "measured_move_price": 147.43,
+              "break_price": 234.41,
+              "confirm_price": null,
+              "sequence": "FALLING",
+              "sequence_cn": "高点逐次降低",
+              "first_last_atr": -0.29,
+              "state": "FALSE_BREAK",
+              "state_cn": "假突破后回落",
+              "state_since_day": "2026-10-08",
+              "selected_because": [
+                "NEAREST_ACTIVE",
+                "RECENT"
+              ],
+              "intraday_note": null,
+              "summary_cn": "双顶：2026-06-02 231.75、2026-08-27 230.21；价区 230.21~231.75，颈线 189.59。曾收盘站上 234.41，2026-10-08 收盘回落（3 根K线内，假突破）；再次收盘站上 234.41 判定价区被突破。"
+            },
+            {
+              "zone_id": "MAJOR-RESISTANCE-2026-05-14",
+              "side": "RESISTANCE",
+              "side_cn": "压力",
+              "name_cn": "双顶",
+              "touch_count": 2,
+              "confirmed_touch_count": 2,
+              "touches": [
+                {
+                  "day": "2026-05-14",
+                  "price": 236.0,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-05-15"
+                },
+                {
+                  "day": "2026-09-04",
+                  "price": 234.5,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-09-10"
+                }
+              ],
+              "touches_truncated": false,
+              "zone_low_price": 234.5,
+              "zone_high_price": 236.0,
+              "neckline_price": 189.59,
+              "height_abs": 46.41,
+              "height_atr": 8.73,
+              "measured_move_price": 143.18,
+              "break_price": 238.66,
+              "confirm_price": null,
+              "sequence": "FALLING",
+              "sequence_cn": "高点逐次降低",
+              "first_last_atr": -0.28,
+              "state": "FALSE_BREAK",
+              "state_cn": "假突破后回落",
+              "state_since_day": "2026-10-08",
+              "selected_because": [
+                "RECENT"
+              ],
+              "intraday_note": null,
+              "summary_cn": "双顶：2026-05-14 236.00、2026-09-04 234.50；价区 234.50~236.00，颈线 189.59。曾收盘站上 238.66，2026-10-08 收盘回落（3 根K线内，假突破）；再次收盘站上 238.66 判定价区被突破。"
+            }
+          ],
+          "head_shoulders": [
+            {
+              "name_cn": "头肩底",
+              "left_shoulder": {
+                "day": "2026-09-01",
+                "price": 214.86
+              },
+              "head": {
+                "day": "2026-09-14",
+                "price": 208.93
+              },
+              "right_shoulder": {
+                "day": "2026-10-15",
+                "price": 212.85
+              },
+              "right_shoulder_confirmed": false,
+              "neckline_points": [
+                {
+                  "day": "2026-09-04",
+                  "price": 234.5
+                },
+                {
+                  "day": "2026-10-06",
+                  "price": 243.37
+                }
+              ],
+              "neckline_today_price": 246.33,
+              "height_abs": 27.68,
+              "measured_move_price": 274.01,
+              "state": "FORMING",
+              "state_cn": "形成中、未过颈线（右肩未确认）",
+              "summary_cn": "头肩底：左肩 2026-09-01 214.86、头部 2026-09-14 208.93、右肩 2026-10-15 212.85（右肩形成中，未确认）；形成中、未过颈线（右肩未确认）。收盘站上今日颈线 246.33 为突破，测量位 274.01；收盘跌破头部 208.93 下方 0.5 个 ATR 判定形态失败。"
+            }
+          ],
+          "platform": {
+            "lower_price": 207.02,
+            "upper_price": 236.0,
+            "lower_zone_id": "MAJOR-SUPPORT-2026-08-24",
+            "upper_zone_id": "MAJOR-RESISTANCE-2026-05-14",
+            "lower_touch_count": 2,
+            "upper_touch_count": 2,
+            "gap_atr": 4.81,
+            "since_day": "2026-05-14",
+            "summary_cn": "平台：下沿 207.02（2 次测试）、上沿 236.00（2 次测试），自 2026-05-14 起，两沿间距 4.81 个 ATR。平台是两个价区的组合描述，任一侧破位或越过颈线后不再成立。"
+          }
+        },
+        {
+          "scale": "MINOR",
+          "scale_cn": "次级别",
+          "zigzag_threshold_pct": 2.5,
+          "skipped_reason": null,
+          "zones": [
+            {
+              "zone_id": "MINOR-SUPPORT-2026-08-24",
+              "side": "SUPPORT",
+              "side_cn": "支撑",
+              "name_cn": "三重底",
+              "touch_count": 3,
+              "confirmed_touch_count": 3,
+              "touches": [
+                {
+                  "day": "2026-08-24",
+                  "price": 207.02,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-08-25"
+                },
+                {
+                  "day": "2026-08-26",
+                  "price": 209.0,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-08-27"
+                },
+                {
+                  "day": "2026-09-14",
+                  "price": 208.93,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-09-16"
+                }
+              ],
+              "touches_truncated": false,
+              "zone_low_price": 207.02,
+              "zone_high_price": 209.0,
+              "neckline_price": 234.5,
+              "height_abs": 27.48,
+              "height_atr": 5.17,
+              "measured_move_price": 261.98,
+              "break_price": 204.36,
+              "confirm_price": null,
+              "sequence": "MIXED",
+              "sequence_cn": "低点不单调",
+              "first_last_atr": 0.36,
+              "state": "HOLDING",
+              "state_cn": "价区守住、未过颈线",
+              "state_since_day": null,
+              "selected_because": [
+                "NEAREST_ACTIVE"
+              ],
+              "intraday_note": null,
+              "summary_cn": "三重底：2026-08-24 207.02、2026-08-26 209.00、2026-09-14 208.93；价区 207.02~209.00，颈线 234.50。收盘站上颈线 234.50 为突破，测量位 261.98；收盘跌破 204.36 判定破位。"
+            },
+            {
+              "zone_id": "MINOR-RESISTANCE-2026-06-02",
+              "side": "RESISTANCE",
+              "side_cn": "压力",
+              "name_cn": "三重顶",
+              "touch_count": 3,
+              "confirmed_touch_count": 3,
+              "touches": [
+                {
+                  "day": "2026-06-02",
+                  "price": 231.75,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-06-03"
+                },
+                {
+                  "day": "2026-08-27",
+                  "price": 230.21,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-08-28"
+                },
+                {
+                  "day": "2026-09-22",
+                  "price": 229.98,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-09-23"
+                }
+              ],
+              "touches_truncated": false,
+              "zone_low_price": 229.98,
+              "zone_high_price": 231.75,
+              "neckline_price": 189.59,
+              "height_abs": 42.16,
+              "height_atr": 7.93,
+              "measured_move_price": 147.43,
+              "break_price": 234.41,
+              "confirm_price": null,
+              "sequence": "FALLING",
+              "sequence_cn": "高点逐次降低",
+              "first_last_atr": -0.33,
+              "state": "FALSE_BREAK",
+              "state_cn": "假突破后回落",
+              "state_since_day": "2026-10-08",
+              "selected_because": [
+                "NEAREST_ACTIVE",
+                "RECENT"
+              ],
+              "intraday_note": null,
+              "summary_cn": "三重顶：2026-06-02 231.75、2026-08-27 230.21、2026-09-22 229.98；价区 229.98~231.75，颈线 189.59。曾收盘站上 234.41，2026-10-08 收盘回落（3 根K线内，假突破）；再次收盘站上 234.41 判定价区被突破。"
+            },
+            {
+              "zone_id": "MINOR-RESISTANCE-2026-05-14",
+              "side": "RESISTANCE",
+              "side_cn": "压力",
+              "name_cn": "三重顶",
+              "touch_count": 3,
+              "confirmed_touch_count": 3,
+              "touches": [
+                {
+                  "day": "2026-05-14",
+                  "price": 236.0,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-05-15"
+                },
+                {
+                  "day": "2026-09-04",
+                  "price": 234.5,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-09-08"
+                },
+                {
+                  "day": "2026-09-28",
+                  "price": 233.21,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-09-29"
+                }
+              ],
+              "touches_truncated": false,
+              "zone_low_price": 233.21,
+              "zone_high_price": 236.0,
+              "neckline_price": 189.59,
+              "height_abs": 46.41,
+              "height_atr": 8.73,
+              "measured_move_price": 143.18,
+              "break_price": 238.66,
+              "confirm_price": null,
+              "sequence": "FALLING",
+              "sequence_cn": "高点逐次降低",
+              "first_last_atr": -0.52,
+              "state": "FALSE_BREAK",
+              "state_cn": "假突破后回落",
+              "state_since_day": "2026-10-08",
+              "selected_because": [
+                "RECENT"
+              ],
+              "intraday_note": null,
+              "summary_cn": "三重顶：2026-05-14 236.00、2026-09-04 234.50、2026-09-28 233.21；价区 233.21~236.00，颈线 189.59。曾收盘站上 238.66，2026-10-08 收盘回落（3 根K线内，假突破）；再次收盘站上 238.66 判定价区被突破。"
+            }
+          ],
+          "head_shoulders": [],
+          "platform": {
+            "lower_price": 207.02,
+            "upper_price": 231.75,
+            "lower_zone_id": "MINOR-SUPPORT-2026-08-24",
+            "upper_zone_id": "MINOR-RESISTANCE-2026-06-02",
+            "lower_touch_count": 3,
+            "upper_touch_count": 3,
+            "gap_atr": 3.95,
+            "since_day": "2026-06-02",
+            "summary_cn": "平台：下沿 207.02（3 次测试）、上沿 231.75（3 次测试），自 2026-06-02 起，两沿间距 3.95 个 ATR。平台是两个价区的组合描述，任一侧破位或越过颈线后不再成立。"
+          }
+        }
+      ],
+      "changes": [
+        {
+          "scale": "MAJOR",
+          "object_type": "ZONE",
+          "object_id": "MAJOR-SUPPORT-2026-06-29",
+          "change": "ZONE_DISSOLVED",
+          "change_cn": "价区不再列出",
+          "from": "NECKLINE_CROSSED",
+          "to": null,
+          "reason": "NOT_SELECTED",
+          "threshold_changed": true,
+          "detail_cn": "双底（首触点 2026-06-29）不再列出：不再满足入选条件（价区仍在，只是不再列出）（阈值由 4.79% 变为 4.89%，按新阈值重算）"
+        },
+        {
+          "scale": "MAJOR",
+          "object_type": "HEAD_SHOULDERS",
+          "object_id": "MAJOR-HS_BOTTOM-2026-09-01-2026-09-14-2026-10-15",
+          "change": "HS_NEW",
+          "change_cn": "新头肩形态",
+          "from": null,
+          "to": "FORMING",
+          "reason": null,
+          "threshold_changed": true,
+          "detail_cn": "头肩底（形成中、未过颈线）（阈值由 4.79% 变为 4.89%，按新阈值重算）"
+        },
+        {
+          "scale": "MINOR",
+          "object_type": "ZONE",
+          "object_id": "MINOR-SUPPORT-2026-08-24",
+          "change": "ZONE_NEW",
+          "change_cn": "新价区",
+          "from": null,
+          "to": "HOLDING",
+          "reason": "SELECTED",
+          "threshold_changed": false,
+          "detail_cn": "三重底（价区守住、未过颈线），重新满足入选条件"
+        },
+        {
+          "scale": "MINOR",
+          "object_type": "ZONE",
+          "object_id": "MINOR-SUPPORT-2026-09-24",
+          "change": "ZONE_DISSOLVED",
+          "change_cn": "价区不再列出",
+          "from": "TESTING",
+          "to": null,
+          "reason": "TOUCH_REPLACED",
+          "threshold_changed": false,
+          "detail_cn": "双底（首触点 2026-09-24）不再列出：未确认触点被取代后不足 2 个触点"
+        },
+        {
+          "scale": "MINOR",
+          "object_type": "PLATFORM",
+          "object_id": "MINOR-SUPPORT-2026-09-24|MINOR-RESISTANCE-2026-05-14",
+          "change": "PLATFORM_ENDED",
+          "change_cn": "平台不再成立",
+          "from": null,
+          "to": null,
+          "reason": null,
+          "threshold_changed": false,
+          "detail_cn": "原平台不再成立（一侧价区破位、越过颈线或不再入选）"
+        },
+        {
+          "scale": "MINOR",
+          "object_type": "PLATFORM",
+          "object_id": "MINOR-SUPPORT-2026-08-24|MINOR-RESISTANCE-2026-06-02",
+          "change": "PLATFORM_NEW",
+          "change_cn": "新平台",
+          "from": null,
+          "to": null,
+          "reason": null,
+          "threshold_changed": false,
+          "detail_cn": "平台 207.02~231.75（下沿 3 次、上沿 3 次）"
+        }
+      ]
     }
   },
   "indicators": {
@@ -2229,6 +2655,8 @@
       134.66,
       137.05,
       143.13,
+      143.18,
+      147.43,
       163.67,
       164.18,
       168.39,
@@ -2297,6 +2725,7 @@
       203.03,
       203.39,
       203.9,
+      204.36,
       206.16,
       207.02,
       207.53,
@@ -2314,6 +2743,7 @@
       208.82,
       208.93,
       208.94,
+      209.0,
       209.06,
       209.14,
       209.36,
@@ -2510,6 +2940,7 @@
       233.87,
       233.92,
       233.95,
+      234.41,
       234.5,
       234.53,
       234.92,
@@ -2529,6 +2960,7 @@
       237.69,
       237.88,
       238.63,
+      238.66,
       238.9,
       238.93,
       239.08,
@@ -2538,8 +2970,11 @@
       242.1,
       243.37,
       246.09,
+      246.33,
       246.51,
-      266.63
+      261.98,
+      266.63,
+      274.01
     ],
     "benchmark": {
       "price_decimals": 2,

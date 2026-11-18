@@ -159,6 +159,7 @@ stderr 同时打印 `[CODE] message`。本节列出的命令行参数都是稳�
    - `scenarios` 按"触发条件 → 目标位 → 失效条件"转述：三条主路径 `scenarios.paths`（上攻 / 震荡 / 下探），以及 `scenarios.active` 中 2~5 个适用情景及其状态（`status_cn`：`已在进行中` / `待触发`）。不为情景附加任何频率、用时或概率；`scenarios.contested_levels`（现价附近正在争夺的价位）不作触发条件。
    - 浪型先说主计数，再说 `structure.wave_counts` 里的备选数法及各自的否定条件；备选数法不代表可能性大小。形态为"形态不明确"时不套用教科书形态。
    - 形态只引用 `structure.patterns` 里的 `name_cn` 和 `formula_verified`。
+   - 多次测试价区（`structure.tested_zones`，实验字段，报告第 5 节末尾）：先说主级别，再说次级别；未确认触点必须说"未确认"；失效价引用 `break_price`；测试次数只是描述，不得说成支撑更强、更可靠或更容易破（`lint_response.py` 拦截这类说法）。
 6. **回测**（有 `*_backtest.json` 时）：成交笔数、胜率（带 95% 区间）、累计收益与同期买入持有对比；有 `sample_size_warning` 时原文转述。规则分 IC 的结论（`rule_score_ic.verdict`）原文转述，`informative = false` 时说明规则分在该标的上只作描述。
    有 `backtest.market_attribution` 且 `available = true` 时，转述报告第 7 节"大盘贡献拆解"一行（单笔平均净收益、同期基准平均收益、相对基准的超额及区间、两组的笔数与平均净收益），并说明这是相对同期基准、不是相对随机选股；不得把"持有期大盘上涨"一组的平均收益说成大盘好时的预期收益。`available = false` 时转述 `reason_cn`。
 7. **文件**：给出 `result.json` 与 `dashboard.html` 的路径（取自 `files`）；客户端能显示图片时再内嵌 `preview.png`，否则只给路径。

@@ -8,6 +8,7 @@
       "nadaraya_watson",
       "structure_layer_pivots",
       "structure_and_scenarios",
+      "tested_zones",
       "candlestick_patterns",
       "smc_structures",
       "conformal_forecast",

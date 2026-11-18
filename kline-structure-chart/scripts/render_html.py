@@ -306,6 +306,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     <label class="layer-pill"><input type="checkbox" data-layer="scenarios" checked /> 多情景路径(虚线=待触发)</label>
     <label class="layer-pill"><input type="checkbox" data-layer="barriers" checked /> Triple-Barrier 止盈止损框</label>
     <label class="layer-pill"><input type="checkbox" data-layer="structure" checked /> 核平滑与楔形/波段轨道</label>
+    <label class="layer-pill"><input type="checkbox" data-layer="zones" checked /> 多次测试价区</label>
     <label class="layer-pill"><input type="checkbox" data-layer="poc" checked /> 成交分布近似 POC</label>
     <label class="layer-pill"><input type="checkbox" data-layer="smc" checked /> SMC 订单块/FVG缺口</label>
     <label class="layer-pill"><input type="checkbox" data-layer="ma" checked /> 均线簇(MA20/60/120/250)</label>
@@ -313,6 +314,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   <div style="display:flex;gap:8px;align-items:center;">
     <button class="btn" id="subchartModeBtn" type="button">副图: 成交量 &amp; RVOL</button>
     <button class="btn" id="viewModeBtn" type="button">视图: 标的主图</button>
+    <button class="btn" id="zoneScaleBtn" type="button">价区: 主级别</button>
     <button class="btn" id="exportPngBtn" type="button">导出当前视图为高清 PNG</button>
   </div>
 </div>
@@ -399,6 +401,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     volume_profile: Object.assign({{}}, ST.volume_profile, {{ bins: CH.volume_profile_bins || [] }}),
     smc_structures: ST.smc,
     algebraic_patterns_detected: ST.patterns || [],
+    tested_zones: ST.tested_zones || null,
     strategy_signals: V.strategy_signals || [],
     rule_scenarios: {{ scenarios: (SC.active || []).map(function(s) {{ return Object.assign({{}}, s, SCP_BY_ID[s.id] || {{}}); }}) }},
   }};
@@ -632,9 +635,11 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     structure: true,
     poc: true,
     smc: true,
+    zones: true,
     ma: true
   }};
   let showRsMode = false;
+  let zoneScale = 'MAJOR';  // 多次测试价区图层显示的级别
   let activeReplayIdx = replays.length; // replays.length === live/latest view
   // 横轴密度固定：最新截面与历史回放显示同样根数（回放快照窗口长度），拖动滑块时K线宽度不变
   const VIEW_BARS = (replays.length && replays[0].bars_window && replays[0].bars_window.length >= 20)
@@ -658,7 +663,7 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
     const isLive = activeReplayIdx === replays.length;
     document.querySelectorAll('#layerControls input[type=checkbox]').forEach(function(cb) {{
       const lk = cb.getAttribute('data-layer');
-      const liveOnly = (lk === 'scenarios' || lk === 'barriers' || lk === 'poc' || lk === 'smc');
+      const liveOnly = (lk === 'scenarios' || lk === 'barriers' || lk === 'poc' || lk === 'smc' || lk === 'zones');
       if (liveOnly) {{
         cb.disabled = !isLive;
         cb.parentElement.style.opacity = isLive ? '1' : '0.45';
@@ -775,6 +780,12 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
   document.getElementById('viewModeBtn').addEventListener('click', function(ev) {{
     showRsMode = !showRsMode;
     ev.target.textContent = showRsMode ? '视图: 相对强弱(RS对比)' : '视图: 标的主图';
+    drawChart();
+  }});
+
+  document.getElementById('zoneScaleBtn').addEventListener('click', function(ev) {{
+    zoneScale = zoneScale === 'MAJOR' ? 'MINOR' : 'MAJOR';
+    ev.target.textContent = zoneScale === 'MAJOR' ? '价区: 主级别' : '价区: 次级别';
     drawChart();
   }});
 
@@ -1003,6 +1014,63 @@ def render_html(result: dict[str, Any], chart: dict[str, Any], output_path: Path
       ctx.fillStyle = col;
       ctx.fillRect(x - barHalf, topY, barHalf * 2, bodyH);
     }});
+
+    // Layer: 多次测试价区（只在最新截面显示；按钮切换主级别 / 次级别）
+    const TZ = REPORT.tested_zones;
+    if (layers.zones && TZ && activeReplayIdx === replays.length) {{
+      const sc = (TZ.scales || []).find(function(s) {{ return s.scale === zoneScale; }});
+      const pos = {{}};
+      activeBars.forEach(function(b, bi) {{ pos[b.day] = bi; }});
+      clipToMainPlot();
+      ((sc && sc.zones) || []).forEach(function(z) {{
+        if (!z.touches) return;  // 与主级别相同的次级别价区只有 zone_id 与 same_as_zone_id
+        const col = z.side === 'SUPPORT' ? UP_COL : DN_COL;
+        let x0 = padL;
+        for (let bi = 0; bi < activeBars.length; bi++) {{
+          if (activeBars[bi].day >= z.touches[0].day) {{ x0 = xOfBar(bi); break; }}
+        }}
+        const yHi = yOfPrice(z.zone_high_price), yLo = yOfPrice(z.zone_low_price);
+        ctx.globalAlpha = 0.16;
+        ctx.fillStyle = col;
+        ctx.fillRect(x0, Math.min(yHi, yLo), (padL + histW) - x0, Math.max(3, Math.abs(yLo - yHi)));
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 4]);
+        [z.neckline_price, z.break_price].forEach(function(p) {{
+          if (p === null || p === undefined) return;
+          const y = yOfPrice(p);
+          ctx.beginPath();
+          ctx.moveTo(x0, y);
+          ctx.lineTo(padL + histW, y);
+          ctx.stroke();
+        }});
+        ctx.setLineDash([]);
+        const offset = z.touch_count - z.touches.length;  // 触点被截断时，第 2 个起的编号接着真实序号
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        z.touches.forEach(function(t, ti) {{
+          if (pos[t.day] === undefined) return;
+          const x = xOfBar(pos[t.day]), y = yOfPrice(t.price);
+          ctx.beginPath();
+          ctx.arc(x, y, 7, 0, Math.PI * 2);
+          ctx.fillStyle = t.confirmed ? col : '#0e1420';
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = col;
+          ctx.stroke();
+          ctx.fillStyle = t.confirmed ? '#0e1420' : col;
+          ctx.fillText(String(ti === 0 ? 1 : ti + 1 + offset), x, y);
+        }});
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.font = '11px sans-serif';
+        ctx.fillStyle = col;
+        ctx.fillText(z.name_cn.split('（')[0] + ' · ' + z.state_cn, x0 + 4, Math.min(yHi, yLo) - 4);
+      }});
+      ctx.restore();
+    }}
 
     // Layer: Moving Averages
     if (layers.ma) {{
