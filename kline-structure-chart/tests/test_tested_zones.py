@@ -503,9 +503,26 @@ def test_lint_blocks_touch_count_strength_claims_but_allows_negations() -> None:
                  "三重底的成功率很高。", "多次测试后更坚固。", "双顶易破。"):
         assert flagged(text), text
     for text in ("测试次数只是计数，不代表支撑更强。", "三重底（第 3 次测试进行中，未确认）。", "不能说三重底更可靠。",
-                 "多次测试价区先说主级别。", "4 次测试的支撑区（价区守住、未过颈线）。", "波段双底结构（看多，2026-10-09）。"):
+                 "多次测试价区先说主级别。", "4 次测试的支撑区（价区守住、未过颈线）。", "波段双底结构（看多，2026-10-09）。",
+                 "三重底不代表支撑更强。", "双底并不意味着更可靠。", "双底形态没有更可靠的含义。"):
         assert not flagged(text), text
 
+
+
+def test_lint_checks_tested_zone_price_words_against_whitelist() -> None:
+    """价区小节的价位用语（颈线、测量位、价区上下沿、确认价、头肩各点）后面的数字也必须在白名单里。"""
+    from lint_response import lint_agent_response
+
+    report = {**_LINT_STUB, "quotable_prices": {"prices": [], "tolerance": 0.01}}
+
+    def flagged(text: str) -> bool:
+        return any("白名单" in e for e in lint_agent_response(text + "不构成投资建议。", report))
+
+    for text in ("价区 9999.11~9888.22。", "颈线 9777.33。", "测量位 9444.66。", "之后最高价达到 9555.55 即确认。",
+                 "之后最低价达到 9555.55 即确认。", "平台下沿 81.51、上沿 85.20。", "右肩 2026-06-23 4175.35。",
+                 "左肩 2026-05-11 4100.10、头部 2026-06-01 4300.20。", "第 3 个低点 3565.59 尚未确认。", "确认价 3600.01。"):
+        assert flagged(text), text
+    assert not flagged("颈线高度不足 1.2 个 ATR；价区（2 次测试）。")
 
 # ---------------------------------------------------------------------------
 # 任务 7：PNG 与看板

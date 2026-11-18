@@ -53,6 +53,7 @@ _TOUCH_COUNT_PHRASES = (
     re.compile(_ZONE_NAME + r"[^。；\n]{0,6}?(?:概率|成功率|胜率|准确率)"),
 )
 _NEGATION_RE = re.compile(r"不是|不叫|不代表|并非|不得|不能|严禁|禁止|不构成|不等于|不要|不应|不宜|而非|不含|没有")
+_TOUCH_NEGATION_RE = re.compile(_NEGATION_RE.pattern + r"|并不|不意味")
 # 唯一允许的概率类数字：回测成交胜率，同一句必须出现「回测」并给出 95% 区间
 _BACKTEST_SENTENCE_RE = re.compile(r"回测")
 _CI_RE = re.compile(r"95%\s*(?:置信)?区间|Wilson")
@@ -76,8 +77,13 @@ _LINT_PRICE_AFTER_RE = re.compile(
     r"|(?:止损位?|日?均线|乐观上沿|悲观下沿)(?:建议)?(?:设在|位于|可达))"
     r"[^\d\n。；，,、（）()|]{0,4}?(\d+(?:\.\d+)?)"
 )
+# 多次测试价区与头肩的价位用语：数字须紧跟在词后（只隔空白或冒号），避免「悲观下沿 q10」「高点 10-15」这类非价格
+_LINT_ZONE_PRICE_RE = re.compile(
+    r"(?<!乐观)(?<!悲观)(?:颈线|测量位|价区|上沿|下沿|确认价|最高价达到|最低价达到|左肩|右肩|头部|个低点|个高点)"
+    r"\s*[为=:：约]?\s*(\d+(?:\.\d+)?)(?![\d-])"
+)
 _LINT_PRICE_COMPARE_RE = re.compile(
-    r"(?:目标位?|失效位?|止损位?|止盈位?|触发位?|破位价|支撑位?|压力位?|阻力位?|现价|收盘价?|POC|VAH|VAL|TP1|TP2|入场区?|观察区|防守位?|减仓位?)"
+    r"(?:目标位?|失效位?|止损位?|止盈位?|触发位?|破位价|支撑位?|压力位?|阻力位?|现价|收盘价?|POC|VAH|VAL|TP1|TP2|入场区?|观察区|防守位?|减仓位?|价区)"
     r"[^。；\n]{0,36}?"
     r"(?:vs\.?|VS\.?|对比|较上日|上日|前日|昨日|原为|下调至|上调至|移至|降至|升至|~|～|→|->)"
     r"[^\d\n。；]{0,8}?(\d+\.\d+)"
@@ -200,7 +206,8 @@ def lint_agent_response(
     for pat in _TOUCH_COUNT_PHRASES:
         for hit in pat.finditer(text):
             sent_start = max((sm.end() for sm in _SENTENCE_SPLIT_RE.finditer(text, 0, hit.start())), default=0)
-            if not _NEGATION_RE.search(text[sent_start : hit.start()]):
+            # 否定词可能在命中片段之前，也可能被片段中间的 {0,8} 吞进去（「三重底不代表支撑更强」）
+            if not _TOUCH_NEGATION_RE.search(text[sent_start : hit.end()]):
                 errors.append(f"检测到违规表述: {hit.group(0)!r}（测试次数只是计数，不得说成支撑压力更强、更可靠或更容易破）")
                 break
     for hit in dict.fromkeys(_unvalidated_probability_hits(text)):
@@ -284,7 +291,7 @@ def lint_agent_response(
         ):
             errors.append(f"不得把浪型测算位 {cand_tp} 当作目标位/目标价: {m_tp.group(0)!r}")
     seen_spans: set[tuple[int, int]] = set()
-    for pat in (CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_PRICE_COMPARE_RE, _LINT_PRICE_BEFORE_RE):
+    for pat in (CONTEXT_PRICE_RE, _LINT_PRICE_AFTER_RE, _LINT_ZONE_PRICE_RE, _LINT_PRICE_COMPARE_RE, _LINT_PRICE_BEFORE_RE):
         for m in pat.finditer(cleaned):
             grp_idx = 1 if m.group(1) is not None else 2
             span = m.span(grp_idx)
