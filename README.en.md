@@ -380,11 +380,11 @@ If something is wrong with the environment, run `scripts/doctor.py` (see 3.5); `
 
 | File | Content |
 | --- | --- |
-| `*_report.md` | Chinese analysis report, in order: data notes, risk veto, conclusion, market, future normal volatility range, risk plan, structure and conditional scenarios, pattern evidence, backtest, file paths, disclaimer. Every number comes from `*_result.json` |
+| `*_report.md` | Chinese analysis report, in order: data notes, risk veto, conclusion, market, future normal volatility range, risk plan, structure and conditional scenarios (including tested price zones), pattern evidence, backtest, file paths, disclaimer. Every number comes from `*_result.json` |
 | `*_result.json` | v6 stable contract (fully validated against `assets/analysis.schema.json`) |
 | `*_chart_data.json` | Bar series, replay snapshots and other rendering data; not a stable interface |
 | `*_preview.png` | 1920×1160 structure chart; carries a red warning banner and watermark when data has problems |
-| `*_dashboard.html` | Offline interactive dashboard: 8 layer toggles, hover values, relative-strength view, history replay slider, PNG export |
+| `*_dashboard.html` | Offline interactive dashboard: 9 layer toggles (including tested price zones, switchable between major and minor scale), hover values, relative-strength view, history replay slider, PNG export |
 | `*_backtest.json` | Historical plan-replay backtest and no-lookahead audit (with `--backtest`) |
 
 The CLI's standard output is a JSON envelope; on failure the exit code tells the error type:

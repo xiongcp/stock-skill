@@ -174,6 +174,28 @@
 | `structure.patterns` | 识别到的蜡烛、波段与背离形态：`pattern`、`name_cn`、`category`、`direction`、`observed_at`（形态日）、`confirmed_at`（确认日）、`volume_confirmed`、`formula_verified`（代入数值的判定公式） | 对象数组 | 否（可为空数组） | stable | 只引用 `name_cn` 与 `formula_verified` |
 | `structure.smc` | 算法结构区：`fvgs[]`（公允价值缺口，`status` 为 `ACTIVE` / `MITIGATED` 等）、`order_blocks[]`、`structure_breaks[]`、`note` | 价格区间 | 否（子数组可为空） | experimental | "算法结构区"，不说成机构真实挂单 |
 | `structure.volume_profile` | Volume Profile 近似成交分布的 `poc_price`（成交最密集价位）、`vah_price` / `val_price`（70% 价值区上下沿），另有 `value_area_coverage`、`lookback_bars`、`approximation_method`、`note`；24 个价格桶明细在 `chart_data.json` | 价格 | 数据不足时三个价位可空 | stable | "成交密集区"，**不是真实持仓筹码** |
+| `structure.tested_zones` | 多次测试价区：`atr_abs`、`atr_basis`、`prev_bar_day`；`scales[]` 依次为主级别 `MAJOR` 与次级别 `MINOR`，各含 `zigzag_threshold_pct`、`skipped_reason`、`zones[]`、`head_shoulders[]`、`platform`；`changes[]` 为与上一根已收盘K线相比的变化。明细见下表 | 对象 | 结构层不计算时为 `null`；级别跳过时 `skipped_reason` 非空、`zones` 为空 | experimental | 先说主级别再说次级别，按 `summary_cn` 原文转述；测试次数只是计数 |
+
+### `structure.tested_zones`（多次测试价区）
+
+公式与常量见 `references/math-patterns.md` 第 9 节。只做描述，规则分、评级、否决条件与计划价位不读取它；回测逐日回放与历史回放快照不计算它。
+
+| 字段 | 含义 | 取值 / 单位 | 稳定级别 | 对外怎么说 |
+| --- | --- | --- | --- | --- |
+| `zones[].zone_id` | `{级别}-{SUPPORT\|RESISTANCE}-{首触点日期}`；次级别与主级别触点完全相同且没有未确认触点时，该项只有 `zone_id` 与 `same_as_zone_id` | 字符串 | experimental | 说"与主级别某价区相同" |
+| `zones[].side` / `side_cn` / `name_cn` | 支撑或压力；名称为双底 / 三重底 / N 次测试的支撑区（压力侧镜像），有未确认触点时带"（第 N 次测试进行中，未确认）" | 枚举 / 字符串 | experimental | 原文转述名称 |
+| `zones[].touch_count` / `confirmed_touch_count` | 触点数（含未确认）与已确认触点数 | 整数 | experimental | 只是计数，不代表支撑或压力更强 |
+| `zones[].touches[]` / `touches_truncated` | `{day, price, confirmed, confirmed_at_day}`，最多 8 个；超过时列第 1 个与最后 7 个 | 对象数组 / 布尔 | experimental | 未确认触点必须说"未确认" |
+| `zones[].zone_low_price` / `zone_high_price` / `neckline_price` | 已确认触点的最低价、最高价，首末触点之间的反向极值（颈线） | 价格 | experimental | — |
+| `zones[].break_price` / `confirm_price` / `measured_move_price` | 失效价（已确认边缘外 0.5 ATR）、未确认触点的确认价（没有时为 `null`）、测量位（颈线 ± 高度） | 价格 | experimental | 失效价引用 `break_price`；测量位不是目标价 |
+| `zones[].height_abs` / `height_atr` / `first_last_atr` | 形态高度及其 ATR 倍数、末触点减首触点（ATR 倍数） | 价格差 / 倍数 | experimental | 不是价位，不当价格引用 |
+| `zones[].sequence` / `sequence_cn` | `RISING` 逐次抬高 / `FALLING` 逐次降低 / `MIXED` | 枚举 | experimental | — |
+| `zones[].state` / `state_cn` / `state_since_day` | `TESTING` / `HOLDING` / `NECKLINE_CROSSED` / `FALSE_BREAK` / `BROKEN`（破位后 20 根内输出）；`TESTING` 与 `HOLDING` 的 `state_since_day` 为 `null` | 枚举 / 日期 | experimental | 按 `state_cn` 转述 |
+| `zones[].selected_because[]` | `NEAREST_ACTIVE`（离最新收盘最近的未破位价区）/ `RECENT`（最后触点或状态变化在最近 20 根内） | 枚举数组 | experimental | — |
+| `zones[].intraday_note` / `summary_cn` | 盘中标注（未收盘，不作确认；没有时为 `null`）与按状态生成的一句摘要；体积超出预算时次级别的 `summary_cn` 可能被裁掉 | 字符串 | experimental | 原文转述 |
+| `head_shoulders[]` | 头肩底 / 头肩顶：`name_cn`、`left_shoulder` / `head` / `right_shoulder`（`{day, price}`）、`right_shoulder_confirmed`、`neckline_points`、`neckline_today_price`、`height_abs`、`measured_move_price`、`state`（`FORMING` / `NECKLINE_CROSSED` / `FAILED`）、`state_cn`、`summary_cn`；每级别每侧最多一个 | 对象数组 | experimental | 右肩未确认时必须说"未确认" |
+| `platform` | 同级别一个支撑价区与一个压力价区组成的平台：`lower_price` / `upper_price`、`lower_zone_id` / `upper_zone_id`、`lower_touch_count` / `upper_touch_count`、`gap_atr`、`since_day`、`summary_cn`；不成立时为 `null` | 对象 | experimental | 组合描述，不单独判定状态 |
+| `changes[]` | `scale`、`object_type`、`object_id`、`change`（`ZONE_NEW` / `TOUCH_ADDED` / `TOUCH_UPDATED` / `TOUCH_CONFIRMED` / `TOUCH_LEFT_ZONE` / `STATE_CHANGED` / `ZONE_DISSOLVED` / `HS_NEW` / `HS_STATE_CHANGED` / `HS_ENDED` / `PLATFORM_NEW` / `PLATFORM_CHANGED` / `PLATFORM_ENDED`）、`change_cn`、`from` / `to`、`reason`、`threshold_changed`、`detail_cn`；最多 12 条，主级别优先 | 对象数组 | experimental | 按 `detail_cn` 转述；`threshold_changed = true` 时说明是阈值变化后的重算，不说成结构变化 |
 
 ## `indicators`
 

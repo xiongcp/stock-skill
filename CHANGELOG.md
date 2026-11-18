@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### 新增（多次测试价区）
+
+- **契约变更（新增实验字段，`x-stability: experimental`）**：`structure.tested_zones`。在主级别（结构层 ZigZag 阈值）与次级别（按 ATR% 向上取整到 0.5%，夹在 1.5%~4%）上把价格相近的拐点聚成价区，由数据决定是双底、三重底还是"N 次测试的支撑区"（压力侧镜像），给出状态、颈线、失效价与未确认触点的确认价；另识别头肩底 / 头肩顶与平台，并列出与上一根已收盘K线相比的变化。只做描述：规则分、评级、否决条件与计划价位不读取它（`test_decisions_do_not_depend_on_tested_zones` 守护），回测逐日回放与历史回放快照不计算它。
+- **契约变更（`backtest.json`，不在 schema 约束内）**：`causal_replay_audit.modules_audited` 新增 `tested_zones` 项。
+- `result.json` 体积裁剪在基准结构摘要两步之后新增两步：去掉次级别已破位的价区（连同指向它们的变化），再去掉次级别价区的 `summary_cn`；后两步之后重算 `quotable_prices.prices`。`quality.notes` 的裁剪说明改为"result.json 超出体积预算，已依次裁剪：…；其余字段未裁剪"。腾讯（00700.HK）截至 2026-10-15 的录制样例会触发前两步。
+- `report.md` 第 5 节末尾新增"多次测试价区"小节，第 6 节在波段双底 / 双顶之后加一句说明；看板新增"多次测试价区"图层与主次级别切换按钮；PNG 画主级别价区的横带、触点编号与颈线。
+- `lint_response.py` 拦截把测试次数说成支撑压力更强、更可靠、更容易破，或给"几重底"配概率的说法；`SKILL.md` 回复契约第 5 条同步。
+- `tests/check_days_invariance.py` 检查 `tested_zones`；v4.1 命令行（`render_structure_chart.py`）取数下限由 420 根改为 421 根，上一交易日的对照也能在 420 根上重算。
+- 新增录制 `tests/fixtures/recorded/sina_daily_cases/sh000001_2026-11-17.json`（`record_fixtures.py --only cases`，截止日固定）。
+- `examples/` 四个示例按 `--as-of 2026-10-15` 重新生成，结果 JSON、报告、看板与 PNG 新增多次测试价区。
+
 ### 调整（报告与回复顺序）
 
 - `report.md` 与 `SKILL.md` 回复契约改为先给正常波动范围和风控计划、后给结构与条件推演：第 3 节为正常波动范围，第 5 节为结构与条件推演，第 6 节为形态与信号证据；第 2、4、7、8 节编号不变。直出摘要的分句顺序同步调整，每个分句的文字与数字不变。

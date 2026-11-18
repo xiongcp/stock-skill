@@ -380,11 +380,11 @@ uv run --directory kline-structure-chart python scripts/resolve_symbol.py 茅台
 
 | 文件 | 内容 |
 | --- | --- |
-| `*_report.md` | 中文分析报告，依次为：数据说明、风控否决、结论、大盘、未来正常波动范围、风控计划、结构与条件推演、形态证据、回测、文件路径、免责声明。数字全部取自 `*_result.json` |
+| `*_report.md` | 中文分析报告，依次为：数据说明、风控否决、结论、大盘、未来正常波动范围、风控计划、结构与条件推演（含多次测试价区）、形态证据、回测、文件路径、免责声明。数字全部取自 `*_result.json` |
 | `*_result.json` | v6 稳定契约（通过 `assets/analysis.schema.json` 全量校验） |
 | `*_chart_data.json` | K 线序列、回放快照等渲染数据；不是稳定接口 |
 | `*_preview.png` | 1920×1160 结构推演图；数据有问题时带红色告警和水印 |
-| `*_dashboard.html` | 离线交互看板：8 个图层开关、悬停查看数值、相对强弱视图、历史回放滑块、导出 PNG |
+| `*_dashboard.html` | 离线交互看板：9 个图层开关（含多次测试价区，可切换主次级别）、悬停查看数值、相对强弱视图、历史回放滑块、导出 PNG |
 | `*_backtest.json` | 历史计划回放回测与无前视审计（传 `--backtest` 时生成） |
 
 命令行的标准输出是一个 JSON 信封，失败时退出码区分错误类型：

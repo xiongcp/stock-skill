@@ -1530,6 +1530,189 @@
       "lookback_bars": 120,
       "approximation_method": "ohlcv_range_partition_v1",
       "note": "由 OHLCV 价格区间近似计算的成交分布，不等于真实持仓筹码成本。"
+    },
+    "tested_zones": {
+      "atr_abs": 20.41,
+      "atr_basis": "STRUCTURE_ATR20",
+      "prev_bar_day": "2026-10-14",
+      "scales": [
+        {
+          "scale": "MAJOR",
+          "scale_cn": "主级别",
+          "zigzag_threshold_pct": 3.11,
+          "skipped_reason": null,
+          "zones": [
+            {
+              "zone_id": "MAJOR-SUPPORT-2026-06-22",
+              "side": "SUPPORT",
+              "side_cn": "支撑",
+              "name_cn": "双底",
+              "touch_count": 2,
+              "confirmed_touch_count": 2,
+              "touches": [
+                {
+                  "day": "2026-06-22",
+                  "price": 1177.14,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-06-23"
+                },
+                {
+                  "day": "2026-07-10",
+                  "price": 1170.28,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-07-13"
+                }
+              ],
+              "touches_truncated": false,
+              "zone_low_price": 1170.28,
+              "zone_high_price": 1177.14,
+              "neckline_price": 1234.78,
+              "height_abs": 64.5,
+              "height_atr": 3.16,
+              "measured_move_price": 1299.27,
+              "break_price": 1160.08,
+              "confirm_price": null,
+              "sequence": "FALLING",
+              "sequence_cn": "低点逐次降低",
+              "first_last_atr": -0.34,
+              "state": "NECKLINE_CROSSED",
+              "state_cn": "已突破颈线",
+              "state_since_day": "2026-07-15",
+              "selected_because": [
+                "NEAREST_ACTIVE"
+              ],
+              "intraday_note": null,
+              "summary_cn": "双底：2026-06-22 1177.14、2026-07-10 1170.28；价区 1170.28~1177.14，颈线 1234.78。已于 2026-07-15 收盘站上颈线 1234.78，测量位 1299.27；收盘跌破 1160.08 判定破位。"
+            },
+            {
+              "zone_id": "MAJOR-RESISTANCE-2026-08-03",
+              "side": "RESISTANCE",
+              "side_cn": "压力",
+              "name_cn": "双顶",
+              "touch_count": 2,
+              "confirmed_touch_count": 2,
+              "touches": [
+                {
+                  "day": "2026-08-03",
+                  "price": 1363.35,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-08-05"
+                },
+                {
+                  "day": "2026-08-10",
+                  "price": 1359.97,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-08-17"
+                }
+              ],
+              "touches_truncated": false,
+              "zone_low_price": 1359.97,
+              "zone_high_price": 1363.35,
+              "neckline_price": 1300.01,
+              "height_abs": 63.34,
+              "height_atr": 3.1,
+              "measured_move_price": 1236.67,
+              "break_price": 1373.55,
+              "confirm_price": null,
+              "sequence": "FALLING",
+              "sequence_cn": "高点逐次降低",
+              "first_last_atr": -0.17,
+              "state": "HOLDING",
+              "state_cn": "价区压住、未破颈线",
+              "state_since_day": null,
+              "selected_because": [
+                "NEAREST_ACTIVE"
+              ],
+              "intraday_note": null,
+              "summary_cn": "双顶：2026-08-03 1363.35、2026-08-10 1359.97；价区 1359.97~1363.35，颈线 1300.01。收盘跌破颈线 1300.01 为破位，测量位 1236.67；收盘站上 1373.55 判定价区被突破。"
+            }
+          ],
+          "head_shoulders": [],
+          "platform": null
+        },
+        {
+          "scale": "MINOR",
+          "scale_cn": "次级别",
+          "zigzag_threshold_pct": 2.0,
+          "skipped_reason": null,
+          "zones": [
+            {
+              "zone_id": "MINOR-SUPPORT-2026-06-22",
+              "same_as_zone_id": "MAJOR-SUPPORT-2026-06-22"
+            },
+            {
+              "zone_id": "MINOR-RESISTANCE-2026-08-19",
+              "side": "RESISTANCE",
+              "side_cn": "压力",
+              "name_cn": "双顶",
+              "touch_count": 2,
+              "confirmed_touch_count": 2,
+              "touches": [
+                {
+                  "day": "2026-08-19",
+                  "price": 1308.88,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-08-21"
+                },
+                {
+                  "day": "2026-08-25",
+                  "price": 1317.0,
+                  "confirmed": true,
+                  "confirmed_at_day": "2026-08-27"
+                }
+              ],
+              "touches_truncated": false,
+              "zone_low_price": 1308.88,
+              "zone_high_price": 1317.0,
+              "neckline_price": 1270.33,
+              "height_abs": 46.67,
+              "height_atr": 2.29,
+              "measured_move_price": 1223.66,
+              "break_price": 1327.2,
+              "confirm_price": null,
+              "sequence": "RISING",
+              "sequence_cn": "高点逐次抬高",
+              "first_last_atr": 0.4,
+              "state": "HOLDING",
+              "state_cn": "价区压住、未破颈线",
+              "state_since_day": null,
+              "selected_because": [
+                "NEAREST_ACTIVE"
+              ],
+              "intraday_note": null,
+              "summary_cn": "双顶：2026-08-19 1308.88、2026-08-25 1317.00；价区 1308.88~1317.00，颈线 1270.33。收盘跌破颈线 1270.33 为破位，测量位 1223.66；收盘站上 1327.20 判定价区被突破。"
+            }
+          ],
+          "head_shoulders": [],
+          "platform": null
+        }
+      ],
+      "changes": [
+        {
+          "scale": "MAJOR",
+          "object_type": "ZONE",
+          "object_id": "MAJOR-RESISTANCE-2026-08-03",
+          "change": "STATE_CHANGED",
+          "change_cn": "状态变化",
+          "from": "NECKLINE_CROSSED",
+          "to": "HOLDING",
+          "reason": null,
+          "threshold_changed": true,
+          "detail_cn": "双顶：已跌破颈线 → 价区压住、未破颈线（阈值由 3.00% 变为 3.11%，按新阈值重算）"
+        },
+        {
+          "scale": "MINOR",
+          "object_type": "ZONE",
+          "object_id": "MINOR-RESISTANCE-2026-07-30",
+          "change": "ZONE_DISSOLVED",
+          "change_cn": "价区不再列出",
+          "from": "NECKLINE_CROSSED",
+          "to": null,
+          "reason": "NOT_SELECTED",
+          "threshold_changed": false,
+          "detail_cn": "4 次测试的压力区（首触点 2026-07-30）不再列出：不再满足入选条件（价区仍在，只是不再列出）"
+        }
+      ]
     }
   },
   "indicators": {
@@ -2168,12 +2351,14 @@
     "tolerance": 0.01,
     "prices": [
       1151.01,
+      1160.08,
       1170.28,
       1177.14,
       1212.12,
       1215.52,
       1215.71,
       1221.3,
+      1223.66,
       1226.87,
       1227.99,
       1228.1,
@@ -2187,6 +2372,7 @@
       1236.0,
       1236.05,
       1236.38,
+      1236.67,
       1237.0,
       1239.53,
       1240.26,
@@ -2359,6 +2545,7 @@
       1298.21,
       1298.32,
       1298.7,
+      1299.27,
       1299.75,
       1300.01,
       1300.6,
@@ -2374,10 +2561,12 @@
       1304.4,
       1308.09,
       1308.61,
+      1308.88,
       1309.21,
       1312.97,
       1315.39,
       1316.7,
+      1317.0,
       1317.76,
       1318.83,
       1320.32,
@@ -2386,6 +2575,7 @@
       1321.13,
       1323.46,
       1325.21,
+      1327.2,
       1327.73,
       1328.58,
       1333.07,
@@ -2429,6 +2619,7 @@
       1358.34,
       1359.22,
       1359.33,
+      1359.97,
       1361.03,
       1363.35,
       1366.34,
@@ -2439,6 +2630,7 @@
       1368.67,
       1371.75,
       1372.79,
+      1373.55,
       1375.43,
       1379.95,
       1380.44,
