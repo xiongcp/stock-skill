@@ -54,6 +54,8 @@ _TOUCH_COUNT_PHRASES = (
 )
 _NEGATION_RE = re.compile(r"不是|不叫|不代表|并非|不得|不能|严禁|禁止|不构成|不等于|不要|不应|不宜|而非|不含|没有")
 _TOUCH_NEGATION_RE = re.compile(_NEGATION_RE.pattern + r"|并不|不意味")
+# 「双底失守后跌势更强」「三重顶被突破后多头更强」：更强的主语是破位后的走势，不是价区本身
+_TOUCH_AFTER_BREAK_RE = re.compile(r"(?:失守|跌破|突破|破位|被破)[^。；\n]{0,4}(?:跌势|涨势|多头|空头|动能|势头|卖压|买盘)")
 # 唯一允许的概率类数字：回测成交胜率，同一句必须出现「回测」并给出 95% 区间
 _BACKTEST_SENTENCE_RE = re.compile(r"回测")
 _CI_RE = re.compile(r"95%\s*(?:置信)?区间|Wilson")
@@ -207,6 +209,8 @@ def lint_agent_response(
         for hit in pat.finditer(text):
             sent_start = max((sm.end() for sm in _SENTENCE_SPLIT_RE.finditer(text, 0, hit.start())), default=0)
             # 否定词可能在命中片段之前，也可能被片段中间的 {0,8} 吞进去（「三重底不代表支撑更强」）
+            if _TOUCH_AFTER_BREAK_RE.search(hit.group(0)):
+                continue
             if not _TOUCH_NEGATION_RE.search(text[sent_start : hit.end()]):
                 errors.append(f"检测到违规表述: {hit.group(0)!r}（测试次数只是计数，不得说成支撑压力更强、更可靠或更容易破）")
                 break

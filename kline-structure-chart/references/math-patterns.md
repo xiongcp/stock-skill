@@ -207,14 +207,14 @@
 | `MAX_TOUCHES` | 8 | 触点列表上限：超过时列第 1 个与最后 7 个，`touches_truncated = true` |
 | `MAX_CHANGES` | 12 | 逐日变化最多输出条数，主级别优先 |
 
-**ATR 与两个级别**：$\text{atr\_abs} = \text{atr\_pct}(hist, 20) \times$ 最新收盘价（结构层同一个 ATR，`atr_basis = "STRUCTURE_ATR20"`）。主级别 `MAJOR` 的 ZigZag 阈值就是结构层的 `zz_thr`；次级别 `MINOR` 为 $\min(4\%, \max(1.5\%, \lceil \text{ATR\%} / 0.5\% \rceil \times 0.5\%))$，不小于主级别阈值时跳过并写 `skipped_reason`。两个级别都在最近 420 根已收盘K线上跑 `structure.zigzag`，只取落在结构窗口（最近 120 根）内的拐点；ZigZag 末端尚未被反向走势确认的极值是未确认拐点。
+**ATR 与两个级别**：$\text{atr\_abs} = \text{atr\_pct}(hist, 20) \times$ 最新收盘价（结构层同一个 ATR，`atr_basis = "STRUCTURE_ATR20"`）。主级别 `MAJOR` 的 ZigZag 阈值就是结构层的 `zz_thr`；次级别 `MINOR` 为 $\min(4\%, \max(1.5\%, \lceil \text{ATR\%} / 0.5\% \rceil \times 0.5\%))$，不小于主级别阈值时跳过并写 `skipped_reason`。ATR 为 0（最近 20 根完全平）时宽度与高度无从度量，两个级别都不输出价区、头肩与平台。两个级别都在最近 420 根已收盘K线上跑 `structure.zigzag`，只取落在结构窗口（最近 120 根）内的拐点；ZigZag 末端尚未被反向走势确认的极值是未确认拐点。
 
 **聚类（决定 N）**：每个级别、每一侧（支撑用低点，压力用高点）按时间顺序处理拐点。拐点 $p$ 可以并入一个已有价区，当且仅当并入后全部触点的最高价与最低价之差 ≤ 0.65 ATR，且该价区最后一个触点到 $p$ 之间没有收盘价越过已确认触点边缘 0.5 ATR 以上；有多个候选时选并入后宽度最小的，宽度相同选最后触点最近的，没有候选就新建价区。只输出触点数 ≥ 2、第一个触点已确认、颈线高度 ≥ 1.2 ATR 的价区。未确认触点每个价区至多一个，且一定是最后一个。
 
 **几何量（支撑价区；压力镜像）**：
 
 - `zone_low_price` / `zone_high_price`：已确认触点的最低价 / 最高价；`neckline_price`：首末触点之间的最高价；`height_abs` = 颈线 − `zone_low_price`。
-- `break_price` = `zone_low_price` − 0.5 ATR（失效价，只由已确认触点决定，不随未确认的新低移动）；`measured_move_price` = 颈线 + 高度；`confirm_price` = 未确认低点 ×（1 + 本级别阈值），之后任一根最高价达到它，该触点即被确认。
+- `break_price` = `zone_low_price` − 0.5 ATR（失效价，只由已确认触点决定，不随未确认的新低移动；先按价位表取整，状态按取整后的失效价判定，文字与状态一致）；`measured_move_price` = 颈线 + 高度；`confirm_price` = 未确认低点 ×（1 + 本级别阈值），之后任一根最高价达到它，该触点即被确认。
 - 名称：N = 2 为双底 / 双顶，N = 3 为三重底 / 三重顶，N ≥ 4 为"N 次测试的支撑区 / 压力区"；N 含未确认触点，此时名称带"（第 N 次测试进行中，未确认）"。`sequence`：`RISING` / `FALLING` / `MIXED`。
 - 观察到的价格（触点、价区上下沿、颈线、头肩各点）与结构层拐点同口径保留小数；推算的价位（`break_price`、`confirm_price`、`measured_move_price`、`neckline_today_price`）按标的价位表取整。
 
@@ -235,7 +235,7 @@
 
 **平台**：同一级别已筛选的一个支撑价区与一个压力价区，两者状态都是 `TESTING` / `HOLDING` / `FALSE_BREAK`，首末触点的时间区间有交集，且压力价区下沿 − 支撑价区上沿 ≥ 1.2 ATR。多对满足时取两者末触点中较早者最近的一对。平台不单独判定状态，任一侧破位或越过颈线后即不再成立。
 
-**逐日变化**：用截至上一根已收盘K线的数据按同样规则重算（阈值与 ATR 按那一天），按 `zone_id = {级别}-{SUPPORT|RESISTANCE}-{首触点日期}` 匹配价区，头肩按三个点的日期、平台按两侧 `zone_id` 匹配，输出 `changes[]`。级别阈值与上一天不同时，该级别的变化带 `threshold_changed = true`。
+**逐日变化**：用截至上一根已收盘K线的数据按同样规则重算（阈值与 ATR 按那一天），按 `zone_id = {级别}-{SUPPORT|RESISTANCE}-{首触点日期}` 匹配价区，头肩按三个点的日期、平台按两侧 `zone_id` 匹配，输出 `changes[]`。级别阈值按两位小数显示与上一天不同时，该级别的变化带 `threshold_changed = true`。同一级别当天有同名价区（例如两个双顶）时，`detail_cn` 在名称后加"（首触点 X）"以便区分。
 
 **盘中**：价区、头肩与平台只用已收盘K线计算；存在未收盘K线时只在价区上附 `intraday_note`（盘中越过失效价，或盘中正在测试该价区），不作确认。
 

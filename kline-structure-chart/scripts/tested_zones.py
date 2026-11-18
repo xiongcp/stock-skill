@@ -87,8 +87,13 @@ def _zone_state(bars: list[dict], z: dict) -> tuple[str, int | None]:
     return ("TESTING" if z["unc"] else "HOLDING"), None
 
 
-def _build_zone(bars: list[dict], touches: list[dict], kind: str, atr: float, thr: float) -> tuple[dict | None, str | None]:
-    """由一组触点算价区几何量与状态（规格 3.2~3.6）。不满足输出条件时返回 (None, 原因)。"""
+def _build_zone(
+    bars: list[dict], touches: list[dict], kind: str, atr: float, thr: float, rp: Callable[[float], float] | None = None
+) -> tuple[dict | None, str | None]:
+    """由一组触点算价区几何量与状态（规格 3.2~3.6）。不满足输出条件时返回 (None, 原因)。
+
+    rp 给出时失效价先取整再判状态，保证文字里的失效价与状态一致（港股价位粒度粗时尤其要紧）。
+    """
     if len(touches) < 2:
         return None, "TOUCH_REPLACED"
     if not touches[0]["confirmed"]:
@@ -111,7 +116,7 @@ def _build_zone(bars: list[dict], touches: list[dict], kind: str, atr: float, th
         "neck": neck,
         "height": height,
         "measured": neck + height if kind == "L" else neck - height,
-        "break": low - BREAK_ATR * atr if kind == "L" else high + BREAK_ATR * atr,
+        "break": (rp or float)(low - BREAK_ATR * atr if kind == "L" else high + BREAK_ATR * atr),
         "confirm": (unc["price"] * (1 + thr) if kind == "L" else unc["price"] * (1 - thr)) if unc else None,
         "last_idx": touches[-1]["idx"],
         "last_conf_idx": conf[-1]["idx"],
@@ -203,10 +208,10 @@ def _head_shoulders(bars: list[dict], piv: list[dict], kind: str, atr: float) ->
     }
 
 
-def scan_zones(hist: list[dict]) -> dict:
+def scan_zones(hist: list[dict], round_price: Callable[[float], float] | None = None) -> dict:
     """截至 hist 最后一根已收盘K线，算两个级别的全部价区、筛选结果、头肩与平台。
 
-    返回未取整的内部结果（compute_tested_zones 与测试使用）：scales[级别] = {thr, skipped, zones{zone_id: 价区},
+    round_price 只用于失效价（状态按取整后的失效价判定）；其余返回未取整的内部结果（compute_tested_zones 与测试使用）：scales[级别] = {thr, skipped, zones{zone_id: 价区},
     rejected{zone_id: 不输出的原因}, selected[(zone_id, 入选原因)], hs[], platform}。
     """
     n = len(hist)
@@ -219,14 +224,14 @@ def scan_zones(hist: list[dict]) -> dict:
         raw_thr = thr if thr is not None else min(MINOR_MAX, max(MINOR_MIN, math.ceil(atr_frac / MINOR_STEP - 1e-9) * MINOR_STEP))
         sc: dict[str, Any] = {"thr": raw_thr, "skipped": thr is None, "zones": {}, "rejected": {}, "selected": [], "hs": [], "platform": None}
         out["scales"][scale] = sc
-        if thr is None:
+        if thr is None or atr <= 0:  # ATR=0（近 20 根完全平）时价区宽度与高度都无从度量，不输出价区
             continue
         piv = [p for p in zigzag(hist, thr) if p["idx"] >= start]
         valid = []
         for kind in ("L", "H"):
             for touches in _clusters(hist, piv, kind, atr):
                 zid = f"{scale}-{SIDE[kind]}-{touches[0]['day']}"
-                z, why = _build_zone(hist, touches, kind, atr, thr)
+                z, why = _build_zone(hist, touches, kind, atr, thr, round_price)
                 if z is None:
                     sc["rejected"][zid] = why
                     continue
@@ -504,12 +509,17 @@ def _render_hs(hs: dict, rp: Callable[[float], float], obs: Callable[[float], fl
 # ---------------------------------------------------------------------------
 
 
-def _zone_changes(cur: dict, prev: dict, f: Callable[[float], str]) -> list[tuple[str, str | None, str | None, str | None, str]]:
-    """返回 [(change, from, to, reason, detail_cn)]。cur / prev 是该 zone_id 在两天的内部价区（都存在且都已输出或入选）。"""
+def _zone_changes(
+    cur: dict, prev: dict, f: Callable[[float], str], tag: str = ""
+) -> list[tuple[str, str | None, str | None, str | None, str]]:
+    """返回 [(change, from, to, reason, detail_cn)]。cur / prev 是该 zone_id 在两天的内部价区（都存在且都已输出或入选）。
+
+    tag 是同级别有同名价区时附在名称后的「（首触点 X）」。
+    """
     out = []
     kind = cur["kind"]
     word = "低" if kind == "L" else "高"
-    name = _base_name(kind, len(cur["touches"]))
+    name = _base_name(kind, len(cur["touches"])) + tag
     p_unc, c_unc = prev["unc"], cur["unc"]
     cur_conf = {t["day"]: t for t in cur["touches"] if t["confirmed"]}
     explained = False
@@ -560,7 +570,7 @@ def _changes(cur: dict, prev: dict | None, decimals: int) -> list[dict]:
     rows: list[dict] = []
     for scale in ("MAJOR", "MINOR"):
         c_sc, p_sc = cur["scales"][scale], prev["scales"][scale]
-        thr_changed = c_sc["skipped"] != p_sc["skipped"] or abs(c_sc["thr"] - p_sc["thr"]) > 1e-9
+        thr_changed = c_sc["skipped"] != p_sc["skipped"] or round(c_sc["thr"] * 100, 2) != round(p_sc["thr"] * 100, 2)
         suffix = f"（阈值由 {p_sc['thr'] * 100:.2f}% 变为 {c_sc['thr'] * 100:.2f}%，按新阈值重算）" if thr_changed else ""
 
         def add(obj_type: str, obj_id: str, change: str, frm: str | None, to: str | None, reason: str | None, detail: str) -> None:
@@ -571,18 +581,24 @@ def _changes(cur: dict, prev: dict | None, decimals: int) -> list[dict]:
 
         c_sel = [zid for zid, _ in c_sc["selected"]]
         p_sel = [zid for zid, _ in p_sc["selected"]]
+        # 同一级别当天有同名价区（例如两个双顶）时，文字带上首触点日期以便区分
+        c_names = [_base_name(c_sc["zones"][z]["kind"], len(c_sc["zones"][z]["touches"])) for z in c_sel if not _stub_of(cur, z)]
+
+        def tag(z: dict) -> str:
+            dup = c_names.count(_base_name(z["kind"], len(z["touches"]))) > 1
+            return f"（首触点 {z['touches'][0]['day']}）" if dup else ""
         for zid in c_sel + [z for z in p_sel if z not in c_sel]:
             c_stub = zid in c_sel and _stub_of(cur, zid)
             p_stub = zid in p_sel and _stub_of(prev, zid)
             if (c_stub or zid not in c_sel) and (p_stub or zid not in p_sel):
                 continue  # 只以"与主级别相同"的形式出现过：视同主级别价区，不重复记变化
             if zid in c_sel and zid in p_sel:
-                for change, frm, to, reason, detail in _zone_changes(c_sc["zones"][zid], p_sc["zones"][zid], f):
+                for change, frm, to, reason, detail in _zone_changes(c_sc["zones"][zid], p_sc["zones"][zid], f, tag(c_sc["zones"][zid])):
                     add("ZONE", zid, change, frm, to, reason, detail)
             elif zid in c_sel:
                 z = c_sc["zones"][zid]
                 reason = "SELECTED" if zid in p_sc["zones"] else "FORMED"
-                label = _name(z) if z["state"] == "TESTING" else f"{_name(z)}（{_state_cn(z)}）"
+                label = _name(z) + tag(z) if z["state"] == "TESTING" else f"{_name(z)}{tag(z)}（{_state_cn(z)}）"
                 add("ZONE", zid, "ZONE_NEW", None, z["state"], reason, label + ("，重新满足入选条件" if reason == "SELECTED" else ""))
             else:
                 pz = p_sc["zones"][zid]
@@ -636,8 +652,8 @@ def compute_tested_zones(
     """
     rp = (lambda v: float(round_price(float(v)))) if round_price else (lambda v: float(money(v)))
     hist = completed[-HISTORY_BARS:]
-    cur = scan_zones(hist)
-    prev = scan_zones(completed[:-1][-HISTORY_BARS:]) if len(completed) > 2 else None
+    cur = scan_zones(hist, rp)
+    prev = scan_zones(completed[:-1][-HISTORY_BARS:], rp) if len(completed) > 2 else None
     return {
         "atr_abs": float(money(cur["atr"])),
         "atr_basis": "STRUCTURE_ATR20",

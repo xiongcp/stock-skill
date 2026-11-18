@@ -563,3 +563,88 @@ def test_png_and_dashboard_carry_tested_zones(replay_recorded, tmp_path) -> None
     script_file.write_text(script, encoding="utf-8")
     out = subprocess.run([node, str(script_file)], capture_output=True, text=True, timeout=30, check=True).stdout
     assert json.loads(out) == tz
+
+
+# ---------------------------------------------------------------------------
+# 整分支审查暂缓项（阈值文字、同名价区、失效价取整、ATR=0、描述句误报）
+# ---------------------------------------------------------------------------
+
+
+def _history_outputs(rel: str, round_price=None, step: int = 1, start: int = 300):
+    from tested_zones import compute_tested_zones
+
+    bars = _bars(rel)
+    for cut in range(start, len(bars) + 1, step):
+        yield bars[:cut], compute_tested_zones(bars[:cut], None, round_price=round_price)
+
+
+def test_threshold_suffix_only_when_displayed_threshold_differs() -> None:
+    import re
+
+    pat = re.compile(r"阈值由 (\d+\.\d+)% 变为 (\d+\.\d+)%")
+    seen = 0
+    for rel in (SH, "yahoo_daily/0700.HK.json"):
+        for _, tz in _history_outputs(rel, step=3):
+            for row in tz["changes"]:
+                m = pat.search(row["detail_cn"])
+                assert row["threshold_changed"] == bool(m) or "跳过" in row["detail_cn"], row
+                if m:
+                    seen += 1
+                    assert m.group(1) != m.group(2), row["detail_cn"]
+    assert seen > 0
+
+
+def test_change_text_names_first_touch_when_same_name_zones_coexist() -> None:
+    from tested_zones import _base_name
+
+    hits = 0
+    for rel in (SH, MOUTAI, BYD, "yahoo_daily/NVDA.json", "yahoo_daily/0700.HK.json"):
+        for _, tz in _history_outputs(rel, step=2):
+            for sc in tz["scales"]:
+                full = [z for z in sc["zones"] if "touches" in z]
+                names = [_base_name("L" if z["side"] == "SUPPORT" else "H", z["touch_count"]) for z in full]
+                dup = {z["zone_id"]: z for z, nm in zip(full, names) if names.count(nm) > 1}
+                for row in tz["changes"]:
+                    if row["scale"] == sc["scale"] and row["object_id"] in dup:
+                        hits += 1
+                        assert f"首触点 {dup[row['object_id']]['touches'][0]['day']}" in row["detail_cn"], row
+    assert hits > 0
+
+
+def test_state_uses_the_displayed_break_price() -> None:
+    """港股按价位表取整后，状态与文字一致：BROKEN 当且仅当破位起点那根收盘越过显示的失效价。"""
+    from market_rules import round_to_tick
+
+    rp = lambda p: round_to_tick(p, "HK", "equity")  # noqa: E731
+    checked = 0
+    for sub, tz in _history_outputs("yahoo_daily/0700.HK.json", round_price=rp, step=2):
+        closes = {b["day"]: b["close"] for b in sub}
+        for sc in tz["scales"]:
+            for z in sc["zones"]:
+                if z.get("state") == "BROKEN":
+                    c = closes[z["state_since_day"]]
+                    assert (c < z["break_price"]) if z["side"] == "SUPPORT" else (c > z["break_price"]), z["summary_cn"]
+                    checked += 1
+    assert checked > 0
+
+
+def test_zero_atr_yields_no_zones_instead_of_crashing(monkeypatch: pytest.MonkeyPatch) -> None:
+    import tested_zones
+
+    monkeypatch.setattr(tested_zones, "atr_pct", lambda hist: 0.0)
+    tz = tested_zones.compute_tested_zones(_bars(CASE))
+    assert all(sc["zones"] == [] and sc["head_shoulders"] == [] and sc["platform"] is None for sc in tz["scales"])
+
+
+def test_lint_allows_descriptive_sentences_about_what_follows_a_zone_break() -> None:
+    from lint_response import lint_agent_response
+
+    report = {**_LINT_STUB, "quotable_prices": {"prices": [], "tolerance": 0.01}}
+
+    def flagged(text: str) -> bool:
+        return any("测试次数只是计数" in e for e in lint_agent_response(text + "不构成投资建议。", report))
+
+    for text in ("双底失守后跌势更强。", "三重顶被突破后多头更强。"):
+        assert not flagged(text), text
+    for text in ("三重底更可靠。", "多次测试后更坚固。", "双顶易破。"):
+        assert flagged(text), text

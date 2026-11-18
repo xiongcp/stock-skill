@@ -1809,7 +1809,7 @@
           "to": "NECKLINE_CROSSED",
           "reason": null,
           "threshold_changed": true,
-          "detail_cn": "双顶：价区压住、未破颈线 → 已跌破颈线（阈值由 5.14% 变为 5.22%，按新阈值重算）"
+          "detail_cn": "双顶（首触点 2026-08-28）：价区压住、未破颈线 → 已跌破颈线（阈值由 5.14% 变为 5.22%，按新阈值重算）"
         },
         {
           "scale": "MAJOR",
@@ -1833,7 +1833,7 @@
           "to": null,
           "reason": null,
           "threshold_changed": false,
-          "detail_cn": "三重底在 2026-10-14 的未确认低点被越出价区的新极值取代，不再计入"
+          "detail_cn": "三重底（首触点 2026-09-11）在 2026-10-14 的未确认低点被越出价区的新极值取代，不再计入"
         },
         {
           "scale": "MINOR",
@@ -1845,7 +1845,7 @@
           "to": "HOLDING",
           "reason": null,
           "threshold_changed": false,
-          "detail_cn": "三重底：测试进行中 → 价区守住、未过颈线"
+          "detail_cn": "三重底（首触点 2026-09-11）：测试进行中 → 价区守住、未过颈线"
         },
         {
           "scale": "MINOR",
@@ -1881,7 +1881,7 @@
           "to": "NECKLINE_CROSSED",
           "reason": null,
           "threshold_changed": false,
-          "detail_cn": "三重顶：价区压住、未破颈线 → 已跌破颈线"
+          "detail_cn": "三重顶（首触点 2026-09-04）：价区压住、未破颈线 → 已跌破颈线"
         },
         {
           "scale": "MINOR",
@@ -1893,7 +1893,7 @@
           "to": "NECKLINE_CROSSED",
           "reason": null,
           "threshold_changed": false,
-          "detail_cn": "三重顶：价区压住、未破颈线 → 已跌破颈线"
+          "detail_cn": "三重顶（首触点 2026-08-20）：价区压住、未破颈线 → 已跌破颈线"
         },
         {
           "scale": "MINOR",
