@@ -686,17 +686,32 @@ def _without(obj: dict, *keys: str) -> dict:
     return {k: v for k, v in obj.items() if k not in keys}
 
 
-def _assert_only_benchmark_summary_differs(trimmed: dict, base: dict) -> None:
-    """裁剪只能动基准结构摘要的 wave_counts / key_levels、基准可引用价位与 quality.notes。"""
-    for key in V6_TOP - {"market_context", "quality", "quotable_prices"}:
+def _assert_only_trimmed_fields_differ(trimmed: dict, base: dict) -> None:
+    """裁剪只能动：基准结构摘要的 wave_counts / key_levels、次级别多次测试价区（已破位价区及指向它们的变化、
+    价区的 summary_cn）、两份可引用价位清单与 quality.notes。"""
+    for key in V6_TOP - {"market_context", "quality", "quotable_prices", "structure"}:
         assert trimmed[key] == base[key], f"{key} 被裁剪改动"
     assert _without(trimmed["quality"], "notes") == _without(base["quality"], "notes")
     assert trimmed["quality"]["notes"][: len(base["quality"]["notes"])] == base["quality"]["notes"]
-    assert _without(trimmed["quotable_prices"], "benchmark") == _without(base["quotable_prices"], "benchmark")
+    assert _without(trimmed["quotable_prices"], "benchmark", "prices") == _without(base["quotable_prices"], "benchmark", "prices")
     assert _without(trimmed["market_context"], "structure") == _without(base["market_context"], "structure")
     assert _without(trimmed["market_context"]["structure"], "wave_counts", "key_levels") == _without(
         base["market_context"]["structure"], "wave_counts", "key_levels"
     )
+    assert _without(trimmed["structure"], "tested_zones") == _without(base["structure"], "tested_zones")
+    t_tz, b_tz = trimmed["structure"]["tested_zones"], base["structure"]["tested_zones"]
+    assert _without(t_tz, "scales", "changes") == _without(b_tz, "scales", "changes")
+    assert t_tz["scales"][0] == b_tz["scales"][0]  # 主级别不裁
+    t_minor, b_minor = t_tz["scales"][1], b_tz["scales"][1]
+    assert _without(t_minor, "zones") == _without(b_minor, "zones")
+    kept = {z["zone_id"]: z for z in t_minor["zones"]}
+    for z in b_minor["zones"]:
+        if z["zone_id"] in kept:
+            assert _without(kept[z["zone_id"]], "summary_cn") == _without(z, "summary_cn")
+        else:
+            assert z["state"] == "BROKEN", z["zone_id"]
+    removed = {z["zone_id"] for z in b_minor["zones"]} - set(kept)
+    assert t_tz["changes"] == [c for c in b_tz["changes"] if c["object_id"] not in removed]
 
 
 def _assert_benchmark_prices_consistent(result: dict) -> None:
@@ -707,8 +722,17 @@ def _assert_benchmark_prices_consistent(result: dict) -> None:
     assert bench["prices"] == wl["prices"]
 
 
-def test_v6_result_trims_benchmark_summary_in_spec_order(replay_recorded, tmp_path: Path, monkeypatch) -> None:
-    """规格 3.4：超出体积预算时先去掉基准备选计数，再截短基准关键价位；标的字段不动。只调低预算，不改行情。"""
+def _assert_target_prices_consistent(result: dict, recent_bars: list[dict]) -> None:
+    import contract_v6
+    from price_text import collect_price_whitelist
+
+    sections = {k: result[k] for k in contract_v6._QUOTABLE_SECTIONS}
+    wl = collect_price_whitelist(sections, result["quotable_prices"]["price_decimals"], recent_bars)
+    assert result["quotable_prices"]["prices"] == wl["prices"]
+
+
+def test_v6_result_trims_in_spec_order(replay_recorded, tmp_path: Path, monkeypatch) -> None:
+    """超出体积预算时依次裁剪：基准备选计数 → 基准关键价位 → 次级别已破位价区 → 次级别价区摘要。只调预算，不改行情。"""
     import contract_v6
     from contracts import validate_report
 
@@ -718,48 +742,57 @@ def test_v6_result_trims_benchmark_summary_in_spec_order(replay_recorded, tmp_pa
     on_disk = Path(rep["rendered_paths"]["result_json"]).read_bytes()
     files = json.loads(on_disk)["files"]
     build = lambda: contract_v6.build_result(rep, files)  # noqa: E731
+    bars = rep["series_export"]["bars"]
 
-    # 未超预算：与落盘文件逐字节相同
+    # 默认预算下与落盘文件逐字节相同；放开预算得到未裁剪的结果，作为每一步的对照
+    assert _result_bytes(build()) == on_disk
+    monkeypatch.setattr(contract_v6, "RESULT_SIZE_BUDGET_BYTES", 10**9)
     base = build()
-    assert _result_bytes(base) == on_disk
-    s0 = base["market_context"]["structure"]
+    s0, tz0 = base["market_context"]["structure"], base["structure"]["tested_zones"]
     assert [w["role"] for w in s0["wave_counts"]] == ["主计数", "备选计数"]
-    assert max(len(s0["key_levels"]["supports"]), len(s0["key_levels"]["resistances"])) > keep
+    assert max(len(v) for v in s0["key_levels"].values()) > keep
+    broken = {z["zone_id"] for z in tz0["scales"][1]["zones"] if z.get("state") == "BROKEN"}
+    assert broken, "这份录制行情的次级别应有已破位价区，第三步才不是空转"
 
-    # 第一步：只去掉备选计数就够，关键价位保持原样
-    monkeypatch.setattr(contract_v6, "RESULT_SIZE_BUDGET_BYTES", len(on_disk) - 1)
-    r1 = build()
-    s1 = r1["market_context"]["structure"]
-    assert s1["wave_counts"] == s0["wave_counts"][:1]
-    assert s1["key_levels"] == s0["key_levels"]
-    assert len(_result_bytes(r1)) <= len(on_disk) - 1
-    assert len(r1["quality"]["notes"]) == len(base["quality"]["notes"]) + 1
+    # 每次把预算设为上一步结果的字节数 − 1：恰好多做一步
+    results, size = [], len(_result_bytes(base))
+    for _ in range(4):
+        monkeypatch.setattr(contract_v6, "RESULT_SIZE_BUDGET_BYTES", size - 1)
+        r = build()
+        assert len(_result_bytes(r)) <= size - 1
+        size = len(_result_bytes(r))
+        results.append(r)
+    r1, r2, r3, r4 = results
+    assert r1["market_context"]["structure"]["wave_counts"] == s0["wave_counts"][:1]
+    assert r1["market_context"]["structure"]["key_levels"] == s0["key_levels"]
+    assert r1["structure"]["tested_zones"] == tz0
     assert "备选计数" in r1["quality"]["notes"][-1] and "关键价位" not in r1["quality"]["notes"][-1]
+    assert r2["market_context"]["structure"]["key_levels"] == {k: v[:keep] for k, v in s0["key_levels"].items()}
+    assert r2["structure"]["tested_zones"] == tz0
+    assert "关键价位" in r2["quality"]["notes"][-1] and "已破位" not in r2["quality"]["notes"][-1]
+    assert not broken & {z["zone_id"] for z in r3["structure"]["tested_zones"]["scales"][1]["zones"]}
+    assert all("summary_cn" in z for z in r3["structure"]["tested_zones"]["scales"][1]["zones"] if "touches" in z)
+    assert "已破位" in r3["quality"]["notes"][-1] and "文字摘要" not in r3["quality"]["notes"][-1]
+    assert not any("summary_cn" in z for z in r4["structure"]["tested_zones"]["scales"][1]["zones"])
+    assert "文字摘要" in r4["quality"]["notes"][-1]
 
-    # 第二步：仍超预算时每侧只保留最近的 keep 个关键价位
-    monkeypatch.setattr(contract_v6, "RESULT_SIZE_BUDGET_BYTES", len(_result_bytes(r1)) - 1)
-    r2 = build()
-    s2 = r2["market_context"]["structure"]
-    assert s2["wave_counts"] == s0["wave_counts"][:1]
-    assert s2["key_levels"] == {side: levels[:keep] for side, levels in s0["key_levels"].items()}
-    assert len(_result_bytes(r2)) <= len(_result_bytes(r1)) - 1
-    assert "备选计数" in r2["quality"]["notes"][-1] and "关键价位" in r2["quality"]["notes"][-1]
-
-    # 两步都做完仍超预算：不再裁别的字段，如实注明
+    # 四步都做完仍超预算：不再裁别的字段，如实注明
     monkeypatch.setattr(contract_v6, "RESULT_SIZE_BUDGET_BYTES", 1)
-    r3 = build()
-    assert r3["market_context"]["structure"] == s2
-    assert "仍超出" in r3["quality"]["notes"][-1]
+    r5 = build()
+    assert _without(r5, "quality") == _without(r4, "quality") and "仍超出" in r5["quality"]["notes"][-1]
 
-    for trimmed in (r1, r2, r3):
+    for trimmed in (r1, r2, r3, r4, r5):
         validate_report(trimmed)
-        _assert_only_benchmark_summary_differs(trimmed, base)
+        _assert_only_trimmed_fields_differ(trimmed, base)
         _assert_benchmark_prices_consistent(trimmed)
-        assert set(trimmed["quotable_prices"]["benchmark"]["prices"]) <= set(base["quotable_prices"]["benchmark"]["prices"])
-    # 截掉的关键价位不再可引用（备选计数的价位在这份行情里同时出现在关键价位中，第一步不减少价位）
+        _assert_target_prices_consistent(trimmed, bars)
+        assert set(trimmed["quotable_prices"]["prices"]) <= set(base["quotable_prices"]["prices"])
+    # 截掉的基准关键价位不再可引用
     assert len(r2["quotable_prices"]["benchmark"]["prices"]) < len(base["quotable_prices"]["benchmark"]["prices"])
 
-    # 裁剪不回写内部报告：恢复预算后与未裁剪结果逐字节相同
+    # 裁剪不回写内部报告：放开预算后与第一次未裁剪的结果相同，恢复默认预算后与落盘文件逐字节相同
+    monkeypatch.setattr(contract_v6, "RESULT_SIZE_BUDGET_BYTES", 10**9)
+    assert build() == base
     monkeypatch.undo()
     assert _result_bytes(build()) == on_disk
 

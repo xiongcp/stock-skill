@@ -127,6 +127,30 @@
             "vah_price": { "type": ["number", "null"], "x-stability": "stable" },
             "val_price": { "type": ["number", "null"], "x-stability": "stable" }
           }
+        },
+        "tested_zones": {
+          "type": ["object", "null"], "x-stability": "experimental",
+          "description": "多次测试价区：两个级别上动态识别的 N 重底 / N 重顶、头肩与平台，以及与上一根已收盘K线相比的变化；只做描述，不参与评分与决策",
+          "required": ["atr_abs", "atr_basis", "prev_bar_day", "scales", "changes"],
+          "properties": {
+            "atr_abs": { "type": "number", "x-stability": "experimental" },
+            "atr_basis": { "type": "string", "enum": ["STRUCTURE_ATR20"], "x-stability": "experimental" },
+            "prev_bar_day": { "type": ["string", "null"], "x-stability": "experimental" },
+            "scales": {
+              "type": "array", "x-stability": "experimental",
+              "items": {
+                "type": "object",
+                "required": ["scale", "scale_cn", "zigzag_threshold_pct", "skipped_reason", "zones", "head_shoulders", "platform"],
+                "properties": {
+                  "scale": { "type": "string", "enum": ["MAJOR", "MINOR"] },
+                  "zones": { "type": "array", "items": { "type": "object", "required": ["zone_id"] } },
+                  "head_shoulders": { "type": "array" },
+                  "platform": { "type": ["object", "null"] }
+                }
+              }
+            },
+            "changes": { "type": "array", "x-stability": "experimental" }
+          }
         }
       }
     },

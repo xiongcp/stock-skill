@@ -15,7 +15,7 @@
 3. 每个字段标注稳定级别：`stable` 按第 1 条承诺；`experimental` 可在次版本中变动，变动写进 `CHANGELOG.md` 对应版本的"契约变更"小节。
 4. `*_chart_data.json` 不是稳定接口，只供本技能的 PNG / HTML 渲染使用，字段可能在任何版本变化；回答用户时不要引用。
 5. 契约边界由测试守护：新增或移除契约字段时，必须同时更新 `assets/analysis.schema.json` 的 `x-stability`、`CHANGELOG.md` 的"契约变更"小节，以及 `tests/fixtures/contract/result_v6_keypaths_{600519_plain,600519_equity_backtest,00700_hk,nvda_us,000001_index}.json` 各配置的全键路径快照（`tests/test_v6_contract.py::test_v6_result_keypaths_match_snapshot` 按配置参数化：A 股基线、带账户净值与回测、港股、美股、指数）；`backtest.json` 的键结构由 `tests/fixtures/contract/backtest_v6_keypaths_600519.json` 守护（以动作代码、否决代码为键的统计表折叠为 `{*}`）。
-6. `result.json` 落盘（`indent=2`）不超过 80 KB。
+6. `result.json` 落盘（`indent=2`）不超过 80 KB；超出时的裁剪顺序见 `market_context` 一节的"体积预算"。
 
 ## 顶层
 
@@ -109,12 +109,14 @@
 2. 标的自身即基准或指数（没有外部基准）：`structure` 与 `alignment` 为 `null`，`cycle` 按标的自身计算并带 `basis = "SELF"`，此时 `cycle` 里的价位属于标的，收入 `quotable_prices.prices`。
 3. 基准已收盘K线少于结构窗口（`STRUCT_DAYS`）：`structure` 与 `alignment` 为 `null`，`cycle` 仍按基准给出。
 
-体积预算：五个录制配置下三个新字段（含基准价位清单）完整输出，`result.json` 落盘为 59005~63636 字节，在 80 KB（81920 字节）预算内；联网行情的K线与价位更多，体积会更大（仓库内 `300308.SZ` 示例为 71773 字节）。运行期在投影末尾（`contract_v6.build_result`）按落盘的序列化方式计算 UTF-8 字节数，超出预算时只裁剪 `market_context.structure`，按下列顺序做到回到预算内为止：
+体积预算：运行期在投影末尾（`contract_v6.build_result`）按落盘的序列化方式计算 UTF-8 字节数，超出 80 KB（81920 字节）时按下列顺序裁剪，每做一步重新计算一次，回到预算内为止。加入 `structure.tested_zones` 后，录制行情截至 2026-10-15 的配置里只有腾讯（00700.HK）超出预算，做完前两步为 81912 字节；按历史截面估算，约 5% 的运行会触发裁剪。
 
-1. `wave_counts` 只保留主计数，去掉备选计数。
-2. `key_levels` 的 `supports` 与 `resistances` 各只保留离基准收盘最近的 5 个（`BENCH_KEY_LEVELS_KEEP`）。
+1. 基准 `market_context.structure.wave_counts` 只保留主计数，去掉备选计数。
+2. 基准 `market_context.structure.key_levels` 的 `supports` 与 `resistances` 各只保留离基准收盘最近的 5 个（`BENCH_KEY_LEVELS_KEEP`）。
+3. 去掉 `structure.tested_zones` 次级别已破位（`BROKEN`）的价区，连同 `changes` 中指向它们的条目。
+4. 去掉 `structure.tested_zones` 次级别价区的 `summary_cn`。
 
-裁剪发生时：`quality.notes` 追加一句说明裁掉了什么；`quotable_prices.benchmark.prices` 按裁剪后的摘要重新收集，被裁掉的基准价位不再可引用；标的自身的字段、`market_context.cycle` 与 `market_context.alignment` 不裁剪，评级、否决、计划价位与回测不受影响；PNG 与 `chart_data.json` 不变。两步做完仍超出预算时不再裁剪其他字段，照常输出，并在同一条备注里写明"裁剪后仍超出预算"。未超预算时输出与没有这一步时逐字节相同。Windows 上落盘的换行符是 CRLF，文件会比这里计算的字节数略大。
+裁剪发生时：`quality.notes` 追加一句说明依次裁掉了什么；第 1、2 步之后按裁剪后的摘要重新收集 `quotable_prices.benchmark.prices`，第 3、4 步之后按裁剪后的内容重新收集 `quotable_prices.prices`，被裁掉的价位不再可引用；主级别价区、标的自身的其余字段、`market_context.cycle` 与 `market_context.alignment` 不裁剪，评级、否决、计划价位与回测不受影响；PNG 与 `chart_data.json` 不变。四步做完仍超出预算时不再裁剪其他字段，照常输出，并在同一条备注里写明"裁剪后仍超出预算"。未超预算时输出与没有这一步时逐字节相同。Windows 上落盘的换行符是 CRLF，文件会比这里计算的字节数略大。
 
 子字段内部也可能为 `null`（样本不足时不估算、不补数）：周线字段在已完成周少于 35 个时为 `null` 并给出 `cycle.reason`；月线字段在已结束月少于 11 个时为 `null`；联动程度在共同交易日少于 60 个时为 `null`；对照项在基准已确认拐点不足两个时为 `null`。
 

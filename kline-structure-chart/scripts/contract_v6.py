@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Callable
 
 from market_rules import MARKET_SESSIONS
 from price_text import collect_price_whitelist
@@ -21,7 +21,7 @@ _REQUEST_KEYS = (
 _SCENARIO_DRAW_KEYS = ("waypoints_offset", "step_labels", "eta_bars")
 _SCENARIO_DROP_KEYS = (*_SCENARIO_DRAW_KEYS, "target_within_horizon")
 _QUOTABLE_SECTIONS = ("structure", "indicators", "scenarios", "plan", "volatility_range")
-# result.json 落盘（UTF-8、indent=2）的体积预算；超出时只裁剪基准结构摘要，见 _trim_to_size_budget
+# result.json 落盘（UTF-8、indent=2）的体积预算；超出时按顺序裁剪基准结构摘要与次级别价区，见 _trim_to_size_budget
 RESULT_SIZE_BUDGET_BYTES = 80 * 1024
 BENCH_KEY_LEVELS_KEEP = 5  # 裁剪关键价位时每侧保留离基准收盘最近的档数
 
@@ -148,6 +148,7 @@ def build_result(report: dict[str, Any], files: dict[str, str]) -> dict[str, Any
             "patterns": [{k: v for k, v in p.items() if k != "invalidated"} for p in report["algebraic_patterns_detected"]],
             "smc": report["smc_structures"],
             "volume_profile": {k: v for k, v in report["volume_profile"].items() if k != "bins"},
+            "tested_zones": sl.get("tested_zones"),
         },
         "indicators": {k: mi[k] for k in ("trend", "momentum", "volatility", "qlib_factors")},
         "scenarios": {
@@ -205,7 +206,14 @@ def build_result(report: dict[str, Any], files: dict[str, str]) -> dict[str, Any
         )
         bench_wl = {k: bw[k] for k in ("price_decimals", "tolerance", "prices")}
     result["quotable_prices"]["benchmark"] = bench_wl
-    _trim_to_size_budget(result)
+
+    def target_prices() -> list[float]:  # 裁剪多次测试价区后按裁剪后的内容重算标的可引用价位
+        secs = {k: result[k] for k in _QUOTABLE_SECTIONS}
+        if self_basis:
+            secs["cycle"] = ml_fields["cycle"]
+        return collect_price_whitelist(secs, int(meta.get("price_decimals") or 2), report["series_export"]["bars"])["prices"]
+
+    _trim_to_size_budget(result, target_prices)
     return result
 
 
@@ -214,39 +222,81 @@ def _result_size(result: dict[str, Any]) -> int:
     return len(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
 
 
-def _trim_to_size_budget(result: dict[str, Any]) -> None:
-    """超出体积预算时按规格 3.4 的顺序裁剪基准结构摘要：先去掉备选浪型计数，再截短关键价位。
+def _refresh_benchmark_prices(result: dict[str, Any]) -> None:
+    bench = result["quotable_prices"]["benchmark"]
+    if bench is not None:
+        bw = collect_price_whitelist(
+            {"structure": result["market_context"]["structure"], "cycle": result["market_context"]["cycle"]}, bench["price_decimals"], []
+        )
+        result["quotable_prices"]["benchmark"] = {**bench, "prices": bw["prices"]}
 
-    只动 market_context.structure 的 wave_counts / key_levels、随之重算的 quotable_prices.benchmark 与
-    quality.notes；标的自身的字段不裁。新建对象替换，不回写内部报告。
+
+def _trim_bench_wave_counts(result: dict[str, Any]) -> None:
+    s = result["market_context"]["structure"]
+    result["market_context"]["structure"] = {
+        **s, "wave_counts": [w for w in s["wave_counts"] if w.get("role") == "主计数"] or s["wave_counts"][:1]
+    }
+    _refresh_benchmark_prices(result)
+
+
+def _trim_bench_key_levels(result: dict[str, Any]) -> None:
+    s = result["market_context"]["structure"]
+    result["market_context"]["structure"] = {**s, "key_levels": {k: v[:BENCH_KEY_LEVELS_KEEP] for k, v in s["key_levels"].items()}}
+    _refresh_benchmark_prices(result)
+
+
+def _map_minor_zones(result: dict[str, Any], fn: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]) -> dict[str, Any]:
+    tz = result["structure"]["tested_zones"]
+    scales = [{**s, "zones": fn(s["zones"])} if s["scale"] == "MINOR" else s for s in tz["scales"]]
+    return {**tz, "scales": scales}
+
+
+def _trim_minor_broken_zones(result: dict[str, Any]) -> None:
+    tz = result["structure"]["tested_zones"]
+    gone = {z["zone_id"] for s in tz["scales"] if s["scale"] == "MINOR" for z in s["zones"] if z.get("state") == "BROKEN"}
+    new_tz = _map_minor_zones(result, lambda zones: [z for z in zones if z["zone_id"] not in gone])
+    new_tz["changes"] = [c for c in tz["changes"] if c["object_id"] not in gone]
+    result["structure"] = {**result["structure"], "tested_zones": new_tz}
+
+
+def _trim_minor_zone_summaries(result: dict[str, Any]) -> None:
+    new_tz = _map_minor_zones(result, lambda zones: [{k: v for k, v in z.items() if k != "summary_cn"} for z in zones])
+    result["structure"] = {**result["structure"], "tested_zones": new_tz}
+
+
+def _trim_to_size_budget(result: dict[str, Any], target_prices: Callable[[], list[float]]) -> None:
+    """超出体积预算时按顺序裁剪，每步之后检查一次：
+
+    1~2. v6 规格 3.4：基准结构摘要先去掉备选浪型计数，再把关键价位每侧截到离收盘最近的几档；
+    3~4. 多次测试价区规格 8.3：去掉次级别已破位的价区（连同指向它们的变化），再去掉次级别价区的 summary_cn。
+
+    每步之后重算受影响的可引用价位（target_prices() 按裁剪后的内容重算标的价位），并在 quality.notes 写明裁了什么。
+    主级别价区与其余字段不裁。新建对象替换，不回写内部报告。
     """
     budget = RESULT_SIZE_BUDGET_BYTES
-    structure = result["market_context"]["structure"]
-    if structure is None or _result_size(result) <= budget:
+    if _result_size(result) <= budget:
+        return
+    steps: list[tuple[str, Callable[[dict[str, Any]], None], bool]] = []
+    if result["market_context"]["structure"] is not None:
+        steps += [
+            ("去掉基准浪型的备选计数", _trim_bench_wave_counts, False),
+            ("基准关键价位每侧只保留离收盘最近的几档", _trim_bench_key_levels, False),
+        ]
+    if result["structure"].get("tested_zones") is not None:
+        steps += [
+            ("去掉次级别已破位的多次测试价区", _trim_minor_broken_zones, True),
+            ("去掉次级别多次测试价区的文字摘要", _trim_minor_zone_summaries, True),
+        ]
+    if not steps:
         return
     base_notes = list(result["quality"].get("notes") or [])
-    steps = (
-        (
-            "去掉基准浪型的备选计数",
-            lambda s: {**s, "wave_counts": [w for w in s["wave_counts"] if w.get("role") == "主计数"] or s["wave_counts"][:1]},
-        ),
-        (
-            "基准关键价位每侧只保留离收盘最近的几档",
-            lambda s: {**s, "key_levels": {k: v[:BENCH_KEY_LEVELS_KEEP] for k, v in s["key_levels"].items()}},
-        ),
-    )
     done: list[str] = []
-    for label, trim in steps:
-        structure = trim(structure)
+    for label, trim, touches_target in steps:
+        trim(result)
         done.append(label)
-        result["market_context"]["structure"] = structure
-        bench = result["quotable_prices"]["benchmark"]
-        if bench is not None:
-            bw = collect_price_whitelist(
-                {"structure": structure, "cycle": result["market_context"]["cycle"]}, bench["price_decimals"], []
-            )
-            result["quotable_prices"]["benchmark"] = {**bench, "prices": bw["prices"]}
-        note = f"result.json 超出体积预算，已裁剪大盘结构摘要（{'；'.join(done)}）；标的自身的字段未裁剪"
+        if touches_target:
+            result["quotable_prices"] = {**result["quotable_prices"], "prices": target_prices()}
+        note = f"result.json 超出体积预算，已依次裁剪：{'；'.join(done)}；其余字段未裁剪"
         result["quality"]["notes"] = [*base_notes, note]
         if _result_size(result) <= budget:
             return
