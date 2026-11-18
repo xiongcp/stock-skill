@@ -94,7 +94,7 @@ SSAA = 2                       # 2× 超采样抗锯齿倍率（3840×2320 渲�
 
 def datalen_for(days: int) -> int:
     """拉取日K根数：结构层固定 HISTORY_BARS 根；展示 N 根时多拉 250 根，让主图最左侧也有 MA250。"""
-    return max(HISTORY_BARS, days + 250)
+    return max(HISTORY_BARS + 1, days + 250)
 
 
 def fetch(url: str, encoding: str = "utf-8") -> str:
@@ -1520,6 +1520,7 @@ def render(
         "recent_gaps": gaps,
         "scenario": scenario,
         "projections": projections,
+        "tested_zones": layer["tested_zones"],
         "intraday": None
         if not active_intra
         else {

@@ -19,7 +19,7 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "render_structure_chart.py"
 SYMBOLS = ("sh000001", "sz399001", "sz399006", "sh000688", "sh000300")
-STRUCT_KEYS = ("wedge", "scenario", "fib_levels", "key_levels", "recent_gaps", "swing", "structure_window", "projections")
+STRUCT_KEYS = ("wedge", "scenario", "fib_levels", "key_levels", "recent_gaps", "swing", "structure_window", "projections", "tested_zones")
 STRUCT_BLOCKS = ("3_wedge_and_levels", "4_three_projections", "5_structure_verdict")
 
 

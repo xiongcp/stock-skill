@@ -260,6 +260,7 @@ def compute_market_layer(bundle: dict[str, Any], target_layer: dict[str, Any], h
         price_decimals=lambda price, day: price_decimals(price, b_inst["market"], b_inst["asset_type"], day),
         horizon_bars=horizon_bars,
         round_price=lambda price, day: round_to_tick(price, b_inst["market"], b_inst["asset_type"], day),
+        with_tested_zones=False,
     )
     sview = b_layer["sview"]
     series = compute_all_indicators(b_layer["hist"])["series"]

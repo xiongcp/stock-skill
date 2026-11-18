@@ -914,6 +914,7 @@ def compute_structure_layer(
     price_decimals: Callable[[float, str], int] | None = None,
     horizon_bars: int = 15,
     round_price: Callable[[float, str], float] | None = None,
+    with_tested_zones: bool = True,
 ) -> dict[str, Any]:
     """一次性计算结构层全部结果，供 JSON 报告与 PNG 渲染共用。
 
@@ -998,7 +999,13 @@ def compute_structure_layer(
     projections["impulse_wave"] = scen_bundle["impulse_wave"]
     # 展示用波段骨架：同一阈值在全部已收盘K线上的 ZigZag，下标换算到主图
     display_pivots = [dict(p, idx=p["idx"] - view_start) for p in zigzag(completed, zz_thr) if p["idx"] >= view_start]
+    tested_zones = None
+    if with_tested_zones:
+        from tested_zones import compute_tested_zones
+        last_day = completed[-1]["day"]
+        tested_zones = compute_tested_zones(completed, active_intra, round_price=(lambda v: round_price(v, last_day)) if round_price else None, decimals=decimals)
     return {
+        "tested_zones": tested_zones,
         "completed": completed,
         "active_intra": active_intra,
         "data_note": data_note,

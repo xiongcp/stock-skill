@@ -369,3 +369,64 @@ def test_tested_zones_size_stays_under_hard_bound() -> None:
         for cut in range(450, len(bars) + 1, 25):
             tz = compute_tested_zones(bars[:cut])
             assert len(json.dumps(tz, ensure_ascii=False, indent=2).encode("utf-8")) <= 32 * 1024
+
+
+# ---------------------------------------------------------------------------
+# 任务 4：接入结构层、回测与因果审计
+# ---------------------------------------------------------------------------
+
+
+def test_structure_layer_carries_tested_zones_and_can_skip_them() -> None:
+    from structure import compute_structure_layer
+    from tested_zones import compute_tested_zones
+
+    bars = load_recorded(SH)
+    layer = compute_structure_layer(bars, None, 120)
+    assert layer["tested_zones"] == compute_tested_zones(layer["completed"], None, decimals=layer["price_decimals"])
+    assert compute_structure_layer(bars, None, 120, with_tested_zones=False)["tested_zones"] is None
+
+
+def test_derived_prices_follow_the_tick_table_on_hk() -> None:
+    """港股价位表按价格分档（20~50 港元 0.05、200~500 港元 0.2）：推算出的价位必须落在价位表上。"""
+    from market_rules import round_to_tick
+    from structure import compute_structure_layer
+
+    bars = load_recorded("yahoo_daily/0700.HK.json")
+    layer = compute_structure_layer(bars, None, 120, round_price=lambda p, day: round_to_tick(p, "HK", "equity", day))
+    day = layer["completed"][-1]["day"]
+    derived = [
+        z[k] for s in layer["tested_zones"]["scales"] for z in s["zones"]
+        for k in ("break_price", "confirm_price", "measured_move_price") if z.get(k) is not None
+    ]
+    assert derived
+    assert all(p == round_to_tick(p, "HK", "equity", day) for p in derived)
+
+
+def test_decisions_do_not_depend_on_tested_zones(replay_recorded) -> None:
+    """开与关多次测试价区：除 tested_zones 外，内部报告（规则分、评级、动作、否决、计划价位）逐项相同。"""
+    import data_gateway
+    from analysis import analyze_bundle
+
+    req = {"symbol": "600519.SH", "market": "CN", "asset_type": "equity", "display_bars": 120, "structure_bars": 120, "horizon_bars": 15}
+    full = data_gateway.load_bundle(req)
+    bars, bench = full["target"]["bars"], full["benchmark"]
+    for t in range(len(bars) - 200, len(bars), 25):
+        cut_day = bars[t]["day"]
+        bundle = {
+            **full,
+            "target": {**full["target"], "bars": bars[: t + 1], "intraday": None},
+            "benchmark": {**bench, "bars": [b for b in bench["bars"] if b["day"] <= cut_day]},
+        }
+        on = analyze_bundle(bundle, req, include_replay=False, include_forecast=False, include_tested_zones=True)
+        off = analyze_bundle(bundle, req, include_replay=False, include_forecast=False, include_tested_zones=False)
+        assert on["mathematical_indicators"]["structure_levels"].pop("tested_zones") is not None
+        assert off["mathematical_indicators"]["structure_levels"].pop("tested_zones") is None
+        assert on == off, cut_day
+
+
+def test_causal_replay_audit_covers_tested_zones() -> None:
+    from evaluation import run_causal_replay_audit
+
+    audit = run_causal_replay_audit(load_recorded(SH), check_steps=4)
+    assert "tested_zones" in audit["modules_audited"]
+    assert audit["passed"], audit["mismatches"]

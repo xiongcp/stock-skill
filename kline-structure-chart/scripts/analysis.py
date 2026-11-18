@@ -124,6 +124,7 @@ def _build_replay_snapshots(
             price_decimals=lambda price, day: price_decimals(price, meta["market"], meta["asset_type"], day),
             horizon_bars=horizon_bars,
             round_price=lambda price, day: round_to_tick(price, meta["market"], meta["asset_type"], day),
+            with_tested_zones=False,
         )
         sview_sub = layer_sub["sview"]
         ind_sub_win = _indicators_on_window(layer_sub["hist"], len(sview_sub))
@@ -239,6 +240,7 @@ def analyze_bundle(
     structure: dict[str, Any] | None = None,
     include_forecast: bool = True,
     include_market_layer: bool = True,
+    include_tested_zones: bool = True,
 ) -> AnalysisReport:
     """100% 纯数学计算核心：从 OHLCV 矩阵计算全部指标、形态证据、SMC、多周期共振分、三重屏障与正常波动范围。"""
     target = bundle["target"]
@@ -263,6 +265,7 @@ def analyze_bundle(
             price_decimals=lambda price, day: price_decimals(price, inst["market"], inst["asset_type"], day),
             horizon_bars=horizon_bars,
             round_price=lambda price, day: round_to_tick(price, inst["market"], inst["asset_type"], day),
+            with_tested_zones=include_tested_zones,
         )
     )
     completed, active_intra, data_note = layer["completed"], layer["active_intra"], layer["data_note"]
@@ -543,6 +546,7 @@ def analyze_bundle(
             "abc_scenario": scenario,
             "wave_counts": layer["wave_counts"],
             "wedge_structure": wedge_clean,
+            "tested_zones": layer.get("tested_zones"),
         },
     }
 

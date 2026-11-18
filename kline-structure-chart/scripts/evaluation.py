@@ -37,7 +37,8 @@ from strategies import (
     compute_multi_timeframe_score,
     evaluate_five_core_strategies,
 )
-from structure import HISTORY_BARS, STRUCT_DAYS, compute_structure_layer
+from structure import HISTORY_BARS, STRUCT_DAYS, atr_pct, compute_structure_layer
+from tested_zones import confirmed_geometry, minor_threshold
 
 
 def audit_market_layer_causality(bundle: dict[str, Any], check_steps: int = 4) -> list[str]:
@@ -128,6 +129,18 @@ def run_causal_replay_audit(
             key = (sp["day"], sp["kind"])
             if key not in ext_piv_map or abs(ext_piv_map[key][0] - sp["price"]) > 1e-6:
                 mismatches.append(f"Pivot mutated at cut={cut}: {sp}")
+
+        # 2b. 多次测试价区：同一阈值与 ATR 下，截至截面日已确认的触点与价区几何量不随未来K线改变
+        tz_frac = atr_pct(sub_hist)
+        tz_atr = tz_frac * float(sub_hist[-1]["close"])
+        tz_start = sub_hist[-min(len(sub_hist), STRUCT_DAYS)]["day"]
+        for tz_thr in (thr_sub, minor_threshold(tz_frac, thr_sub)):
+            if tz_thr is None:
+                continue
+            if confirmed_geometry(sub_hist, tz_thr, tz_atr, tz_start, cut_day) != confirmed_geometry(
+                ext_hist, tz_thr, tz_atr, tz_start, cut_day
+            ):
+                mismatches.append(f"Tested zones mutated at cut={cut} thr={tz_thr:.4f}")
 
         sub_ind = compute_all_indicators(sub)
         ext_ind = compute_all_indicators(ext_corrupted)
@@ -279,6 +292,7 @@ def run_causal_replay_audit(
             "nadaraya_watson",
             "structure_layer_pivots",
             "structure_and_scenarios",
+            "tested_zones",
             "candlestick_patterns",
             "smc_structures",
             "conformal_forecast",
@@ -824,7 +838,9 @@ def run_plan_backtest(
             "extra_context": {"vix": None, "earnings_date": None, "is_st": st_at_t, "is_ipo_no_limit": ipo_at_t},
             "provenance": {**base_provenance, "missing_closed_session": None, "stale_sessions": 0},
         }
-        rep = analyze_bundle(sub_bundle, sub_request, include_replay=False, include_forecast=False, include_market_layer=False)
+        rep = analyze_bundle(
+            sub_bundle, sub_request, include_replay=False, include_forecast=False, include_market_layer=False, include_tested_zones=False
+        )
         decisions += 1
         action = rep["meta_labeling_decision"]["action"]
         actions_seen[action] = actions_seen.get(action, 0) + 1
