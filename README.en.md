@@ -10,7 +10,7 @@
 
 > Generated reports, chart labels and the reply contract are in Chinese. Ticker formats, CLI flags and JSON field names are the same in both languages.
 
-![NVIDIA NVDA.US offline interactive dashboard demo](site/dashboard-demo-en.gif)
+![NVIDIA NVDA.US offline interactive dashboard demo](site/dashboard-demo-en.webp)
 
 <sub>Screen recording of the NVIDIA `NVDA.US` offline interactive dashboard (data as of 2026-10-15): dragging the history replay, where each past snapshot uses only the data available then and the white line is the close that actually followed; then layer toggles and sub-chart switching. The dashboard is the skill's HTML output as-is and can be opened on the [website](https://xiongcp.github.io/stock-skill/#demos). On-screen labels are in Chinese.</sub>
 

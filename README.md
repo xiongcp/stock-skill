@@ -10,7 +10,7 @@
 
 `kline-structure-chart` 是一个符合 [Agent Skills 开放规范](https://agentskills.io/specification) 的金融量化与 K 线数学结构分析技能包。装进 Claude Code、Codex、Hermes Agent、Cursor、Gemini CLI、OpenCode 等 AI 助手之后，你只需用自然语言提问（例如："帮我看看中际旭创的 K 线结构和支撑压力，账户 50 万"），助手就会自动完成从**真实行情拉取 → 确定性数学结构识别 → 三重屏障风控与正常波动范围 → 离线交互看板与高清图生成 → 回复契约校验**的完整投研闭环。
 
-![中际旭创 300308.SZ 离线交互看板演示](site/dashboard-demo-zh.gif)
+![中际旭创 300308.SZ 离线交互看板演示](site/dashboard-demo-zh.webp)
 
 <sub>中际旭创 `300308.SZ` 离线交互看板录屏（数据截至 2026-10-15）：拖动时间回放，每个历史截面只用当时数据，白线是之后的真实收盘；再演示图层开关与副图切换。看板是技能原样输出的 HTML，可在[项目主页](https://xiongcp.github.io/stock-skill/#demos)在线打开。</sub>
 

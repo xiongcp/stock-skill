@@ -9,9 +9,24 @@
 <meta property="og:title" content="kline-structure-chart">
 <meta property="og:description" content="Open-source Agent Skill for Claude Code & Codex: deterministic K-line structure, triple-barrier risk plan, 15-day normal volatility range and no-lookahead backtest on real A-share, HK & US data. Research only, not investment advice.">
 <meta property="og:url" content="https://xiongcp.github.io/stock-skill/">
-<meta property="og:image" content="https://xiongcp.github.io/stock-skill/examples/NVDA.US/NVDA.US_preview.png">
+<meta property="og:image" content="https://xiongcp.github.io/stock-skill/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="kline-structure-chart: Let your AI agent read K-line charts with real data and deterministic math">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://xiongcp.github.io/stock-skill/og-image.png">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script>
+  // 在页面渲染前定语言，避免先闪一下另一种语言，也让首屏演示只下载一份
+  (function () {
+    var lang = null;
+    try { lang = new URLSearchParams(location.search).get("lang"); } catch (e) {}
+    if (lang !== "zh" && lang !== "en") { try { lang = localStorage.getItem("lang"); } catch (e) {} }
+    if (lang !== "zh" && lang !== "en") lang = /^zh/i.test(navigator.language || "") ? "zh" : "en";
+    document.documentElement.setAttribute("data-lang", lang);
+    document.documentElement.setAttribute("lang", lang === "zh" ? "zh-CN" : "en");
+  })();
+</script>
 <style>
   :root {
     color-scheme: dark;
@@ -92,6 +107,8 @@
   .grid { display: grid; gap: 16px; margin-top: 32px; grid-template-columns: 1fr; }
   @media (min-width: 700px) { .grid.two { grid-template-columns: 1fr 1fr; } .grid.three { grid-template-columns: 1fr 1fr; } }
   @media (min-width: 1000px) { .grid.three { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 700px) { .grid.four { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 1080px) { .grid.four { grid-template-columns: repeat(4, 1fr); } }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; }
   .card h3 { font-size: 17px; line-height: 1.4; margin-bottom: 8px; }
   .card p, .card li { color: var(--muted); font-size: 15px; }
@@ -194,11 +211,21 @@
         <span lang="en">One-line install on macOS / Linux; registers with the Claude Code, Codex and other agents it finds. For research only, not investment advice.</span>
       </p>
       <figure class="shot">
-        <img lang="zh" src="dashboard-demo-zh.gif" width="1200" height="748" loading="lazy" alt="中际旭创 300308.SZ 离线交互看板演示">
-        <img lang="en" src="dashboard-demo-en.gif" width="1200" height="748" loading="lazy" alt="NVIDIA NVDA.US offline dashboard demo">
+        <img id="heroDemo" width="1200" height="748" fetchpriority="high" alt=""
+             data-src-zh="dashboard-demo-zh.webp" data-alt-zh="中际旭创 300308.SZ 离线交互看板演示"
+             data-src-en="dashboard-demo-en.webp" data-alt-en="NVIDIA NVDA.US offline dashboard demo">
+        <script>
+          (function () {
+            var img = document.getElementById("heroDemo");
+            var lang = document.documentElement.getAttribute("data-lang");
+            img.alt = img.getAttribute("data-alt-" + lang);
+            img.src = img.getAttribute("data-src-" + lang);
+          })();
+        </script>
+        <noscript><img src="dashboard-demo-zh.webp" width="1200" height="748" alt="中际旭创 300308.SZ 离线交互看板演示"></noscript>
         <figcaption>
-          <span lang="zh">中际旭创 <code>300308.SZ</code> 离线交互看板录屏，数据截至 2026-10-15：拖动时间回放（每个历史截面只用当时数据，白线是之后的真实收盘），再切换图层与副图。下方"在线示例"可以亲手操作。</span>
-          <span lang="en">Screen recording of the NVIDIA <code>NVDA.US</code> offline dashboard, data as of 2026-10-15: dragging the history replay (each past snapshot uses only the data available then; the white line is the close that followed), then toggling layers and sub-charts. Try it yourself under "Live demos". On-screen labels are in Chinese.</span>
+          <span lang="zh">中际旭创 <code>300308.SZ</code> 离线交互看板录屏，数据截至 2026-10-15：拖动时间回放（每个历史截面只用当时数据，白线是之后的真实收盘），查看主级别与次级别的多次测试价区，再切换副图。下方"在线示例"可以亲手操作。</span>
+          <span lang="en">Screen recording of the NVIDIA <code>NVDA.US</code> offline dashboard, data as of 2026-10-15: dragging the history replay (each past snapshot uses only the data available then; the white line is the close that followed), viewing multi-touch price zones on the major and minor scales, then switching sub-charts. Try it yourself under "Live demos". On-screen labels are in Chinese.</span>
         </figcaption>
       </figure>
     </div>
@@ -235,7 +262,11 @@
   <section id="features">
     <div class="wrap">
       <h2><span lang="zh">它能做什么</span><span lang="en">What it does</span></h2>
-      <div class="grid three">
+      <p class="section-lead">
+        <span lang="zh">价区和大盘结构只描述已经发生的走势，不参与规则分、评级和风控否决。</span>
+        <span lang="en">Price zones and market structure only describe what has happened; they do not feed the rule score, rating or risk veto.</span>
+      </p>
+      <div class="grid four">
         <div class="card">
           <span class="tag">CN · HK · US</span>
           <h3><span lang="zh">三市场覆盖</span><span lang="en">Three markets</span></h3>
@@ -245,6 +276,16 @@
           <span class="tag">structure</span>
           <h3><span lang="zh">K 线数学结构</span><span lang="en">K-line structure</span></h3>
           <p><span lang="zh">因果拐点、轨道拟合、ABC 浪型与推动 5 浪、8 类标准情景、蜡烛与双底双顶、RSI 背离、SMC、成交分布。</span><span lang="en">Causal swing points, channel fitting, ABC and 5-wave counts, 8 standard scenarios, candlestick and double top/bottom patterns, RSI divergence, SMC and a volume profile.</span></p>
+        </div>
+        <div class="card">
+          <span class="tag">tested zones · new</span>
+          <h3><span lang="zh">多次测试价区</span><span lang="en">Multi-touch price zones</span></h3>
+          <p><span lang="zh">在主、次两个级别上由数据判断是双底、三重底还是 N 次测试的支撑压力区，并识别头肩与平台；给出状态、颈线、失效价和与上一交易日相比的变化。</span><span lang="en">On a major and a minor scale, the data decides whether it is a double bottom, a triple bottom or an N-touch support or resistance zone, plus head-and-shoulders and platforms, with state, neckline, invalidation level and what changed since the previous session.</span></p>
+        </div>
+        <div class="card">
+          <span class="tag">market structure</span>
+          <h3><span lang="zh">大盘结构与周期</span><span lang="en">Market structure and cycle</span></h3>
+          <p><span lang="zh">基准指数的通道、浪型与支撑压力，周线阶段与月线位置，以及个股与大盘的联动、相对强弱和新高新低对照。</span><span lang="en">The benchmark's channel, wave count and key levels, its weekly phase and monthly position, and how the stock moves with the market: correlation, relative strength and new highs and lows compared.</span></p>
         </div>
         <div class="card">
           <span class="tag">risk plan</span>
@@ -353,7 +394,7 @@
         </div>
         <div class="install-item">
           <h3>Windows (PowerShell)</h3>
-          <p><span lang="zh">安装脚本尚未在 Windows 上实测。</span><span lang="en">The installer has not been tested on Windows yet.</span></p>
+          <p><span lang="zh">安装与卸载已在 GitHub Actions 的 Windows 环境中演练（不含实际分析）。</span><span lang="en">Install and uninstall are rehearsed on Windows in GitHub Actions (without running an analysis).</span></p>
           <div class="cmd plain"><pre>irm https://raw.githubusercontent.com/xiongcp/stock-skill/main/install.ps1 | iex</pre><button type="button" class="copy"><span lang="zh">复制</span><span lang="en">Copy</span></button></div>
         </div>
         <div class="install-item">
@@ -437,14 +478,14 @@
     document.querySelectorAll("[data-set-lang]").forEach(function (b) {
       b.setAttribute("aria-pressed", String(b.getAttribute("data-set-lang") === lang));
     });
+    var demo = document.getElementById("heroDemo");
+    if (demo && demo.getAttribute("src") !== demo.getAttribute("data-src-" + lang)) {
+      demo.src = demo.getAttribute("data-src-" + lang);
+      demo.alt = demo.getAttribute("data-alt-" + lang);
+    }
     if (persist) { try { localStorage.setItem("lang", lang); } catch (e) {} }
   }
-  var initial = null;
-  var param = new URLSearchParams(location.search).get("lang");
-  if (param === "zh" || param === "en") initial = param;
-  if (!initial) { try { initial = localStorage.getItem("lang"); } catch (e) {} }
-  if (initial !== "zh" && initial !== "en") initial = /^zh/i.test(navigator.language || "") ? "zh" : "en";
-  setLang(initial, false);
+  setLang(root.getAttribute("data-lang"), false);  // 语言已由 <head> 里的脚本确定
   document.querySelectorAll("[data-set-lang]").forEach(function (b) {
     b.addEventListener("click", function () { setLang(b.getAttribute("data-set-lang"), true); });
   });
